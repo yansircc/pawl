@@ -1,7 +1,10 @@
 use anyhow::{bail, Result};
+use chrono::Utc;
+use std::fs;
+use std::io::Write;
 
-use crate::model::{Step, StepStatus, TaskState, TaskStatus};
-use crate::util::shell::{run_command_with_env, spawn_background};
+use crate::model::{StepStatus, TaskState, TaskStatus};
+use crate::util::shell::{run_command_with_env, spawn_background, CommandResult};
 use crate::util::tmux;
 use crate::util::variable::Context;
 
@@ -137,6 +140,13 @@ fn execute_step(
     ctx: &Context,
     command: &str,
 ) -> Result<bool> {
+    let step_idx = {
+        let state = project.status.get(task_name).unwrap();
+        state.current_step
+    };
+
+    let step_name = project.config.workflow[step_idx].name.clone();
+
     {
         let state = project.status.get_mut(task_name).unwrap();
         state.status = TaskStatus::Running;
@@ -144,14 +154,30 @@ fn execute_step(
     }
     project.save_status()?;
 
+    // Record start time
+    let start_time = Utc::now();
+
     // Run command with environment variables
     let env = ctx.to_env_vars();
     let result = run_command_with_env(command, &env)?;
 
-    let step_idx = {
-        let state = project.status.get(task_name).unwrap();
-        state.current_step
-    };
+    // Record end time and calculate duration
+    let end_time = Utc::now();
+    let duration = end_time.signed_duration_since(start_time);
+
+    // Write step log (best-effort)
+    let status_str = if result.success { "success" } else { "failed" };
+    write_step_log(
+        project,
+        task_name,
+        step_idx,
+        &step_name,
+        command,
+        &start_time,
+        duration.num_milliseconds() as f64 / 1000.0,
+        &result,
+        status_str,
+    );
 
     if result.success {
         // Success: mark step and advance
@@ -200,21 +226,30 @@ fn execute_in_window(
     }
     project.save_status()?;
 
-    // Wrap command with on-exit handler
-    // Format: command; wf _on-exit task_name $?
-    let wrapped = format!("{}; wf _on-exit {} $?", command, task_name);
-
     // Send to tmux window
     let session = &ctx.session;
     let window = &ctx.window;
 
     // Check if window exists
     if !tmux::window_exists(session, window) {
-        // Window doesn't exist - the workflow should have created it
-        // Try to create it in the worktree directory
+        // Window doesn't exist - create it in the repo root
         println!("  Creating window {}:{}...", session, window);
-        tmux::create_window(session, window, Some(&ctx.worktree))?;
+        tmux::create_window(session, window, Some(&ctx.repo_root))?;
     }
+
+    // Determine working directory: use worktree if it exists, otherwise repo_root
+    let work_dir = if std::path::Path::new(&ctx.worktree).exists() {
+        &ctx.worktree
+    } else {
+        &ctx.repo_root
+    };
+
+    // Wrap command with cd and on-exit handler
+    // Format: cd <dir> && command; wf _on-exit task_name $?
+    let wrapped = format!(
+        "cd '{}' && {}; wf _on-exit {} $?",
+        work_dir, command, task_name
+    );
 
     println!("  → Sending to {}:{}", session, window);
     println!("  → Waiting for 'wf done {}' or 'wf fail {}'", task_name, task_name);
@@ -222,6 +257,79 @@ fn execute_in_window(
     tmux::send_keys(session, window, &wrapped)?;
 
     Ok(())
+}
+
+/// Write step log file (best-effort, errors are silently ignored)
+fn write_step_log(
+    project: &Project,
+    task_name: &str,
+    step_idx: usize,
+    step_name: &str,
+    command: &str,
+    start_time: &chrono::DateTime<Utc>,
+    duration_secs: f64,
+    result: &CommandResult,
+    status: &str,
+) {
+    let log_dir = project.log_dir(task_name);
+    let log_path = project.log_path(task_name, step_idx, step_name);
+
+    // Create log directory if it doesn't exist
+    if fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+
+    let content = format!(
+        "=== Step {}: {} ===\n\
+         Command: {}\n\
+         Started: {}\n\
+         \n\
+         {}\
+         \n\
+         Exit code: {}\n\
+         Duration: {:.1}s\n\
+         Status: {}\n",
+        step_idx + 1,
+        step_name,
+        command,
+        start_time.to_rfc3339(),
+        format_output(&result.stdout, &result.stderr),
+        result.exit_code,
+        duration_secs,
+        status,
+    );
+
+    // Best-effort write
+    if let Ok(mut file) = fs::File::create(&log_path) {
+        let _ = file.write_all(content.as_bytes());
+    }
+}
+
+/// Format stdout/stderr for log output
+fn format_output(stdout: &str, stderr: &str) -> String {
+    let mut output = String::new();
+
+    if !stdout.is_empty() {
+        output.push_str("[stdout]\n");
+        output.push_str(stdout);
+        if !stdout.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+
+    if !stderr.is_empty() {
+        output.push_str("[stderr]\n");
+        output.push_str(stderr);
+        if !stderr.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+
+    if output.is_empty() {
+        output.push_str("[no output]\n");
+    }
+
+    output
 }
 
 /// Fire a hook (fire-and-forget)

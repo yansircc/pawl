@@ -241,7 +241,7 @@ pub fn reset(task_name: &str) -> Result<()> {
 }
 
 /// Internal: called when in_window command exits
-pub fn on_exit(task_name: &str) -> Result<()> {
+pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
     let mut project = Project::load()?;
 
     let status = project.status.get(task_name).map(|s| s.status);
@@ -255,19 +255,41 @@ pub fn on_exit(task_name: &str) -> Result<()> {
         return Ok(());
     }
 
-    // Fallback: mark as needing attention
-    {
-        let state = project.status.get_mut(task_name).unwrap();
-        state.status = TaskStatus::Waiting;
-        state.message = Some("Process exited without calling wf done/fail/block".to_string());
-        state.touch();
-    }
-    project.save_status()?;
+    let step_idx = {
+        let state = project.status.get(task_name).unwrap();
+        state.current_step
+    };
 
-    eprintln!(
-        "Warning: Task '{}' window exited without status. Use 'wf next {}' to continue.",
-        task_name, task_name
-    );
+    if exit_code == 0 {
+        // Success: mark step and advance, then continue execution
+        {
+            let state = project.status.get_mut(task_name).unwrap();
+            state.mark_step(step_idx, StepStatus::Success);
+            state.current_step += 1;
+            state.message = None;
+            state.touch();
+        }
+        project.save_status()?;
+        println!("Step {} completed successfully.", step_idx + 1);
+        continue_execution(&mut project, task_name)?;
+    } else {
+        // Failure: mark step as failed
+        {
+            let state = project.status.get_mut(task_name).unwrap();
+            state.mark_step(step_idx, StepStatus::Failed);
+            state.status = TaskStatus::Failed;
+            state.message = Some(format!("Exit code: {}", exit_code));
+            state.touch();
+        }
+        project.save_status()?;
+        eprintln!(
+            "Task '{}' failed at step {} (exit code: {}). Use 'wf retry {}' to retry.",
+            task_name,
+            step_idx + 1,
+            exit_code,
+            task_name
+        );
+    }
 
     Ok(())
 }

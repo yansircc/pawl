@@ -83,3 +83,39 @@ pub fn kill_session(name: &str) -> Result<()> {
     run_command(&cmd)?;
     Ok(())
 }
+
+/// Capture pane content from a window
+pub fn capture_pane(session: &str, window: &str, lines: usize) -> Result<String> {
+    // Use negative start to capture from scrollback buffer
+    let start = -(lines as i64);
+    let cmd = format!(
+        "tmux capture-pane -t '{}:{}' -p -S {} 2>/dev/null",
+        session, window, start
+    );
+    let result = run_command(&cmd)?;
+    if result.success {
+        Ok(result.stdout)
+    } else {
+        Ok(String::new())
+    }
+}
+
+/// Check if a pane is running a process (has active command)
+pub fn pane_is_active(session: &str, window: &str) -> bool {
+    // Check if there's a running command in the pane
+    let cmd = format!(
+        "tmux list-panes -t '{}:{}' -F '#{{pane_current_command}}' 2>/dev/null",
+        session, window
+    );
+    if let Ok(result) = run_command(&cmd) {
+        if result.success {
+            let cmd_name = result.stdout.trim();
+            // If it's just a shell (bash, zsh, sh), no command is running
+            !matches!(cmd_name, "bash" | "zsh" | "sh" | "fish" | "")
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}

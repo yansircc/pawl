@@ -1,11 +1,13 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::Path;
 
 const STATUS_FILE: &str = "status.json";
+const LOCK_FILE: &str = "status.lock";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusStore {
@@ -16,31 +18,81 @@ pub struct StatusStore {
 impl StatusStore {
     /// Load status from .wf/status.json
     pub fn load<P: AsRef<Path>>(wf_dir: P) -> Result<Self> {
-        let path = wf_dir.as_ref().join(STATUS_FILE);
-        Self::load_from(&path)
+        let wf_dir = wf_dir.as_ref();
+        let path = wf_dir.join(STATUS_FILE);
+        let lock_path = wf_dir.join(LOCK_FILE);
+        Self::load_with_lock(&path, &lock_path)
     }
 
     /// Load status from a specific path
     pub fn load_from<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
+        let lock_path = path.with_extension("lock");
+        Self::load_with_lock(path, &lock_path)
+    }
+
+    /// Load status with file locking
+    fn load_with_lock(path: &Path, lock_path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
+
+        // Acquire shared lock for reading
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)
+            .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
+
+        lock_file
+            .lock_shared()
+            .with_context(|| "Failed to acquire shared lock")?;
+
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read status: {}", path.display()))?;
+
+        // Lock is automatically released when lock_file is dropped
         serde_json::from_str(&content).context("Failed to parse status JSON")
     }
 
     /// Save status to .wf/status.json with atomic write
     pub fn save<P: AsRef<Path>>(&self, wf_dir: P) -> Result<()> {
-        let path = wf_dir.as_ref().join(STATUS_FILE);
-        self.save_to(&path)
+        let wf_dir = wf_dir.as_ref();
+        let path = wf_dir.join(STATUS_FILE);
+        let lock_path = wf_dir.join(LOCK_FILE);
+        self.save_with_lock(&path, &lock_path)
     }
 
     /// Save status to a specific path with atomic write
     pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
+        let lock_path = path.with_extension("lock");
+        self.save_with_lock(path, &lock_path)
+    }
+
+    /// Save status with file locking and atomic write
+    fn save_with_lock(&self, path: &Path, lock_path: &Path) -> Result<()> {
         let content = serde_json::to_string_pretty(self).context("Failed to serialize status")?;
+
+        // Ensure parent directory exists
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+
+        // Acquire exclusive lock for writing
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)
+            .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
+
+        lock_file
+            .lock_exclusive()
+            .with_context(|| "Failed to acquire exclusive lock")?;
 
         // Atomic write: write to tmp file, then rename
         let tmp_path = path.with_extension("json.tmp");
@@ -49,6 +101,7 @@ impl StatusStore {
         fs::rename(&tmp_path, path)
             .with_context(|| format!("Failed to rename to: {}", path.display()))?;
 
+        // Lock is automatically released when lock_file is dropped
         Ok(())
     }
 

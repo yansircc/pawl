@@ -55,6 +55,11 @@ pub struct Step {
     /// Whether to run in a tmux window
     #[serde(default)]
     pub in_window: bool,
+
+    /// Validation command to run before accepting "wf done"
+    /// If specified, must exit with code 0 for done to succeed
+    #[serde(default)]
+    pub stop_hook: Option<String>,
 }
 
 impl Step {

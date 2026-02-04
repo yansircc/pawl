@@ -1,8 +1,31 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::path::PathBuf;
 
 use crate::model::{Config, StatusStore, TaskDefinition};
 use crate::util::git::get_repo_root;
+
+/// Convert a step name to a safe filename slug
+pub fn slugify(name: &str) -> String {
+    let mut result = String::new();
+    let mut last_was_dash = true; // Start true to avoid leading dash
+
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            result.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash {
+            result.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    // Remove trailing dash
+    if result.ends_with('-') {
+        result.pop();
+    }
+
+    result
+}
 
 const WF_DIR: &str = ".wf";
 
@@ -92,5 +115,55 @@ impl Project {
             }
         }
         Ok(blocking)
+    }
+
+    /// Get the log directory for a task
+    pub fn log_dir(&self, task_name: &str) -> PathBuf {
+        self.wf_dir.join("logs").join(task_name)
+    }
+
+    /// Get the log file path for a specific step
+    pub fn log_path(&self, task_name: &str, step_idx: usize, step_name: &str) -> PathBuf {
+        let slug = slugify(step_name);
+        let filename = format!("step-{}-{}.log", step_idx + 1, slug);
+        self.log_dir(task_name).join(filename)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slugify_simple() {
+        assert_eq!(slugify("hello"), "hello");
+        assert_eq!(slugify("Hello World"), "hello-world");
+    }
+
+    #[test]
+    fn test_slugify_special_chars() {
+        assert_eq!(slugify("Setup: Environment"), "setup-environment");
+        assert_eq!(slugify("Run [tests]"), "run-tests");
+        assert_eq!(slugify("Step #1 - Build"), "step-1-build");
+    }
+
+    #[test]
+    fn test_slugify_consecutive_non_alnum() {
+        assert_eq!(slugify("a---b"), "a-b");
+        assert_eq!(slugify("a   b"), "a-b");
+        assert_eq!(slugify("a!@#b"), "a-b");
+    }
+
+    #[test]
+    fn test_slugify_leading_trailing() {
+        assert_eq!(slugify("--hello--"), "hello");
+        assert_eq!(slugify("  hello  "), "hello");
+        assert_eq!(slugify("...test..."), "test");
+    }
+
+    #[test]
+    fn test_slugify_empty() {
+        assert_eq!(slugify(""), "");
+        assert_eq!(slugify("---"), "");
     }
 }

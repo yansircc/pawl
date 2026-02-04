@@ -1,27 +1,195 @@
 use anyhow::Result;
 use chrono::Utc;
+use serde::Serialize;
 
-use crate::model::TaskStatus;
+use crate::model::{StepStatus, TaskStatus};
 
 use super::common::Project;
 
+/// JSON output structure for task summary
+#[derive(Serialize)]
+struct TaskSummary {
+    name: String,
+    status: String,
+    current_step: usize,
+    total_steps: usize,
+    step_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    blocked_by: Vec<String>,
+}
+
+/// JSON output structure for task detail
+#[derive(Serialize)]
+struct TaskDetail {
+    name: String,
+    description: Option<String>,
+    depends: Vec<String>,
+    status: String,
+    current_step: usize,
+    total_steps: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<String>,
+    workflow: Vec<StepInfo>,
+}
+
+#[derive(Serialize)]
+struct StepInfo {
+    index: usize,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step_type: Option<String>,
+    status: String,
+}
+
 /// Show status of all tasks or a specific task
-pub fn run(task_name: Option<&str>) -> Result<()> {
+pub fn run(task_name: Option<&str>, json: bool) -> Result<()> {
     let project = Project::load()?;
 
     if let Some(name) = task_name {
         let name = project.resolve_task_name(name)?;
-        show_task_detail(&project, &name)?;
+        if json {
+            show_task_detail_json(&project, &name)?;
+        } else {
+            show_task_detail(&project, &name)?;
+        }
     } else {
-        show_all_tasks(&project)?;
+        if json {
+            show_all_tasks_json(&project)?;
+        } else {
+            show_all_tasks(&project)?;
+        }
     }
 
     Ok(())
 }
 
 /// List all tasks (alias for status without arguments)
-pub fn list() -> Result<()> {
-    run(None)
+pub fn list(json: bool) -> Result<()> {
+    run(None, json)
+}
+
+fn show_all_tasks_json(project: &Project) -> Result<()> {
+    let tasks = project.load_all_tasks()?;
+    let workflow_len = project.config.workflow.len();
+
+    let mut summaries: Vec<TaskSummary> = Vec::new();
+
+    for task_def in &tasks {
+        let name = &task_def.name;
+        let blocking = project.check_dependencies(&task_def)?;
+
+        let summary = if let Some(state) = project.status.get(name) {
+            let step_name = if state.current_step < workflow_len {
+                project.config.workflow[state.current_step].name.clone()
+            } else {
+                "Done".to_string()
+            };
+
+            TaskSummary {
+                name: name.clone(),
+                status: format_status(state.status),
+                current_step: state.current_step + 1,
+                total_steps: workflow_len,
+                step_name,
+                message: state.message.clone(),
+                started_at: state.started_at.map(|t| t.to_rfc3339()),
+                updated_at: state.updated_at.map(|t| t.to_rfc3339()),
+                blocked_by: blocking,
+            }
+        } else {
+            TaskSummary {
+                name: name.clone(),
+                status: "pending".to_string(),
+                current_step: 0,
+                total_steps: workflow_len,
+                step_name: "--".to_string(),
+                message: None,
+                started_at: None,
+                updated_at: None,
+                blocked_by: blocking,
+            }
+        };
+
+        summaries.push(summary);
+    }
+
+    println!("{}", serde_json::to_string_pretty(&summaries)?);
+    Ok(())
+}
+
+fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
+    let task_def = project.load_task(task_name)?;
+    let workflow = &project.config.workflow;
+    let workflow_len = workflow.len();
+
+    let state = project.status.get(task_name);
+    let current_step = state.map(|s| s.current_step).unwrap_or(0);
+
+    let mut steps: Vec<StepInfo> = Vec::new();
+    for (i, step) in workflow.iter().enumerate() {
+        let step_type = if step.is_checkpoint() {
+            Some("checkpoint".to_string())
+        } else if step.in_window {
+            Some("in_window".to_string())
+        } else {
+            None
+        };
+
+        let step_status = if let Some(state) = state {
+            if i < current_step {
+                state
+                    .step_status
+                    .get(&i)
+                    .map(|s| format_step_status(*s))
+                    .unwrap_or_else(|| "success".to_string())
+            } else if i == current_step {
+                "current".to_string()
+            } else {
+                "pending".to_string()
+            }
+        } else {
+            "pending".to_string()
+        };
+
+        steps.push(StepInfo {
+            index: i + 1,
+            name: step.name.clone(),
+            step_type,
+            status: step_status,
+        });
+    }
+
+    let detail = TaskDetail {
+        name: task_name.to_string(),
+        description: if task_def.description.is_empty() {
+            None
+        } else {
+            Some(task_def.description.clone())
+        },
+        depends: task_def.depends.clone(),
+        status: state
+            .map(|s| format_status(s.status))
+            .unwrap_or_else(|| "pending".to_string()),
+        current_step: current_step + 1,
+        total_steps: workflow_len,
+        message: state.and_then(|s| s.message.clone()),
+        started_at: state.and_then(|s| s.started_at.map(|t| t.to_rfc3339())),
+        updated_at: state.and_then(|s| s.updated_at.map(|t| t.to_rfc3339())),
+        workflow: steps,
+    };
+
+    println!("{}", serde_json::to_string_pretty(&detail)?);
+    Ok(())
 }
 
 fn show_all_tasks(project: &Project) -> Result<()> {
@@ -145,10 +313,10 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
             if i < current {
                 if let Some(status) = state.step_status.get(&i) {
                     match status {
-                        crate::model::StepStatus::Success => "✓",
-                        crate::model::StepStatus::Failed => "✗",
-                        crate::model::StepStatus::Skipped => "○",
-                        crate::model::StepStatus::Blocked => "!",
+                        StepStatus::Success => "✓",
+                        StepStatus::Failed => "✗",
+                        StepStatus::Skipped => "○",
+                        StepStatus::Blocked => "!",
                     }
                 } else {
                     "✓"
@@ -184,6 +352,15 @@ fn format_status(status: TaskStatus) -> String {
         TaskStatus::Completed => "completed".to_string(),
         TaskStatus::Failed => "failed".to_string(),
         TaskStatus::Stopped => "stopped".to_string(),
+    }
+}
+
+fn format_step_status(status: StepStatus) -> String {
+    match status {
+        StepStatus::Success => "success".to_string(),
+        StepStatus::Failed => "failed".to_string(),
+        StepStatus::Blocked => "blocked".to_string(),
+        StepStatus::Skipped => "skipped".to_string(),
     }
 }
 

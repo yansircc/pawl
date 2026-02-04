@@ -36,6 +36,9 @@ pub enum Command {
     Status {
         /// Task name (optional, shows all if omitted)
         task: Option<String>,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Advance to next step
@@ -80,10 +83,43 @@ pub enum Command {
         task: String,
     },
 
+    /// Capture tmux window content
+    Capture {
+        /// Task name
+        task: String,
+        /// Number of lines to capture (default: 50)
+        #[arg(short, long, default_value = "50")]
+        lines: usize,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Wait for task to reach a specific status
+    Wait {
+        /// Task name
+        task: String,
+        /// Target status to wait for (pending, running, waiting, completed, failed, stopped)
+        #[arg(long)]
+        until: String,
+        /// Timeout in seconds (default: 300)
+        #[arg(short, long, default_value = "300")]
+        timeout: u64,
+        /// Poll interval in milliseconds (default: 500)
+        #[arg(long, default_value = "500")]
+        interval: u64,
+    },
+
     /// Show task logs
     Log {
         /// Task name
         task: String,
+        /// Show specific step log (1-based index)
+        #[arg(short, long)]
+        step: Option<usize>,
+        /// Show all step logs
+        #[arg(short, long)]
+        all: bool,
     },
 
     /// Mark current step as done (for agent use)
@@ -118,5 +154,7 @@ pub enum Command {
     OnExit {
         /// Task name
         task: String,
+        /// Exit code from the command
+        exit_code: i32,
     },
 }
