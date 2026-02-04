@@ -1,31 +1,46 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::io::Read as _;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Session name prefix
+    /// tmux session name (default: project directory name)
     #[serde(default)]
     pub session: Option<String>,
 
-    /// Terminal multiplexer to use (tmux, zellij)
+    /// Terminal multiplexer (default: "tmux")
     #[serde(default = "default_multiplexer")]
     pub multiplexer: String,
 
-    /// Workflow configuration
-    pub workflow: Workflow,
+    /// Claude CLI command path (default: "claude")
+    #[serde(default = "default_claude_command")]
+    pub claude_command: String,
 
-    /// Hooks configuration
+    /// Worktree directory relative to repo root (default: ".wf/worktrees")
+    #[serde(default = "default_worktree_dir")]
+    pub worktree_dir: String,
+
+    /// Workflow steps
+    pub workflow: Vec<Step>,
+
+    /// Event hooks: event name -> shell command
     #[serde(default)]
-    pub hooks: Hooks,
+    pub hooks: HashMap<String, String>,
 }
 
 fn default_multiplexer() -> String {
     "tmux".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Workflow {
-    /// Workflow steps
-    pub steps: Vec<Step>,
+fn default_claude_command() -> String {
+    "claude".to_string()
+}
+
+fn default_worktree_dir() -> String {
+    ".wf/worktrees".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,26 +48,59 @@ pub struct Step {
     /// Step name
     pub name: String,
 
-    /// Command to run
+    /// Command to run (None = checkpoint)
     #[serde(default)]
     pub run: Option<String>,
 
-    /// Whether to run in a new window
+    /// Whether to run in a tmux window
     #[serde(default)]
     pub in_window: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Hooks {
-    /// Hook to run on task start
-    #[serde(default)]
-    pub on_start: Option<String>,
-
-    /// Hook to run on task complete
-    #[serde(default)]
-    pub on_complete: Option<String>,
-
-    /// Hook to run on task fail
-    #[serde(default)]
-    pub on_fail: Option<String>,
+impl Step {
+    /// Check if this step is a checkpoint (no run command)
+    pub fn is_checkpoint(&self) -> bool {
+        self.run.is_none()
+    }
 }
+
+impl Config {
+    /// Load config from .wf/config.jsonc
+    pub fn load<P: AsRef<Path>>(wf_dir: P) -> Result<Self> {
+        let config_path = wf_dir.as_ref().join("config.jsonc");
+        Self::load_from(&config_path)
+    }
+
+    /// Load config from a specific path
+    pub fn load_from<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config: {}", path.display()))?;
+        Self::from_str(&content)
+    }
+
+    /// Parse config from JSONC string
+    pub fn from_str(content: &str) -> Result<Self> {
+        // Strip comments using json_comments crate
+        let mut stripped = String::new();
+        json_comments::StripComments::new(content.as_bytes())
+            .read_to_string(&mut stripped)
+            .context("Failed to strip comments from JSONC")?;
+
+        serde_json::from_str(&stripped).context("Failed to parse config JSON")
+    }
+
+    /// Get session name, defaulting to directory name
+    pub fn session_name(&self, project_dir: &str) -> String {
+        self.session.clone().unwrap_or_else(|| {
+            Path::new(project_dir)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("wf")
+                .to_string()
+        })
+    }
+}
+
+// Re-export for convenience (keeping old name for compatibility)
+pub type Workflow = Vec<Step>;

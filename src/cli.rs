@@ -16,6 +16,11 @@ pub enum Command {
     Create {
         /// Task name
         name: String,
+        /// Task description (optional)
+        description: Option<String>,
+        /// Comma-separated list of task dependencies
+        #[arg(short, long)]
+        depends: Option<String>,
     },
 
     /// List all tasks
