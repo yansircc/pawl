@@ -13,8 +13,6 @@ pub enum Action {
     PageDown,
 
     // View switching
-    SwitchToList,
-    SwitchToDetail(String),
     SwitchToTmux(String),
 
     // Task operations
@@ -43,5 +41,4 @@ pub enum Action {
 
     // Refresh
     Refresh,
-    Tick,
 }

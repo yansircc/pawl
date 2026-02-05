@@ -137,18 +137,6 @@ pub fn reduce(state: AppState, action: Action) -> AppState {
             _ => state,
         },
 
-        Action::SwitchToList => AppState {
-            view: ViewMode::TaskList,
-            task_detail: None,
-            tmux_view: None,
-            ..state
-        },
-
-        Action::SwitchToDetail(name) => AppState {
-            view: ViewMode::TaskDetail(name),
-            ..state
-        },
-
         Action::SwitchToTmux(name) => AppState {
             view: ViewMode::TmuxView(name.clone()),
             tmux_view: Some(TmuxViewState::new(name)),
@@ -194,8 +182,7 @@ pub fn reduce(state: AppState, action: Action) -> AppState {
         | Action::DoneTask(_)
         | Action::FailTask(_)
         | Action::BlockTask(_)
-        | Action::Refresh
-        | Action::Tick => state,
+        | Action::Refresh => state,
     }
 }
 

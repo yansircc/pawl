@@ -24,14 +24,6 @@ impl StatusStore {
         Self::load_with_lock(&path, &lock_path)
     }
 
-    /// Load status from a specific path
-    #[allow(dead_code)]
-    pub fn load_from<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-        let lock_path = path.with_extension("lock");
-        Self::load_with_lock(path, &lock_path)
-    }
-
     /// Load status with file locking
     fn load_with_lock(path: &Path, lock_path: &Path) -> Result<Self> {
         if !path.exists() {
@@ -64,14 +56,6 @@ impl StatusStore {
         let path = wf_dir.join(STATUS_FILE);
         let lock_path = wf_dir.join(LOCK_FILE);
         self.save_with_lock(&path, &lock_path)
-    }
-
-    /// Save status to a specific path with atomic write
-    #[allow(dead_code)]
-    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let path = path.as_ref();
-        let lock_path = path.with_extension("lock");
-        self.save_with_lock(path, &lock_path)
     }
 
     /// Save status with file locking and atomic write

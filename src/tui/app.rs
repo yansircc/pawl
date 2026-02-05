@@ -122,7 +122,7 @@ fn handle_action(
 
     // Then handle side effects
     match action {
-        Action::Refresh | Action::Tick => {
+        Action::Refresh => {
             state = refresh_data(state, provider);
         }
 
@@ -131,10 +131,6 @@ fn handle_action(
             if let ViewMode::TaskDetail(name) = state.view.clone() {
                 state = load_task_detail(state, &name, provider);
             }
-        }
-
-        Action::SwitchToDetail(ref name) => {
-            state = load_task_detail(state, name, provider);
         }
 
         Action::SwitchToTmux(ref name) => {
