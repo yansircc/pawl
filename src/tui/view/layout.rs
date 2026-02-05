@@ -5,7 +5,7 @@ use ratatui::{
 
 use crate::tui::state::{AppState, ModalState, ViewMode};
 
-use super::{help_popup, status_bar, task_detail, task_list, tmux_pane};
+use super::{confirm_popup, help_popup, status_bar, task_detail, task_list, tmux_pane};
 
 pub fn render(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
@@ -42,8 +42,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             ModalState::Help => {
                 help_popup::render(frame, area, &state.view);
             }
-            ModalState::Confirm { .. } => {
-                // TODO: implement confirm dialog
+            ModalState::Confirm { title, message, .. } => {
+                confirm_popup::render(frame, area, title, message);
             }
         }
     }

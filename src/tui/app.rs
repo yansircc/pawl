@@ -11,7 +11,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use super::data::{DataProvider, LiveDataProvider, TaskAction};
 use super::event::{handle_key_event, Action};
-use super::state::{reducer::reduce, AppState, StatusMessage, ViewMode};
+use super::state::{reducer::reduce, AppState, ModalState, StatusMessage, ViewMode};
 use super::view;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -101,8 +101,24 @@ fn handle_action(
     action: Action,
     provider: &Box<dyn DataProvider>,
 ) -> AppState {
-    // First apply reducer for navigation/view changes
+    // Handle ConfirmYes specially - extract the stored action before reducing
+    let confirmed_action = if matches!(action, Action::ConfirmYes) {
+        if let Some(ModalState::Confirm { on_confirm, .. }) = &state.modal {
+            Some(on_confirm.as_ref().clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Apply reducer for navigation/view changes
     state = reduce(state, action.clone());
+
+    // If this was a confirmation, recursively handle the confirmed action
+    if let Some(confirmed) = confirmed_action {
+        return handle_action(state, confirmed, provider);
+    }
 
     // Then handle side effects
     match action {

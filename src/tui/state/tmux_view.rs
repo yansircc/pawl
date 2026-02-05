@@ -60,3 +60,97 @@ impl TmuxViewState {
         self.content.lines().collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new() {
+        let state = TmuxViewState::new("test-task".to_string());
+        assert_eq!(state.task_name, "test-task");
+        assert!(state.content.is_empty());
+        assert_eq!(state.scroll_offset, 0);
+        assert!(state.auto_scroll);
+        assert!(!state.window_exists);
+    }
+
+    #[test]
+    fn test_update_content_auto_scroll() {
+        let state = TmuxViewState::new("task".to_string());
+        assert!(state.auto_scroll);
+
+        let content = "line1\nline2\nline3\nline4\nline5".to_string();
+        let state = state.update_content(content, true);
+
+        assert!(state.window_exists);
+        assert_eq!(state.scroll_offset, 4); // auto-scroll to bottom (5 lines - 1)
+        assert!(state.auto_scroll);
+    }
+
+    #[test]
+    fn test_scroll_up_disables_auto_scroll() {
+        let state = TmuxViewState::new("task".to_string());
+        let content = "line1\nline2\nline3\nline4\nline5".to_string();
+        let state = state.update_content(content, true);
+
+        assert!(state.auto_scroll);
+        assert_eq!(state.scroll_offset, 4);
+
+        let state = state.scroll_up(2);
+        assert!(!state.auto_scroll);
+        assert_eq!(state.scroll_offset, 2);
+
+        // Subsequent update should not auto-scroll
+        let new_content = "line1\nline2\nline3\nline4\nline5\nline6".to_string();
+        let state = state.update_content(new_content, true);
+        assert_eq!(state.scroll_offset, 2); // preserved
+        assert!(!state.auto_scroll);
+    }
+
+    #[test]
+    fn test_scroll_down_re_enables_auto_scroll() {
+        let mut state = TmuxViewState::new("task".to_string());
+        state.content = "line1\nline2\nline3\nline4\nline5".to_string();
+        state.scroll_offset = 0;
+        state.auto_scroll = false;
+
+        // Scroll down but not to bottom
+        let state = state.scroll_down(2);
+        assert_eq!(state.scroll_offset, 2);
+        assert!(!state.auto_scroll);
+
+        // Scroll to bottom
+        let state = state.scroll_down(10);
+        assert_eq!(state.scroll_offset, 4); // max offset
+        assert!(state.auto_scroll); // re-enabled
+    }
+
+    #[test]
+    fn test_scroll_up_boundary() {
+        let mut state = TmuxViewState::new("task".to_string());
+        state.scroll_offset = 2;
+
+        let state = state.scroll_up(5); // try to go below 0
+        assert_eq!(state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_content_lines() {
+        let mut state = TmuxViewState::new("task".to_string());
+        state.content = "line1\nline2\nline3".to_string();
+
+        let lines = state.content_lines();
+        assert_eq!(lines, vec!["line1", "line2", "line3"]);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let state = TmuxViewState::new("task".to_string());
+        let lines = state.content_lines();
+        assert!(lines.is_empty());
+
+        let state = state.update_content(String::new(), false);
+        assert_eq!(state.scroll_offset, 0);
+    }
+}

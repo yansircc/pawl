@@ -6,8 +6,8 @@ use crate::tui::state::{AppState, ViewMode};
 /// Convert a key event to an action based on current state
 pub fn handle_key_event(key: KeyEvent, state: &AppState) -> Option<Action> {
     // Handle modal first
-    if state.modal.is_some() {
-        return handle_modal_key(key);
+    if let Some(modal) = &state.modal {
+        return handle_modal_key(key, modal);
     }
 
     // Handle based on current view
@@ -18,11 +18,20 @@ pub fn handle_key_event(key: KeyEvent, state: &AppState) -> Option<Action> {
     }
 }
 
-fn handle_modal_key(key: KeyEvent) -> Option<Action> {
-    match key.code {
-        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => Some(Action::HideModal),
-        KeyCode::Enter => Some(Action::HideModal),
-        _ => None,
+use crate::tui::state::ModalState;
+
+fn handle_modal_key(key: KeyEvent, modal: &ModalState) -> Option<Action> {
+    match modal {
+        ModalState::Help => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => Some(Action::HideModal),
+            KeyCode::Enter => Some(Action::HideModal),
+            _ => None,
+        },
+        ModalState::Confirm { .. } => match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(Action::ConfirmYes),
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(Action::ConfirmNo),
+            _ => None,
+        },
     }
 }
 
@@ -71,14 +80,22 @@ fn handle_task_list_key(key: KeyEvent, state: &AppState) -> Option<Action> {
         }
         KeyCode::Char('R') => {
             if let Some(task) = state.task_list.selected_task() {
-                Some(Action::ResetTask(task.name.clone()))
+                Some(Action::ShowConfirm {
+                    title: "Reset Task".to_string(),
+                    message: format!("Reset task '{}'? All progress will be lost.", task.name),
+                    on_confirm: Box::new(Action::ResetTask(task.name.clone())),
+                })
             } else {
                 None
             }
         }
         KeyCode::Char('x') => {
             if let Some(task) = state.task_list.selected_task() {
-                Some(Action::StopTask(task.name.clone()))
+                Some(Action::ShowConfirm {
+                    title: "Stop Task".to_string(),
+                    message: format!("Stop task '{}'?", task.name),
+                    on_confirm: Box::new(Action::StopTask(task.name.clone())),
+                })
             } else {
                 None
             }
@@ -131,8 +148,16 @@ fn handle_task_detail_key(key: KeyEvent, state: &AppState) -> Option<Action> {
         KeyCode::Char('s') => Some(Action::StartTask(task_name)),
         KeyCode::Char('n') => Some(Action::NextTask(task_name.clone())),
         KeyCode::Char('r') => Some(Action::RetryTask(task_name.clone())),
-        KeyCode::Char('R') => Some(Action::ResetTask(task_name.clone())),
-        KeyCode::Char('x') => Some(Action::StopTask(task_name.clone())),
+        KeyCode::Char('R') => Some(Action::ShowConfirm {
+            title: "Reset Task".to_string(),
+            message: format!("Reset task '{}'? All progress will be lost.", task_name),
+            on_confirm: Box::new(Action::ResetTask(task_name.clone())),
+        }),
+        KeyCode::Char('x') => Some(Action::ShowConfirm {
+            title: "Stop Task".to_string(),
+            message: format!("Stop task '{}'?", task_name),
+            on_confirm: Box::new(Action::StopTask(task_name.clone())),
+        }),
         KeyCode::Char('S') => Some(Action::SkipTask(task_name)),
 
         // Help
@@ -176,7 +201,11 @@ fn handle_tmux_view_key(key: KeyEvent, state: &AppState) -> Option<Action> {
         // Task operations
         KeyCode::Char('n') => Some(Action::NextTask(task_name.clone())),
         KeyCode::Char('r') => Some(Action::RetryTask(task_name.clone())),
-        KeyCode::Char('x') => Some(Action::StopTask(task_name)),
+        KeyCode::Char('x') => Some(Action::ShowConfirm {
+            title: "Stop Task".to_string(),
+            message: format!("Stop task '{}'?", task_name),
+            on_confirm: Box::new(Action::StopTask(task_name)),
+        }),
 
         // Help
         KeyCode::Char('?') => Some(Action::ShowHelp),

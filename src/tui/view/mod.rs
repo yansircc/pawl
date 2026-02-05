@@ -1,3 +1,4 @@
+pub mod confirm_popup;
 pub mod help_popup;
 pub mod layout;
 pub mod status_bar;

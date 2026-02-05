@@ -2,37 +2,29 @@
 
 ## 本次 Session 完成的工作
 
-### 1. TUI 界面开发 + 完善
+### 1. Confirm 对话框
 
-**基础 TUI** (ratatui + crossterm):
-- 三个视图：任务列表 → 任务详情 → Tmux 实时视图
-- 任务操作：start/stop/reset/next/retry/skip/done/fail/block
-- 帮助系统、自动刷新、状态消息
+为危险操作 (reset, stop) 添加了确认弹窗：
 
-**TUI 增强**:
-- 添加 SkipTask 键绑定 (`S`)
-- 任务列表显示 `blocked: xxx` 依赖信息
-- 任务详情显示 Description 区域
+**实现细节**:
+- 新增 `Action::ShowConfirm`, `Action::ConfirmYes`, `Action::ConfirmNo`
+- 扩展 `ModalState::Confirm` 存储 `on_confirm` action
+- 按 `R` (reset) 或 `x` (stop) 时显示确认对话框
+- 按 `y/Y/Enter` 确认，按 `n/N/Esc` 取消
+- 新建 `src/tui/view/confirm_popup.rs` 渲染组件
 
-### 2. 代码清理
+### 2. TUI state 单元测试
 
-**删除未使用代码** (共 ~40 行):
-- `util/git.rs`: branch_exists, worktree_exists, current_branch, is_clean
-- `util/shell.rs`: run_command_in_dir
-- `util/tmux.rs`: is_available, attach, kill_session
-- `util/variable.rs`: expand 便捷函数
+为 `src/tui/state/` 添加了完整测试覆盖：
 
-### 3. 自动化测试
+| 文件 | 新增测试数 |
+|------|-----------|
+| `app_state.rs` | 7 |
+| `task_detail.rs` | 4 |
+| `tmux_view.rs` | 8 |
+| `reducer.rs` | 2 (confirm 相关) |
 
-在 `/Users/yansir/code/nextjs-project/try-wt/` 完成 TUI 自动化测试:
-- 任务列表导航 (j/k) ✅
-- 进入详情视图 (Enter) ✅
-- 显示 Description ✅
-- 帮助弹窗 (?) ✅
-- 显示 blocked_by ✅
-- 启动任务 (s) ✅
-- Tmux 实时视图 ✅
-- 标记完成 (D) ✅
+测试总数从 21 增加到 41。
 
 ---
 
@@ -48,13 +40,15 @@
 | `n` | next | next | next |
 | `r` | retry | retry | retry |
 | `S` | skip | skip | - |
-| `R` | reset | reset | - |
-| `x` | stop | stop | stop |
+| `R` | reset (确认) | reset (确认) | - |
+| `x` | stop (确认) | stop (确认) | stop (确认) |
 | `D` | - | - | done |
 | `F` | - | - | fail |
 | `B` | - | - | block |
 | `?` | 帮助 | 帮助 | 帮助 |
 | `g` | 刷新 | 刷新 | 刷新 |
+
+**确认对话框**: `y`/`Y`/`Enter` 确认，`n`/`N`/`Esc` 取消
 
 ---
 
@@ -72,6 +66,8 @@
 | 等待状态 | ✅ |
 | 窗口检测 | ✅ |
 | TUI 界面 | ✅ |
+| Confirm 对话框 | ✅ |
+| TUI 单元测试 | ✅ |
 
 ---
 
@@ -86,11 +82,12 @@
 | TUI 状态 | `src/tui/state/*.rs` |
 | TUI 视图 | `src/tui/view/*.rs` |
 | TUI 事件 | `src/tui/event/*.rs` |
+| Confirm 弹窗 | `src/tui/view/confirm_popup.rs` |
 
 ---
 
 ## 下一步建议
 
-1. **Confirm 对话框**: 对危险操作 (reset, stop) 添加确认弹窗
-2. **主题定制**: 支持自定义颜色主题
-3. **更多测试**: 添加 TUI state 层的单元测试
+1. **更多 Confirm 操作**: 考虑为其他危险操作（如 `done`, `fail`）也添加确认
+2. **集成测试**: 添加 TUI 组件的集成测试
+3. **性能优化**: 如果任务列表很长，考虑虚拟滚动

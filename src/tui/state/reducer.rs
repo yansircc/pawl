@@ -160,7 +160,26 @@ pub fn reduce(state: AppState, action: Action) -> AppState {
             ..state
         },
 
-        Action::HideModal => AppState {
+        Action::HideModal | Action::ConfirmNo => AppState {
+            modal: None,
+            ..state
+        },
+
+        Action::ShowConfirm {
+            title,
+            message,
+            on_confirm,
+        } => AppState {
+            modal: Some(ModalState::Confirm {
+                title,
+                message,
+                on_confirm,
+            }),
+            ..state
+        },
+
+        // ConfirmYes is handled by app.rs (needs to execute the stored action)
+        Action::ConfirmYes => AppState {
             modal: None,
             ..state
         },
@@ -247,6 +266,58 @@ mod tests {
         assert_eq!(state.modal, Some(ModalState::Help));
 
         let state = reduce(state, Action::HideModal);
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_confirm_modal() {
+        let state = AppState::default();
+        assert!(state.modal.is_none());
+
+        // Show confirm dialog
+        let state = reduce(
+            state,
+            Action::ShowConfirm {
+                title: "Test".to_string(),
+                message: "Are you sure?".to_string(),
+                on_confirm: Box::new(Action::ResetTask("task1".to_string())),
+            },
+        );
+
+        match &state.modal {
+            Some(ModalState::Confirm {
+                title,
+                message,
+                on_confirm,
+            }) => {
+                assert_eq!(title, "Test");
+                assert_eq!(message, "Are you sure?");
+                assert_eq!(**on_confirm, Action::ResetTask("task1".to_string()));
+            }
+            _ => panic!("Expected Confirm modal"),
+        }
+
+        // ConfirmNo closes modal
+        let state = reduce(state, Action::ConfirmNo);
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_confirm_yes_clears_modal() {
+        let state = AppState::default();
+
+        let state = reduce(
+            state,
+            Action::ShowConfirm {
+                title: "Test".to_string(),
+                message: "Are you sure?".to_string(),
+                on_confirm: Box::new(Action::StopTask("task1".to_string())),
+            },
+        );
+        assert!(state.modal.is_some());
+
+        // ConfirmYes clears modal (actual action execution handled by app.rs)
+        let state = reduce(state, Action::ConfirmYes);
         assert!(state.modal.is_none());
     }
 }

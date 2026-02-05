@@ -1,6 +1,5 @@
 /// User action that can be triggered by input or timer
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Some variants reserved for future use
 pub enum Action {
     // Navigation
     Quit,
@@ -32,6 +31,15 @@ pub enum Action {
     // Modal
     ShowHelp,
     HideModal,
+
+    // Confirm dialog
+    ShowConfirm {
+        title: String,
+        message: String,
+        on_confirm: Box<Action>,
+    },
+    ConfirmYes,
+    ConfirmNo,
 
     // Refresh
     Refresh,
