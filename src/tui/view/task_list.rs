@@ -40,7 +40,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TaskListState) {
                 ),
                 Span::raw(" "),
                 Span::styled(
-                    format!("[{}/{}]", task.current_step + 1, task.total_steps),
+                    format!(
+                        "[{}/{}]",
+                        (task.current_step + 1).min(task.total_steps),
+                        task.total_steps
+                    ),
                     Theme::dimmed(),
                 ),
                 Span::raw(" "),

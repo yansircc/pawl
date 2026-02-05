@@ -48,7 +48,11 @@ pub fn create_window(session: &str, window: &str, dir: Option<&str>) -> Result<(
 pub fn send_keys(session: &str, window: &str, keys: &str) -> Result<()> {
     // Escape single quotes in the keys
     let escaped = keys.replace('\'', "'\\''");
-    let cmd = format!("tmux send-keys -t '{}:{}' '{}' Enter", session, window, escaped);
+    // Send keys and Enter separately to ensure Enter is processed
+    let cmd = format!(
+        "tmux send-keys -t '{}:{}' '{}' && tmux send-keys -t '{}:{}' Enter",
+        session, window, escaped, session, window
+    );
     run_command(&cmd).with_context(|| format!("Failed to send keys to {}:{}", session, window))?;
     Ok(())
 }

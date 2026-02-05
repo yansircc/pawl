@@ -57,7 +57,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TaskDetailState) {
             Span::styled("Progress: ", Theme::dimmed()),
             Span::raw(format!(
                 "{}/{}",
-                state.current_step + 1,
+                (state.current_step + 1).min(state.steps.len()),
                 state.steps.len()
             )),
         ]),

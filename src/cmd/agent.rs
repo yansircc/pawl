@@ -102,13 +102,16 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     }
     project.save_status()?;
 
-    // Cleanup tmux window
-    cleanup_window(&session, &task_name);
-
     println!("Step {} marked as done.", step_idx + 1);
 
-    // Continue execution
+    // Continue execution first, then cleanup window
+    // This ensures subsequent steps can execute before we destroy the current shell
     continue_execution(&mut project, &task_name)?;
+
+    // Cleanup tmux window after execution completes
+    // Note: If continue_execution stopped at another in_window step, the window
+    // might be reused. cleanup_window is best-effort and ignores errors.
+    cleanup_window(&session, &task_name);
 
     Ok(())
 }
