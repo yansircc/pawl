@@ -2,68 +2,66 @@
 
 ## 本次 Session 完成的工作
 
-### 1. Claude/Codex CLI Skills
+### Log Pipeline 简化重构
 
-新增两个 skill 文档，帮助 agent 构建可执行的 CLI 命令：
+**目标**：实现稳定的日志管道，让后续 step 可以读取前置 step 的输出
 
-| Skill | 位置 | 用途 |
-|-------|------|------|
-| `claude-cli` | `.claude/skills/claude-cli/SKILL.md` | Claude Code CLI 参考 |
-| `codex-cli` | `.claude/skills/codex-cli/SKILL.md` | OpenAI Codex CLI 参考 |
+**最终方案**：激进简化 - 只记录元数据，让 Judge 自己读取 Claude 的 transcript
 
-### 2. Agent 自验证机制调研
+#### 完成的改动
 
-**核心发现**：
+| 改动 | 说明 |
+|------|------|
+| 移除 pipe-pane | 不再流式捕获终端输出 |
+| 移除 ANSI 过滤 | 删除 text.rs 和 regex 依赖 |
+| JSON 元数据日志 | `.wf/logs/{task}/step-{n}-{slug}.json` |
+| 新增变量 | `${log_dir}`, `${log_path}`, `${prev_log}`, `${step_index}` |
+| 修复 worktree bug | `_on-exit` 回到 repo_root 执行 |
 
-| CLI | Stop Hook | 自验证方式 |
-|-----|-----------|-----------|
-| Claude | ✅ 完整支持 `decision: block` | Stop Hook 强制 |
-| Codex | ❌ 无（PR #9796 被拒绝） | 只能靠 prompt + output |
+#### 日志格式
 
-**决策**：放弃 Stop Hook 方式，采用更通用的 **output → judge → mark** 流程：
-1. Agent 执行任务，输出保存到日志
-2. 另一个 agent (如 haiku) 读取日志 + 原始任务，判断完成情况
-3. 根据判断结果执行 `wf done/fail/block`
+```json
+{
+  "step": 1,
+  "name": "Develop",
+  "type": "in_window",
+  "command": "claude -p ...",
+  "completed": "2026-02-05T12:38:21+00:00",
+  "exit_code": 0,
+  "status": "success"
+}
+```
 
-### 3. Log Pipeline 现状分析
+#### 设计决策
 
-**问题发现**：
-
-| 步骤类型 | 日志记录 | 问题 |
-|----------|----------|------|
-| 普通 step | ✅ `.wf/logs/{task}/step-{n}-{slug}.log` | 正常 |
-| in_window step | ❌ **没有记录** | 无法传递给下一步 |
-
-**缺失功能**：
-- in_window 步骤没有输出捕获
-- 没有 step 间的输出传递机制（如 `${prev_output}`）
-- `wf capture` 只能获取 tmux 可见区域，不是完整日志
+**为什么只记录元数据？**
+- Claude CLI 自己维护 transcript（`~/.claude/projects/*/session.jsonl`）
+- `--output-format=stream-json` 的最后一行包含完整 result
+- Judge 可以用 shell 命令提取需要的信息
+- 避免复杂的终端输出处理（ANSI codes、断行等）
 
 ---
 
 ## 待实现功能
 
-### Log Pipeline（高优先级）
+### Session 软链接（用户建议）
 
-需要实现稳定可靠的日志管道，让执行结果可以往下传递：
+在日志目录创建软链接指向 Claude 的 transcript，简化 Judge 读取：
 
-1. **in_window 输出捕获**
-   - 方案 A: `script` 命令记录
-   - 方案 B: `tmux pipe-pane` 持续写入
-   - 方案 C: 要求 agent 用 `-p --output-format json > log`
+```
+.wf/logs/{task}/
+  step-1-xxx.json           # 元数据
+  latest-session -> ~/.claude/projects/{hash}/{session-id}.jsonl
+```
 
-2. **变量传递**
-   - 新增 `${prev_output}` 或 `${step_N_output}` 变量
-   - 或用文件路径 `${log_dir}/step-{N}-{name}.log`
+这样 Judge 可以直接：
+```bash
+cat ${log_dir}/latest-session | jq '.result'
+```
 
-3. **Judge Step 类型**
-   ```jsonc
-   {
-     "name": "Judge",
-     "run": "claude -p --model haiku '读取 ${prev_output}，判断任务是否完成'",
-     "judge": true  // 特殊标记，根据输出执行 wf done/fail/block
-   }
-   ```
+**待解决**：
+- 如何获取 session_id（从 Claude JSON 输出解析）
+- 如何定位 Claude projects 目录
 
 ---
 
@@ -73,16 +71,12 @@
 |------|------|
 | 核心执行引擎 | ✅ |
 | 日志记录（普通 step） | ✅ |
-| 日志记录（in_window） | ❌ 待实现 |
-| Log Pipeline | ❌ 待实现 |
-| 任务索引 | ✅ |
-| JSON 输出 | ✅ |
-| 文件锁 | ✅ |
+| 日志记录（in_window）| ✅ JSON 元数据 |
+| 变量展开（含日志路径）| ✅ |
 | Stop Hook | ✅ |
-| tmux 捕获 | ✅ |
 | TUI 界面 | ✅ |
-| 所有 Hooks | ✅ |
 | Claude/Codex CLI Skills | ✅ |
+| Session 软链接 | ❌ 待实现 |
 
 ---
 
@@ -93,40 +87,17 @@
 | CLI 定义 | `src/cli.rs` |
 | 执行引擎 | `src/cmd/start.rs` |
 | Agent 命令 | `src/cmd/agent.rs` |
+| 控制命令 | `src/cmd/control.rs` |
 | 公共工具 | `src/cmd/common.rs` |
-| 日志显示 | `src/cmd/log.rs` |
-| tmux 捕获 | `src/cmd/capture.rs` |
+| 变量展开 | `src/util/variable.rs` |
+| tmux 操作 | `src/util/tmux.rs` |
 | 状态存储 | `src/model/state.rs` |
-| TUI | `src/tui/*.rs` |
 
 ---
 
-## 实验记录
+## 测试验证
 
-### Stop Hook 自验证实验
-
-```bash
-# 测试命令
-ccc -p --model haiku --max-turns 10 \
-  --settings /tmp/test-hook/settings.json \
-  --output-format json \
-  "Say hello and finish"
-
-# 结果：4 轮完成，$0.004885
-# 机制可行，但决定放弃 Stop Hook 改用更通用方案
-```
-
-### tmux 输出捕获实验
-
-| 方法 | 可行性 |
-|------|--------|
-| `tmux capture-pane -p` | ✅ 但只有可见区域 |
-| `script` 命令 | ✅ 完整记录 |
-| tee 到文件 | ✅ 可行 |
-| Claude transcript | ✅ `~/.claude/projects/*/session.jsonl` |
-
----
-
-## 下一步
-
-**进入 Plan Mode 实现 Log Pipeline**
+在 `/Users/yansir/code/nextjs-project/try-wt` 测试通过：
+- `wf start` → `wf status` → 日志生成正确
+- JSON 元数据格式正确
+- `_on-exit` 在 repo_root 正确执行

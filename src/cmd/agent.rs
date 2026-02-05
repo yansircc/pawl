@@ -1,11 +1,12 @@
 use anyhow::{bail, Result};
 use chrono::Utc;
+use serde_json::json;
 use std::fs;
 use std::io::Write;
 
 use crate::model::{StepStatus, TaskStatus};
 use crate::util::shell::run_command_with_env;
-use crate::util::tmux::{self, CaptureResult};
+use crate::util::tmux;
 use crate::util::variable::Context;
 
 use super::common::Project;
@@ -37,14 +38,23 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     if let Some(stop_hook) = &step.stop_hook {
         println!("Running stop_hook validation...");
 
-        // Build context for variable expansion
+        // Build full context for variable expansion (including log paths)
         let session = project.session_name();
-        let ctx = Context::new(
+        let log_dir = project.log_dir(&task_name);
+        let log_path = project.log_path(&task_name, step_idx, &step.name);
+        let prev_log = project.prev_log_path(&task_name, step_idx);
+        let prev_log_str = prev_log.as_ref().map(|p| p.to_string_lossy().to_string());
+
+        let ctx = Context::new_full(
             &task_name,
             &session,
             &project.repo_root,
             &project.config.worktree_dir,
             &step.name,
+            step_idx,
+            &log_dir.to_string_lossy(),
+            &log_path.to_string_lossy(),
+            prev_log_str.as_deref(),
         );
 
         let expanded = ctx.expand(stop_hook);
@@ -73,12 +83,14 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
         println!("Stop hook validation passed.");
     }
 
-    // Get step name for logging
-    let step_name = project.config.workflow[step_idx].name.clone();
+    // Get step info for logging
+    let step = &project.config.workflow[step_idx];
+    let step_name = step.name.clone();
+    let command = step.run.clone().unwrap_or_default();
     let session = project.session_name();
 
-    // Capture tmux content before marking as done (window may be killed after)
-    write_in_window_log(&project, &task_name, step_idx, &step_name, &session, "success");
+    // Write metadata log
+    write_in_window_log(&project, &task_name, step_idx, &step_name, &command, "success");
 
     // Mark step as success
     {
@@ -121,12 +133,14 @@ pub fn fail(task_name: &str, message: Option<&str>) -> Result<()> {
         );
     }
 
-    // Get step name for logging
-    let step_name = project.config.workflow[step_idx].name.clone();
+    // Get step info for logging
+    let step = &project.config.workflow[step_idx];
+    let step_name = step.name.clone();
+    let command = step.run.clone().unwrap_or_default();
     let session = project.session_name();
 
-    // Capture tmux content before marking as failed
-    write_in_window_log(&project, &task_name, step_idx, &step_name, &session, "failed");
+    // Write metadata log
+    write_in_window_log(&project, &task_name, step_idx, &step_name, &command, "failed");
 
     // Mark step as failed
     {
@@ -175,12 +189,14 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
         );
     }
 
-    // Get step name for logging
-    let step_name = project.config.workflow[step_idx].name.clone();
+    // Get step info for logging
+    let step = &project.config.workflow[step_idx];
+    let step_name = step.name.clone();
+    let command = step.run.clone().unwrap_or_default();
     let session = project.session_name();
 
-    // Capture tmux content before marking as blocked
-    write_in_window_log(&project, &task_name, step_idx, &step_name, &session, "blocked");
+    // Write metadata log
+    write_in_window_log(&project, &task_name, step_idx, &step_name, &command, "blocked");
 
     // Mark step as blocked
     {
@@ -207,13 +223,13 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Write log for an in_window step (captures tmux content)
+/// Write JSON metadata log for an in_window step
 fn write_in_window_log(
     project: &Project,
     task_name: &str,
     step_idx: usize,
     step_name: &str,
-    session: &str,
+    command: &str,
     status: &str,
 ) {
     let log_dir = project.log_dir(task_name);
@@ -224,32 +240,21 @@ fn write_in_window_log(
         return;
     }
 
-    // Capture tmux content
-    let captured_at = Utc::now();
-    let content = match tmux::capture_pane(session, task_name, 2000) {
-        Ok(CaptureResult::Content(c)) => c,
-        Ok(CaptureResult::WindowGone) => "(window already gone)".to_string(),
-        Err(_) => "(capture failed)".to_string(),
-    };
+    let completed_at = Utc::now();
 
-    let log_content = format!(
-        "=== Step {}: {} ===\n\
-         Type: in_window\n\
-         Captured: {}\n\
-         Status: {}\n\
-         \n\
-         [tmux capture]\n\
-         {}\n",
-        step_idx + 1,
-        step_name,
-        captured_at.to_rfc3339(),
-        status,
-        content.trim_end(),
-    );
+    // Write JSON metadata only
+    let log_data = json!({
+        "step": step_idx + 1,
+        "name": step_name,
+        "type": "in_window",
+        "command": command,
+        "completed": completed_at.to_rfc3339(),
+        "status": status
+    });
 
     // Best-effort write
     if let Ok(mut file) = fs::File::create(&log_path) {
-        let _ = file.write_all(log_content.as_bytes());
+        let _ = file.write_all(serde_json::to_string_pretty(&log_data).unwrap_or_default().as_bytes());
     }
 }
 

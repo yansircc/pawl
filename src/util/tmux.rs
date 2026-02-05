@@ -88,9 +88,11 @@ pub fn capture_pane(session: &str, window: &str, lines: usize) -> Result<Capture
     }
 
     // Use negative start to capture from scrollback buffer
+    // -J joins wrapped lines (prevents hard breaks at pane width)
+    // -e includes escape sequences (we'll strip them later for clean output)
     let start = -(lines as i64);
     let cmd = format!(
-        "tmux capture-pane -t '{}:{}' -p -S {}",
+        "tmux capture-pane -t '{}:{}' -p -J -S {}",
         session, window, start
     );
     let result = run_command(&cmd)?;
@@ -121,3 +123,4 @@ pub fn pane_is_active(session: &str, window: &str) -> bool {
         false
     }
 }
+

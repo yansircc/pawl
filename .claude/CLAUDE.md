@@ -21,10 +21,10 @@ src/
 │   ├── state.rs      # StatusStore + 原子写入 + 文件锁
 │   └── task.rs       # TaskDefinition + frontmatter 解析
 ├── cmd/
-│   ├── common.rs     # Project 上下文 + slugify/log_dir/log_path
+│   ├── common.rs     # Project 上下文 + log_dir/log_path/prev_log_path
 │   ├── init.rs       # wf init
 │   ├── create.rs     # wf create
-│   ├── start.rs      # wf start (执行引擎 + 日志记录)
+│   ├── start.rs      # wf start (执行引擎)
 │   ├── status.rs     # wf status/list (支持 --json)
 │   ├── control.rs    # wf next/retry/back/skip/stop/reset + _on-exit
 │   ├── agent.rs      # wf done/fail/block (含 stop_hook 验证)
@@ -33,32 +33,58 @@ src/
 │   ├── enter.rs      # wf enter
 │   └── log.rs        # wf log (支持 --step/--all)
 ├── tui/              # 交互式 TUI 界面
-│   ├── app.rs        # 主循环 (事件处理 + 渲染)
-│   ├── state/        # 状态层 (可单元测试)
-│   │   ├── app_state.rs    # 根状态
-│   │   ├── task_list.rs    # 任务列表状态
-│   │   ├── task_detail.rs  # 任务详情状态
-│   │   ├── tmux_view.rs    # Tmux 视图状态
-│   │   └── reducer.rs      # 纯状态转换函数
+│   ├── app.rs        # 主循环
+│   ├── state/        # 状态层
 │   ├── view/         # 渲染层
-│   │   ├── layout.rs       # 主布局
-│   │   ├── task_list.rs    # 任务列表组件
-│   │   ├── task_detail.rs  # 任务详情组件
-│   │   ├── tmux_pane.rs    # Tmux 内容组件
-│   │   ├── status_bar.rs   # 状态栏
-│   │   ├── help_popup.rs   # 帮助弹窗
-│   │   └── style.rs        # 样式定义
 │   ├── event/        # 事件处理
-│   │   ├── action.rs       # Action 枚举
-│   │   └── input.rs        # 按键处理
 │   └── data/         # 数据层
-│       ├── provider.rs     # DataProvider trait
-│       └── live.rs         # 实际实现
 └── util/
     ├── git.rs        # Git 操作
     ├── shell.rs      # Shell 执行
-    ├── tmux.rs       # Tmux 操作 + capture_pane
-    └── variable.rs   # 变量展开
+    ├── tmux.rs       # Tmux 操作
+    └── variable.rs   # 变量展开（含日志路径变量）
+```
+
+## 日志系统
+
+### 日志格式
+
+in_window 步骤完成后生成 JSON 元数据日志：
+
+```
+.wf/logs/{task}/step-{N}-{slug}.json
+```
+
+```json
+{
+  "step": 1,
+  "name": "Develop",
+  "type": "in_window",
+  "command": "claude -p ...",
+  "completed": "2026-02-05T12:38:21+00:00",
+  "exit_code": 0,
+  "status": "success"
+}
+```
+
+### 日志相关变量
+
+| 变量 | 环境变量 | 说明 |
+|------|----------|------|
+| `${log_dir}` | `WF_LOG_DIR` | 任务日志目录 |
+| `${log_path}` | `WF_LOG_PATH` | 当前 step 日志路径 |
+| `${prev_log}` | `WF_PREV_LOG` | 前一个 step 日志路径 |
+| `${step_index}` | `WF_STEP_INDEX` | 当前 step 索引（0-based）|
+
+### 读取 Claude 输出
+
+Claude CLI 的实际输出在其 transcript 中：
+```bash
+# 使用 --output-format=stream-json 时，最后一行是 result
+grep '"type":"result"' output.log | jq -r '.result'
+
+# 或直接读取 Claude 的 transcript
+cat ~/.claude/projects/{hash}/{session-id}.jsonl
 ```
 
 ## CLI 命令

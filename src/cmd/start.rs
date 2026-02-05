@@ -91,12 +91,22 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
         let worktree_dir = project.config.worktree_dir.clone();
         let repo_root = project.repo_root.clone();
 
-        let ctx = Context::new(
+        // Build context with log information
+        let log_dir = project.log_dir(task_name);
+        let log_path = project.log_path(task_name, step_idx, &step.name);
+        let prev_log = project.prev_log_path(task_name, step_idx);
+        let prev_log_str = prev_log.as_ref().map(|p| p.to_string_lossy().to_string());
+
+        let ctx = Context::new_full(
             task_name,
             &session,
             &repo_root,
             &worktree_dir,
             &step.name,
+            step_idx,
+            &log_dir.to_string_lossy(),
+            &log_path.to_string_lossy(),
+            prev_log_str.as_deref(),
         );
 
         println!(
@@ -255,10 +265,11 @@ fn execute_in_window(
     };
 
     // Wrap command with cd and on-exit handler
-    // Format: cd <dir> && command; wf _on-exit task_name $?
+    // Note: _on-exit must run in repo_root where .wf directory exists
+    // Format: cd <work_dir> && command; cd <repo_root> && wf _on-exit task_name $?
     let wrapped = format!(
-        "cd '{}' && {}; wf _on-exit {} $?",
-        work_dir, command, task_name
+        "cd '{}' && {}; __wf_exit=$?; cd '{}' && wf _on-exit {} $__wf_exit",
+        work_dir, command, ctx.repo_root, task_name
     );
 
     println!("  → Sending to {}:{}", session, window);

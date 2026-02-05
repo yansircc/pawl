@@ -124,11 +124,35 @@ impl Project {
         self.wf_dir.join("logs").join(task_name)
     }
 
-    /// Get the log file path for a specific step
+    /// Get the log file path for a specific step (JSON metadata)
     pub fn log_path(&self, task_name: &str, step_idx: usize, step_name: &str) -> PathBuf {
         let slug = slugify(step_name);
-        let filename = format!("step-{}-{}.log", step_idx + 1, slug);
+        let filename = format!("step-{}-{}.json", step_idx + 1, slug);
         self.log_dir(task_name).join(filename)
+    }
+
+    /// Get the previous step's log file path, if it exists
+    pub fn prev_log_path(&self, task_name: &str, current_step: usize) -> Option<PathBuf> {
+        if current_step == 0 {
+            return None;
+        }
+
+        // Find the previous step's log file
+        let log_dir = self.log_dir(task_name);
+        let prev_step_num = current_step; // step numbers are 1-based in filenames
+
+        // Look for step-{N}-*.json pattern
+        if let Ok(entries) = std::fs::read_dir(&log_dir) {
+            let prefix = format!("step-{}-", prev_step_num);
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with(&prefix) && name.ends_with(".json") {
+                    return Some(entry.path());
+                }
+            }
+        }
+
+        None
     }
 
     /// Fire a hook (fire-and-forget)
