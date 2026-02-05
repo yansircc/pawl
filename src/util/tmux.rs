@@ -2,6 +2,15 @@ use anyhow::{Context, Result};
 
 use super::shell::{run_command, run_command_success};
 
+/// Result of capturing pane content
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureResult {
+    /// Window exists and content was captured (may be empty)
+    Content(String),
+    /// Window no longer exists
+    WindowGone,
+}
+
 /// Check if tmux is available
 pub fn is_available() -> bool {
     run_command_success("command -v tmux")
@@ -70,33 +79,49 @@ pub fn attach(session: &str) -> Result<()> {
     Ok(())
 }
 
-/// Kill a window
+/// Kill a window (no-op if window doesn't exist)
 pub fn kill_window(session: &str, window: &str) -> Result<()> {
-    let cmd = format!("tmux kill-window -t '{}:{}' 2>/dev/null || true", session, window);
-    run_command(&cmd)?;
+    // Check if window exists first to avoid spurious errors
+    if !window_exists(session, window) {
+        return Ok(());
+    }
+    let cmd = format!("tmux kill-window -t '{}:{}'", session, window);
+    run_command(&cmd).with_context(|| format!("Failed to kill window: {}:{}", session, window))?;
     Ok(())
 }
 
-/// Kill a session
+/// Kill a session (no-op if session doesn't exist)
 pub fn kill_session(name: &str) -> Result<()> {
-    let cmd = format!("tmux kill-session -t '{}' 2>/dev/null || true", name);
-    run_command(&cmd)?;
+    // Check if session exists first to avoid spurious errors
+    if !session_exists(name) {
+        return Ok(());
+    }
+    let cmd = format!("tmux kill-session -t '{}'", name);
+    run_command(&cmd).with_context(|| format!("Failed to kill session: {}", name))?;
     Ok(())
 }
 
 /// Capture pane content from a window
-pub fn capture_pane(session: &str, window: &str, lines: usize) -> Result<String> {
+/// Returns CaptureResult::WindowGone if the window no longer exists
+/// Returns CaptureResult::Content with the content (may be empty) if window exists
+pub fn capture_pane(session: &str, window: &str, lines: usize) -> Result<CaptureResult> {
+    // First check if window exists
+    if !window_exists(session, window) {
+        return Ok(CaptureResult::WindowGone);
+    }
+
     // Use negative start to capture from scrollback buffer
     let start = -(lines as i64);
     let cmd = format!(
-        "tmux capture-pane -t '{}:{}' -p -S {} 2>/dev/null",
+        "tmux capture-pane -t '{}:{}' -p -S {}",
         session, window, start
     );
     let result = run_command(&cmd)?;
     if result.success {
-        Ok(result.stdout)
+        Ok(CaptureResult::Content(result.stdout))
     } else {
-        Ok(String::new())
+        // Command failed but window existed - treat as gone (race condition)
+        Ok(CaptureResult::WindowGone)
     }
 }
 

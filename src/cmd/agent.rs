@@ -1,7 +1,11 @@
 use anyhow::{bail, Result};
+use chrono::Utc;
+use std::fs;
+use std::io::Write;
 
 use crate::model::{StepStatus, TaskStatus};
 use crate::util::shell::run_command_with_env;
+use crate::util::tmux::{self, CaptureResult};
 use crate::util::variable::Context;
 
 use super::common::Project;
@@ -69,6 +73,13 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
         println!("Stop hook validation passed.");
     }
 
+    // Get step name for logging
+    let step_name = project.config.workflow[step_idx].name.clone();
+    let session = project.session_name();
+
+    // Capture tmux content before marking as done (window may be killed after)
+    write_in_window_log(&project, &task_name, step_idx, &step_name, &session, "success");
+
     // Mark step as success
     {
         let state = project.status.get_mut(&task_name).unwrap();
@@ -77,6 +88,9 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
         state.message = message.map(|s| s.to_string());
     }
     project.save_status()?;
+
+    // Cleanup tmux window
+    cleanup_window(&session, &task_name);
 
     println!("Step {} marked as done.", step_idx + 1);
 
@@ -91,27 +105,41 @@ pub fn fail(task_name: &str, message: Option<&str>) -> Result<()> {
     let mut project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
-    let state = project.status.get_mut(&task_name);
-    let Some(state) = state else {
-        bail!("Task '{}' not found.", task_name);
+    let (status, step_idx) = {
+        let state = project.status.get(&task_name);
+        let Some(state) = state else {
+            bail!("Task '{}' not found.", task_name);
+        };
+        (state.status, state.current_step)
     };
 
-    if state.status != TaskStatus::Running {
+    if status != TaskStatus::Running {
         bail!(
             "Task '{}' is not running (status: {:?}). Cannot mark as failed.",
             task_name,
-            state.status
+            status
         );
     }
 
-    let step_idx = state.current_step;
+    // Get step name for logging
+    let step_name = project.config.workflow[step_idx].name.clone();
+    let session = project.session_name();
+
+    // Capture tmux content before marking as failed
+    write_in_window_log(&project, &task_name, step_idx, &step_name, &session, "failed");
 
     // Mark step as failed
-    state.mark_step(step_idx, StepStatus::Failed);
-    state.status = TaskStatus::Failed;
-    state.message = message.map(|s| s.to_string());
-    state.touch();
+    {
+        let state = project.status.get_mut(&task_name).unwrap();
+        state.mark_step(step_idx, StepStatus::Failed);
+        state.status = TaskStatus::Failed;
+        state.message = message.map(|s| s.to_string());
+        state.touch();
+    }
     project.save_status()?;
+
+    // Cleanup tmux window
+    cleanup_window(&session, &task_name);
 
     println!("Step {} marked as failed.", step_idx + 1);
     if let Some(msg) = message {
@@ -127,27 +155,41 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
     let mut project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
-    let state = project.status.get_mut(&task_name);
-    let Some(state) = state else {
-        bail!("Task '{}' not found.", task_name);
+    let (status, step_idx) = {
+        let state = project.status.get(&task_name);
+        let Some(state) = state else {
+            bail!("Task '{}' not found.", task_name);
+        };
+        (state.status, state.current_step)
     };
 
-    if state.status != TaskStatus::Running {
+    if status != TaskStatus::Running {
         bail!(
             "Task '{}' is not running (status: {:?}). Cannot mark as blocked.",
             task_name,
-            state.status
+            status
         );
     }
 
-    let step_idx = state.current_step;
+    // Get step name for logging
+    let step_name = project.config.workflow[step_idx].name.clone();
+    let session = project.session_name();
+
+    // Capture tmux content before marking as blocked
+    write_in_window_log(&project, &task_name, step_idx, &step_name, &session, "blocked");
 
     // Mark step as blocked
-    state.mark_step(step_idx, StepStatus::Blocked);
-    state.status = TaskStatus::Waiting;
-    state.message = message.map(|s| s.to_string());
-    state.touch();
+    {
+        let state = project.status.get_mut(&task_name).unwrap();
+        state.mark_step(step_idx, StepStatus::Blocked);
+        state.status = TaskStatus::Waiting;
+        state.message = message.map(|s| s.to_string());
+        state.touch();
+    }
     project.save_status()?;
+
+    // Cleanup tmux window
+    cleanup_window(&session, &task_name);
 
     println!("Step {} marked as blocked.", step_idx + 1);
     if let Some(msg) = message {
@@ -156,4 +198,56 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
     println!("Resolve the issue and use 'wf next {}' to continue.", task_name);
 
     Ok(())
+}
+
+/// Write log for an in_window step (captures tmux content)
+fn write_in_window_log(
+    project: &Project,
+    task_name: &str,
+    step_idx: usize,
+    step_name: &str,
+    session: &str,
+    status: &str,
+) {
+    let log_dir = project.log_dir(task_name);
+    let log_path = project.log_path(task_name, step_idx, step_name);
+
+    // Create log directory if it doesn't exist (best-effort)
+    if fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+
+    // Capture tmux content
+    let captured_at = Utc::now();
+    let content = match tmux::capture_pane(session, task_name, 2000) {
+        Ok(CaptureResult::Content(c)) => c,
+        Ok(CaptureResult::WindowGone) => "(window already gone)".to_string(),
+        Err(_) => "(capture failed)".to_string(),
+    };
+
+    let log_content = format!(
+        "=== Step {}: {} ===\n\
+         Type: in_window\n\
+         Captured: {}\n\
+         Status: {}\n\
+         \n\
+         [tmux capture]\n\
+         {}\n",
+        step_idx + 1,
+        step_name,
+        captured_at.to_rfc3339(),
+        status,
+        content.trim_end(),
+    );
+
+    // Best-effort write
+    if let Ok(mut file) = fs::File::create(&log_path) {
+        let _ = file.write_all(log_content.as_bytes());
+    }
+}
+
+/// Cleanup tmux window after step completion (best-effort)
+fn cleanup_window(session: &str, window: &str) {
+    // Kill the window - errors are silently ignored
+    let _ = tmux::kill_window(session, window);
 }

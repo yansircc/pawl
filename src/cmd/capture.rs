@@ -1,7 +1,8 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::util::tmux;
+use crate::model::TaskStatus;
+use crate::util::tmux::{self, CaptureResult};
 
 use super::common::Project;
 
@@ -46,20 +47,25 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         ("pending".to_string(), 0, "--".to_string())
     };
 
-    // Check if window exists
-    let window_exists = tmux::window_exists(&session, window);
+    // Get task status to check for anomalies
+    let task_status = project.status.get(&task_name).map(|s| s.status);
+
+    // Capture content (also checks if window exists)
+    let capture_result = tmux::capture_pane(&session, window, lines)?;
+
+    let (window_exists, content) = match &capture_result {
+        CaptureResult::Content(c) => (true, c.clone()),
+        CaptureResult::WindowGone => (false, String::new()),
+    };
+
     let process_active = if window_exists {
         tmux::pane_is_active(&session, window)
     } else {
         false
     };
 
-    // Capture content
-    let content = if window_exists {
-        tmux::capture_pane(&session, window, lines)?
-    } else {
-        String::new()
-    };
+    // Check for anomaly: task is running but window is gone
+    let window_gone_warning = matches!(task_status, Some(TaskStatus::Running)) && !window_exists;
 
     if json {
         let output = CaptureOutput {
@@ -87,7 +93,11 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         );
         println!("{}", "=".repeat(60));
 
-        if window_exists {
+        if window_gone_warning {
+            println!("WARNING: Task is running but tmux window is gone!");
+            println!("         The task may have crashed or the window was killed.");
+            println!("         Use 'wf retry {}' to restart the current step.", task_name);
+        } else if window_exists {
             if content.is_empty() {
                 println!("(no content)");
             } else {

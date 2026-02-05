@@ -3,6 +3,7 @@ use chrono::Utc;
 use serde::Serialize;
 
 use crate::model::{StepStatus, TaskStatus};
+use crate::util::tmux;
 
 use super::common::Project;
 
@@ -223,7 +224,17 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             let status_str = format_status(state.status);
 
             let info = match state.status {
-                TaskStatus::Running | TaskStatus::Waiting => {
+                TaskStatus::Running => {
+                    // Check if tmux window is alive
+                    let session = project.session_name();
+                    let window_alive = tmux::window_exists(&session, name);
+                    if window_alive {
+                        format_duration(state.started_at)
+                    } else {
+                        "!! window gone".to_string()
+                    }
+                }
+                TaskStatus::Waiting => {
                     format_duration(state.started_at)
                 }
                 TaskStatus::Failed => {
@@ -292,6 +303,17 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
 
         if let Some(msg) = &state.message {
             println!("Message: {}", msg);
+        }
+
+        // Check for anomaly: running but window gone
+        if state.status == TaskStatus::Running {
+            let session = project.session_name();
+            if !tmux::window_exists(&session, task_name) {
+                println!();
+                println!("WARNING: Task is running but tmux window is gone!");
+                println!("         The task may have crashed or the window was killed.");
+                println!("         Use 'wf retry {}' to restart the current step.", task_name);
+            }
         }
 
         println!();

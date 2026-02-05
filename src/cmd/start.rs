@@ -230,6 +230,12 @@ fn execute_in_window(
     let session = &ctx.session;
     let window = &ctx.window;
 
+    // Check if session exists, create if not
+    if !tmux::session_exists(session) {
+        println!("  Creating session {}...", session);
+        tmux::create_session(session, Some(&ctx.repo_root))?;
+    }
+
     // Check if window exists
     if !tmux::window_exists(session, window) {
         // Window doesn't exist - create it in the repo root

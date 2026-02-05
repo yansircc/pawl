@@ -1,8 +1,9 @@
 use anyhow::{bail, Result};
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::model::TaskStatus;
+use crate::model::{StatusStore, TaskStatus};
 
 use super::common::Project;
 
@@ -15,14 +16,77 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
     let interval = Duration::from_millis(interval_ms);
     let start = Instant::now();
 
-    loop {
-        // Load fresh project state each iteration
-        let project = Project::load()?;
-        let task_name = project.resolve_task_name(task_name)?;
+    // First iteration: load full project to resolve task name and get wf_dir
+    let project = Project::load()?;
+    let resolved_name = project.resolve_task_name(task_name)?;
+    let wf_dir = project.wf_dir.clone();
 
-        let current_status = project
-            .status
-            .get(&task_name)
+    // Check initial status
+    let current_status = project
+        .status
+        .get(&resolved_name)
+        .map(|s| s.status)
+        .unwrap_or(TaskStatus::Pending);
+
+    if current_status == target_status {
+        println!(
+            "Task '{}' reached status '{}' after {:.1}s",
+            resolved_name,
+            until,
+            start.elapsed().as_secs_f64()
+        );
+        return Ok(());
+    }
+
+    if is_terminal_mismatch(current_status, target_status) {
+        bail!(
+            "Task '{}' is in terminal state '{:?}', will not reach '{}'",
+            resolved_name,
+            current_status,
+            until
+        );
+    }
+
+    // Drop the full project, keep only what we need
+    drop(project);
+
+    // Subsequent iterations: only load StatusStore (skip Config and git rev-parse)
+    poll_status(&resolved_name, target_status, until, &wf_dir, timeout, interval, start)
+}
+
+/// Poll status without reloading full project
+fn poll_status(
+    task_name: &str,
+    target_status: TaskStatus,
+    until: &str,
+    wf_dir: &PathBuf,
+    timeout: Duration,
+    interval: Duration,
+    start: Instant,
+) -> Result<()> {
+    loop {
+        thread::sleep(interval);
+
+        // Check timeout first
+        if start.elapsed() >= timeout {
+            // Load final status for error message
+            let status = StatusStore::load(wf_dir)?;
+            let current_status = status
+                .get(task_name)
+                .map(|s| s.status)
+                .unwrap_or(TaskStatus::Pending);
+            bail!(
+                "Timeout waiting for task '{}' to reach status '{}' (current: {:?})",
+                task_name,
+                until,
+                current_status
+            );
+        }
+
+        // Load only status (fast path - no Config parsing, no git calls)
+        let status = StatusStore::load(wf_dir)?;
+        let current_status = status
+            .get(task_name)
             .map(|s| s.status)
             .unwrap_or(TaskStatus::Pending);
 
@@ -36,16 +100,6 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
             return Ok(());
         }
 
-        // Check timeout
-        if start.elapsed() >= timeout {
-            bail!(
-                "Timeout waiting for task '{}' to reach status '{}' (current: {:?})",
-                task_name,
-                until,
-                current_status
-            );
-        }
-
         // Check for terminal states that won't change to target
         if is_terminal_mismatch(current_status, target_status) {
             bail!(
@@ -55,8 +109,6 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
                 until
             );
         }
-
-        thread::sleep(interval);
     }
 }
 

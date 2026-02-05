@@ -1,7 +1,10 @@
 use anyhow::{bail, Result};
+use chrono::Utc;
+use std::fs;
+use std::io::Write;
 
 use crate::model::{StepStatus, TaskStatus};
-use crate::util::tmux;
+use crate::util::tmux::{self, CaptureResult};
 
 use super::common::Project;
 use super::start::continue_execution;
@@ -260,6 +263,14 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
         state.current_step
     };
 
+    // Get step name and session for logging
+    let step_name = project.config.workflow[step_idx].name.clone();
+    let session = project.session_name();
+
+    // Capture tmux content BEFORE updating state (window will be killed soon)
+    let status_str = if exit_code == 0 { "success" } else { "failed" };
+    write_on_exit_log(&project, task_name, step_idx, &step_name, &session, exit_code, status_str);
+
     if exit_code == 0 {
         // Success: mark step and advance, then continue execution
         {
@@ -292,4 +303,53 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Write log for an in_window step when it exits via _on-exit
+fn write_on_exit_log(
+    project: &Project,
+    task_name: &str,
+    step_idx: usize,
+    step_name: &str,
+    session: &str,
+    exit_code: i32,
+    status: &str,
+) {
+    let log_dir = project.log_dir(task_name);
+    let log_path = project.log_path(task_name, step_idx, step_name);
+
+    // Create log directory if it doesn't exist (best-effort)
+    if fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
+
+    // Capture tmux content
+    let captured_at = Utc::now();
+    let content = match tmux::capture_pane(session, task_name, 2000) {
+        Ok(CaptureResult::Content(c)) => c,
+        Ok(CaptureResult::WindowGone) => "(window already gone)".to_string(),
+        Err(_) => "(capture failed)".to_string(),
+    };
+
+    let log_content = format!(
+        "=== Step {}: {} ===\n\
+         Type: in_window\n\
+         Captured: {}\n\
+         Exit code: {}\n\
+         Status: {}\n\
+         \n\
+         [tmux capture]\n\
+         {}\n",
+        step_idx + 1,
+        step_name,
+        captured_at.to_rfc3339(),
+        exit_code,
+        status,
+        content.trim_end(),
+    );
+
+    // Best-effort write
+    if let Ok(mut file) = fs::File::create(&log_path) {
+        let _ = file.write_all(log_content.as_bytes());
+    }
 }
