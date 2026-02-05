@@ -27,12 +27,6 @@ pub fn run_command(cmd: &str) -> Result<CommandResult> {
     run_command_with_options(cmd, None, None)
 }
 
-/// Run a shell command in a specific directory
-#[allow(dead_code)]
-pub fn run_command_in_dir(cmd: &str, dir: &str) -> Result<CommandResult> {
-    run_command_with_options(cmd, Some(dir), None)
-}
-
 /// Run a shell command with environment variables
 pub fn run_command_with_env(cmd: &str, env: &HashMap<String, String>) -> Result<CommandResult> {
     run_command_with_options(cmd, None, Some(env))

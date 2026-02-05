@@ -83,6 +83,13 @@ fn handle_task_list_key(key: KeyEvent, state: &AppState) -> Option<Action> {
                 None
             }
         }
+        KeyCode::Char('S') => {
+            if let Some(task) = state.task_list.selected_task() {
+                Some(Action::SkipTask(task.name.clone()))
+            } else {
+                None
+            }
+        }
 
         // Help
         KeyCode::Char('?') => Some(Action::ShowHelp),
@@ -122,10 +129,11 @@ fn handle_task_detail_key(key: KeyEvent, state: &AppState) -> Option<Action> {
 
         // Task operations
         KeyCode::Char('s') => Some(Action::StartTask(task_name)),
-        KeyCode::Char('n') => Some(Action::NextTask(task_name)),
-        KeyCode::Char('r') => Some(Action::RetryTask(task_name)),
-        KeyCode::Char('R') => Some(Action::ResetTask(task_name)),
-        KeyCode::Char('x') => Some(Action::StopTask(task_name)),
+        KeyCode::Char('n') => Some(Action::NextTask(task_name.clone())),
+        KeyCode::Char('r') => Some(Action::RetryTask(task_name.clone())),
+        KeyCode::Char('R') => Some(Action::ResetTask(task_name.clone())),
+        KeyCode::Char('x') => Some(Action::StopTask(task_name.clone())),
+        KeyCode::Char('S') => Some(Action::SkipTask(task_name)),
 
         // Help
         KeyCode::Char('?') => Some(Action::ShowHelp),

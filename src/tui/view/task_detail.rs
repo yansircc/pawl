@@ -12,14 +12,33 @@ use crate::tui::state::TaskDetailState;
 use super::style::{format_status, status_marker, Theme};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &TaskDetailState) {
-    let chunks = Layout::vertical([
-        Constraint::Length(7), // Header section
-        Constraint::Min(5),    // Workflow steps
-    ])
-    .split(area);
+    // Calculate header height based on content
+    let header_height = 4 + state.depends.is_empty().then_some(0).unwrap_or(1)
+        + state.message.is_some().then_some(1).unwrap_or(0);
 
-    render_header(frame, chunks[0], state);
-    render_steps(frame, chunks[1], state);
+    // Show description if present
+    if !state.description.is_empty() {
+        let desc_lines = state.description.lines().count().min(5) as u16 + 2; // +2 for border
+        let chunks = Layout::vertical([
+            Constraint::Length(header_height as u16 + 2), // +2 for border
+            Constraint::Length(desc_lines),
+            Constraint::Min(5), // Workflow steps
+        ])
+        .split(area);
+
+        render_header(frame, chunks[0], state);
+        render_description(frame, chunks[1], state);
+        render_steps(frame, chunks[2], state);
+    } else {
+        let chunks = Layout::vertical([
+            Constraint::Length(header_height as u16 + 2), // +2 for border
+            Constraint::Min(5), // Workflow steps
+        ])
+        .split(area);
+
+        render_header(frame, chunks[0], state);
+        render_steps(frame, chunks[1], state);
+    }
 }
 
 fn render_header(frame: &mut Frame, area: Rect, state: &TaskDetailState) {
@@ -63,6 +82,24 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TaskDetailState) {
         .title_style(Theme::title())
         .borders(Borders::ALL)
         .border_style(Theme::border_focused());
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn render_description(frame: &mut Frame, area: Rect, state: &TaskDetailState) {
+    let lines: Vec<Line> = state
+        .description
+        .lines()
+        .take(5)
+        .map(|line| Line::from(Span::raw(line)))
+        .collect();
+
+    let block = Block::default()
+        .title(" Description ")
+        .title_style(Theme::dimmed())
+        .borders(Borders::ALL)
+        .border_style(Theme::border());
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);

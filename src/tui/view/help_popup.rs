@@ -60,6 +60,7 @@ fn get_help_items(view: &ViewMode) -> Vec<(&'static str, &'static str)> {
                 ("s", "Start task"),
                 ("n", "Next (checkpoint)"),
                 ("r", "Retry step"),
+                ("S", "Skip step"),
                 ("R", "Reset task"),
                 ("x", "Stop task"),
             ]);
@@ -73,6 +74,7 @@ fn get_help_items(view: &ViewMode) -> Vec<(&'static str, &'static str)> {
                 ("s", "Start task"),
                 ("n", "Next (checkpoint)"),
                 ("r", "Retry step"),
+                ("S", "Skip step"),
                 ("R", "Reset task"),
                 ("x", "Stop task"),
             ]);

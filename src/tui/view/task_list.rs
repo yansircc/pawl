@@ -17,6 +17,21 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TaskListState) {
         .map(|task| {
             let (status_text, status_style) = format_status(task.status);
 
+            // Determine info text (blocked_by or message)
+            let info_text = if !task.blocked_by.is_empty() {
+                format!("blocked: {}", task.blocked_by.join(", "))
+            } else {
+                task.message.clone().unwrap_or_default()
+            };
+
+            let info_style = if !task.blocked_by.is_empty() {
+                Theme::dimmed()
+            } else if task.status == TaskStatus::Failed {
+                Theme::status_error()
+            } else {
+                Theme::dimmed()
+            };
+
             // Build the line with colored spans
             let line = Line::from(vec![
                 Span::styled(
@@ -33,14 +48,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TaskListState) {
                 Span::raw(" "),
                 Span::styled(format!("{:<10}", status_text), status_style),
                 Span::raw(" "),
-                Span::styled(
-                    task.message.clone().unwrap_or_default(),
-                    if task.status == TaskStatus::Failed {
-                        Theme::status_error()
-                    } else {
-                        Theme::dimmed()
-                    },
-                ),
+                Span::styled(info_text, info_style),
             ]);
 
             ListItem::new(line)

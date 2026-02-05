@@ -11,12 +11,6 @@ pub enum CaptureResult {
     WindowGone,
 }
 
-/// Check if tmux is available
-#[allow(dead_code)]
-pub fn is_available() -> bool {
-    run_command_success("command -v tmux")
-}
-
 /// Check if a session exists
 pub fn session_exists(session: &str) -> bool {
     run_command_success(&format!("tmux has-session -t '{}' 2>/dev/null", session))
@@ -73,14 +67,6 @@ pub fn select_window(session: &str, window: &str) -> Result<()> {
     Ok(())
 }
 
-/// Attach to a session
-#[allow(dead_code)]
-pub fn attach(session: &str) -> Result<()> {
-    let cmd = format!("tmux attach-session -t '{}'", session);
-    run_command(&cmd).with_context(|| format!("Failed to attach to session: {}", session))?;
-    Ok(())
-}
-
 /// Kill a window (no-op if window doesn't exist)
 pub fn kill_window(session: &str, window: &str) -> Result<()> {
     // Check if window exists first to avoid spurious errors
@@ -89,18 +75,6 @@ pub fn kill_window(session: &str, window: &str) -> Result<()> {
     }
     let cmd = format!("tmux kill-window -t '{}:{}'", session, window);
     run_command(&cmd).with_context(|| format!("Failed to kill window: {}:{}", session, window))?;
-    Ok(())
-}
-
-/// Kill a session (no-op if session doesn't exist)
-#[allow(dead_code)]
-pub fn kill_session(name: &str) -> Result<()> {
-    // Check if session exists first to avoid spurious errors
-    if !session_exists(name) {
-        return Ok(());
-    }
-    let cmd = format!("tmux kill-session -t '{}'", name);
-    run_command(&cmd).with_context(|| format!("Failed to kill session: {}", name))?;
     Ok(())
 }
 
