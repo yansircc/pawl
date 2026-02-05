@@ -23,23 +23,31 @@
 
 每个 step 完成后追加一行 JSON：
 
-### 普通 step
+### 普通 step (command)
 
 ```json
-{"step":0,"exit_code":0,"duration":5.2,"stdout":"bun install v1.0.0\n...","stderr":""}
+{"type":"command","step":0,"exit_code":0,"duration":5.2,"stdout":"bun install v1.0.0\n...","stderr":""}
 ```
 
 ### in_window step (agent)
 
 ```json
-{"step":1,"session_id":"8322e722-9b7b-406d-bee4-88170b8c676b","transcript":"/Users/xxx/.claude/projects/-xxx/8322e722-xxx.jsonl"}
+{"type":"in_window","step":1,"session_id":"8322e722-9b7b-406d-bee4-88170b8c676b","transcript":"/Users/xxx/.claude/projects/-xxx/8322e722-xxx.jsonl","status":"success"}
 ```
 
 ### checkpoint step
 
 ```json
-{"step":2}
+{"type":"checkpoint","step":2}
 ```
+
+## 变量参考
+
+| 变量 | 环境变量 | 说明 |
+|------|----------|------|
+| `${log_file}` | `WF_LOG_FILE` | 任务日志文件路径 (`.wf/logs/{task}.jsonl`) |
+| `${task_file}` | `WF_TASK_FILE` | 任务定义文件路径 (`.wf/tasks/{task}.md`) |
+| `${step_index}` | `WF_STEP_INDEX` | 当前 step 索引（0-based）|
 
 ## 获取 session_id
 
@@ -81,7 +89,7 @@ Judge step 读取 Develop step 的输出：
 
 ```bash
 # 1. 获取前一个 step 的日志行
-PREV=$(tail -1 .wf/logs/${task}.jsonl)
+PREV=$(tail -1 ${log_file})
 
 # 2. 提取 transcript 路径
 TX=$(echo "$PREV" | jq -r '.transcript')
@@ -125,7 +133,7 @@ jq -s '[.[].duration | select(. != null)] | add' .wf/logs/task.jsonl
     {
       "name": "Judge",
       "in_window": true,
-      "run": "PREV_TX=$(tail -1 ${log_dir}/${task}.jsonl | jq -r '.transcript') && claude -p \"Review the code: $(jq -s 'map(select(.type==\"assistant\")) | last | .message.content[0].text' $PREV_TX)\""
+      "run": "PREV_TX=$(tail -1 ${log_file} | jq -r '.transcript') && claude -p \"Review the code: $(jq -s 'map(select(.type==\"assistant\")) | last | .message.content[0].text' $PREV_TX)\""
     }
   ]
 }
@@ -137,13 +145,13 @@ jq -s '[.[].duration | select(. != null)] | add' .wf/logs/task.jsonl
 Develop step 完成
         │
         ▼
-task.jsonl 追加一行: {"step":0,"session_id":"xxx","transcript":"/path/to/xxx.jsonl"}
+task.jsonl 追加一行: {"type":"in_window","step":0,"session_id":"xxx","transcript":"/path/to/xxx.jsonl","status":"success"}
         │
         ▼
 Judge step 启动
         │
         ▼
-tail -1 task.jsonl | jq '.transcript'  →  获取 transcript 路径
+tail -1 ${log_file} | jq '.transcript'  →  获取 transcript 路径
         │
         ▼
 jq 'select(.type=="assistant")' transcript.jsonl  →  提取 Claude 回复
