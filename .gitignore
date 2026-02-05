@@ -1,1 +1,6 @@
 /target
+
+# wf - Workflow Task Runner
+.wf/*
+!.wf/tasks/
+!.wf/config.jsonc
