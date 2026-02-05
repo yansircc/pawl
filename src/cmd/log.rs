@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
-use std::fs;
+
+use crate::model::StepLog;
 
 use super::common::Project;
 
@@ -16,82 +17,162 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
         bail!("Task '{}' has not been started yet.", task_name);
     };
 
-    let log_dir = project.log_dir(&task_name);
+    let log_file = project.log_file(&task_name);
 
-    if !log_dir.exists() {
+    if !log_file.exists() {
         println!("No logs available for task '{}'.", task_name);
         println!("Logs are created when steps are executed.");
         return Ok(());
     }
 
+    // Read all logs
+    let logs = project.read_logs(&task_name)?;
+
+    if logs.is_empty() {
+        println!("No log entries found for task '{}'.", task_name);
+        return Ok(());
+    }
+
     if all {
-        // Show all step logs in order
-        show_all_logs(&project, &task_name)?;
+        // Show all step logs
+        for (i, log) in logs.iter().enumerate() {
+            if i > 0 {
+                println!("\n{}", "─".repeat(60));
+            }
+            print_log_entry(log, &project);
+        }
     } else if let Some(step_num) = step {
         // Show specific step log (1-based)
-        show_step_log(&project, &task_name, step_num)?;
+        let step_idx = step_num.saturating_sub(1);
+
+        // Find the log entry for this step
+        let entry = logs.iter().find(|log| get_step_index(log) == step_idx);
+
+        if let Some(entry) = entry {
+            print_log_entry(entry, &project);
+        } else {
+            println!("No log entry found for step {}.", step_num);
+            println!("The step may not have been executed yet.");
+        }
     } else {
         // Show the most recent step log (current or last executed)
-        let step_idx = if state.current_step > 0 {
+        let target_step = if state.current_step > 0 {
             state.current_step - 1
         } else {
             0
         };
-        show_step_log(&project, &task_name, step_idx + 1)?;
-    }
 
-    Ok(())
-}
+        // Find the log entry for this step, or show the last one
+        let entry = logs
+            .iter()
+            .rev()
+            .find(|log| get_step_index(log) == target_step)
+            .or_else(|| logs.last());
 
-/// Show log for a specific step (1-based index)
-fn show_step_log(project: &Project, task_name: &str, step_num: usize) -> Result<()> {
-    let step_idx = step_num.saturating_sub(1);
-
-    if step_idx >= project.config.workflow.len() {
-        bail!(
-            "Step {} does not exist. Task has {} steps.",
-            step_num,
-            project.config.workflow.len()
-        );
-    }
-
-    let step_name = &project.config.workflow[step_idx].name;
-    let log_path = project.log_path(task_name, step_idx, step_name);
-
-    if !log_path.exists() {
-        println!("No log file for step {}: {}", step_num, step_name);
-        println!("The step may not have been executed yet.");
-        return Ok(());
-    }
-
-    let content = fs::read_to_string(&log_path)?;
-    print!("{}", content);
-
-    Ok(())
-}
-
-/// Show all step logs in order
-fn show_all_logs(project: &Project, task_name: &str) -> Result<()> {
-    let log_dir = project.log_dir(task_name);
-    let mut found_any = false;
-
-    for (step_idx, step) in project.config.workflow.iter().enumerate() {
-        let log_path = project.log_path(task_name, step_idx, &step.name);
-
-        if log_path.exists() {
-            if found_any {
-                println!("\n{}\n", "=".repeat(60));
-            }
-            found_any = true;
-
-            let content = fs::read_to_string(&log_path)?;
-            print!("{}", content);
+        if let Some(entry) = entry {
+            print_log_entry(entry, &project);
+        } else {
+            println!("No log entries found.");
         }
     }
 
-    if !found_any {
-        println!("No log files found in {:?}", log_dir);
-    }
-
     Ok(())
+}
+
+/// Get the step index from a log entry
+fn get_step_index(log: &StepLog) -> usize {
+    match log {
+        StepLog::Command { step, .. } => *step,
+        StepLog::InWindow { step, .. } => *step,
+        StepLog::Checkpoint { step } => *step,
+    }
+}
+
+/// Print a formatted log entry
+fn print_log_entry(log: &StepLog, project: &Project) {
+    match log {
+        StepLog::Command {
+            step,
+            exit_code,
+            duration,
+            stdout,
+            stderr,
+        } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (command) ===", step + 1, step_name);
+            println!("Exit code: {}", exit_code);
+            println!("Duration: {:.1}s", duration);
+
+            if !stdout.is_empty() {
+                println!("\n[stdout]");
+                // Limit output to avoid overwhelming the terminal
+                let lines: Vec<&str> = stdout.lines().collect();
+                if lines.len() > 50 {
+                    for line in lines.iter().take(25) {
+                        println!("{}", line);
+                    }
+                    println!("... ({} lines omitted) ...", lines.len() - 50);
+                    for line in lines.iter().skip(lines.len() - 25) {
+                        println!("{}", line);
+                    }
+                } else {
+                    print!("{}", stdout);
+                    if !stdout.ends_with('\n') {
+                        println!();
+                    }
+                }
+            }
+
+            if !stderr.is_empty() {
+                println!("\n[stderr]");
+                print!("{}", stderr);
+                if !stderr.ends_with('\n') {
+                    println!();
+                }
+            }
+        }
+
+        StepLog::InWindow {
+            step,
+            session_id,
+            transcript,
+            status,
+        } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (in_window) ===", step + 1, step_name);
+            println!("Status: {}", status);
+
+            if let Some(sid) = session_id {
+                println!("Session ID: {}", sid);
+            }
+
+            if let Some(path) = transcript {
+                println!("Transcript: {}", path);
+            }
+        }
+
+        StepLog::Checkpoint { step } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (checkpoint) ===", step + 1, step_name);
+            println!("Checkpoint reached.");
+        }
+    }
 }

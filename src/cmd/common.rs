@@ -1,33 +1,12 @@
 use anyhow::{bail, Result};
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use crate::model::{Config, StatusStore, TaskDefinition};
+use crate::model::{Config, StatusStore, StepLog, TaskDefinition};
 use crate::util::git::get_repo_root;
 use crate::util::shell::spawn_background;
 use crate::util::variable::Context;
-
-/// Convert a step name to a safe filename slug
-pub fn slugify(name: &str) -> String {
-    let mut result = String::new();
-    let mut last_was_dash = true; // Start true to avoid leading dash
-
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            result.push(ch.to_ascii_lowercase());
-            last_was_dash = false;
-        } else if !last_was_dash {
-            result.push('-');
-            last_was_dash = true;
-        }
-    }
-
-    // Remove trailing dash
-    if result.ends_with('-') {
-        result.pop();
-    }
-
-    result
-}
 
 const WF_DIR: &str = ".wf";
 
@@ -119,40 +98,58 @@ impl Project {
         Ok(blocking)
     }
 
-    /// Get the log directory for a task
-    pub fn log_dir(&self, task_name: &str) -> PathBuf {
-        self.wf_dir.join("logs").join(task_name)
+    /// Get the JSONL log file path for a task
+    pub fn log_file(&self, task_name: &str) -> PathBuf {
+        self.wf_dir.join("logs").join(format!("{}.jsonl", task_name))
     }
 
-    /// Get the log file path for a specific step (JSON metadata)
-    pub fn log_path(&self, task_name: &str, step_idx: usize, step_name: &str) -> PathBuf {
-        let slug = slugify(step_name);
-        let filename = format!("step-{}-{}.json", step_idx + 1, slug);
-        self.log_dir(task_name).join(filename)
+    /// Get the task definition file path
+    pub fn task_file(&self, task_name: &str) -> PathBuf {
+        self.wf_dir.join("tasks").join(format!("{}.md", task_name))
     }
 
-    /// Get the previous step's log file path, if it exists
-    pub fn prev_log_path(&self, task_name: &str, current_step: usize) -> Option<PathBuf> {
-        if current_step == 0 {
-            return None;
+    /// Append a log entry to the task's JSONL log file
+    pub fn append_log(&self, task_name: &str, entry: &StepLog) -> Result<()> {
+        let log_file = self.log_file(task_name);
+        let log_dir = log_file.parent().unwrap();
+
+        // Create log directory if it doesn't exist
+        fs::create_dir_all(log_dir)?;
+
+        // Append to file (create if doesn't exist)
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)?;
+
+        let json = serde_json::to_string(entry)?;
+        writeln!(file, "{}", json)?;
+
+        Ok(())
+    }
+
+    /// Read all log entries from the task's JSONL log file
+    pub fn read_logs(&self, task_name: &str) -> Result<Vec<StepLog>> {
+        let log_file = self.log_file(task_name);
+
+        if !log_file.exists() {
+            return Ok(Vec::new());
         }
 
-        // Find the previous step's log file
-        let log_dir = self.log_dir(task_name);
-        let prev_step_num = current_step; // step numbers are 1-based in filenames
+        let file = fs::File::open(&log_file)?;
+        let reader = BufReader::new(file);
+        let mut logs = Vec::new();
 
-        // Look for step-{N}-*.json pattern
-        if let Ok(entries) = std::fs::read_dir(&log_dir) {
-            let prefix = format!("step-{}-", prev_step_num);
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with(&prefix) && name.ends_with(".json") {
-                    return Some(entry.path());
-                }
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
             }
+            let entry: StepLog = serde_json::from_str(&line)?;
+            logs.push(entry);
         }
 
-        None
+        Ok(logs)
     }
 
     /// Fire a hook (fire-and-forget)
@@ -170,43 +167,5 @@ impl Project {
                 eprintln!("Warning: hook '{}' failed: {}", event, e);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_slugify_simple() {
-        assert_eq!(slugify("hello"), "hello");
-        assert_eq!(slugify("Hello World"), "hello-world");
-    }
-
-    #[test]
-    fn test_slugify_special_chars() {
-        assert_eq!(slugify("Setup: Environment"), "setup-environment");
-        assert_eq!(slugify("Run [tests]"), "run-tests");
-        assert_eq!(slugify("Step #1 - Build"), "step-1-build");
-    }
-
-    #[test]
-    fn test_slugify_consecutive_non_alnum() {
-        assert_eq!(slugify("a---b"), "a-b");
-        assert_eq!(slugify("a   b"), "a-b");
-        assert_eq!(slugify("a!@#b"), "a-b");
-    }
-
-    #[test]
-    fn test_slugify_leading_trailing() {
-        assert_eq!(slugify("--hello--"), "hello");
-        assert_eq!(slugify("  hello  "), "hello");
-        assert_eq!(slugify("...test..."), "test");
-    }
-
-    #[test]
-    fn test_slugify_empty() {
-        assert_eq!(slugify(""), "");
-        assert_eq!(slugify("---"), "");
     }
 }

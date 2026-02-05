@@ -18,10 +18,11 @@ src/
 ├── cli.rs            # clap CLI 定义
 ├── model/
 │   ├── config.rs     # Config + JSONC 加载 + Step.stop_hook
+│   ├── log.rs        # StepLog 枚举（JSONL 日志条目）
 │   ├── state.rs      # StatusStore + 原子写入 + 文件锁
 │   └── task.rs       # TaskDefinition + frontmatter 解析
 ├── cmd/
-│   ├── common.rs     # Project 上下文 + log_dir/log_path/prev_log_path
+│   ├── common.rs     # Project 上下文 + log_file/task_file/append_log/read_logs
 │   ├── init.rs       # wf init
 │   ├── create.rs     # wf create
 │   ├── start.rs      # wf start (执行引擎)
@@ -41,50 +42,55 @@ src/
 └── util/
     ├── git.rs        # Git 操作
     ├── shell.rs      # Shell 执行
-    ├── tmux.rs       # Tmux 操作
-    └── variable.rs   # 变量展开（含日志路径变量）
+    ├── tmux.rs       # Tmux 操作 + session_id 提取
+    └── variable.rs   # 变量展开
 ```
 
 ## 日志系统
 
 ### 日志格式
 
-in_window 步骤完成后生成 JSON 元数据日志：
+每个任务一个 JSONL 文件：`.wf/logs/{task}.jsonl`
 
-```
-.wf/logs/{task}/step-{N}-{slug}.json
-```
+每个 step 完成后追加一行 JSON：
 
+**普通命令 step:**
 ```json
-{
-  "step": 1,
-  "name": "Develop",
-  "type": "in_window",
-  "command": "claude -p ...",
-  "completed": "2026-02-05T12:38:21+00:00",
-  "exit_code": 0,
-  "status": "success"
-}
+{"type":"command","step":0,"exit_code":0,"duration":5.2,"stdout":"...","stderr":""}
+```
+
+**in_window step:**
+```json
+{"type":"in_window","step":1,"session_id":"xxx","transcript":"/path/to/xxx.jsonl","status":"success"}
+```
+
+**checkpoint step:**
+```json
+{"type":"checkpoint","step":2}
 ```
 
 ### 日志相关变量
 
 | 变量 | 环境变量 | 说明 |
 |------|----------|------|
-| `${log_dir}` | `WF_LOG_DIR` | 任务日志目录 |
-| `${log_path}` | `WF_LOG_PATH` | 当前 step 日志路径 |
-| `${prev_log}` | `WF_PREV_LOG` | 前一个 step 日志路径 |
+| `${log_file}` | `WF_LOG_FILE` | 任务日志文件路径 (.jsonl) |
+| `${task_file}` | `WF_TASK_FILE` | 任务定义文件路径 (.md) |
 | `${step_index}` | `WF_STEP_INDEX` | 当前 step 索引（0-based）|
 
-### 读取 Claude 输出
+### 读取日志
 
-Claude CLI 的实际输出在其 transcript 中：
 ```bash
-# 使用 --output-format=stream-json 时，最后一行是 result
-grep '"type":"result"' output.log | jq -r '.result'
+# 查看任务所有日志
+wf log <task> --all
 
-# 或直接读取 Claude 的 transcript
-cat ~/.claude/projects/{hash}/{session-id}.jsonl
+# 查看特定 step 日志
+wf log <task> --step 2
+
+# 使用 jq 读取 JSONL
+jq -s '.[] | select(.step==1)' .wf/logs/task.jsonl
+
+# 获取最后一个 step 的 transcript
+tail -1 .wf/logs/task.jsonl | jq -r '.transcript'
 ```
 
 ## CLI 命令
@@ -126,3 +132,4 @@ cargo test            # 运行测试
 - `docs/config.md` - 配置文件参考
 - `docs/execution.md` - 执行模型
 - `docs/data-model.md` - 数据模型
+- `docs/log-system.md` - 日志系统设计

@@ -2,66 +2,46 @@
 
 ## 本次 Session 完成的工作
 
-### Log Pipeline 简化重构
+### 日志系统 JSONL 重构
 
-**目标**：实现稳定的日志管道，让后续 step 可以读取前置 step 的输出
-
-**最终方案**：激进简化 - 只记录元数据，让 Judge 自己读取 Claude 的 transcript
+**目标**：将日志系统从"每个 step 一个文件"改为"每个 task 一个 JSONL 文件"
 
 #### 完成的改动
 
 | 改动 | 说明 |
 |------|------|
-| 移除 pipe-pane | 不再流式捕获终端输出 |
-| 移除 ANSI 过滤 | 删除 text.rs 和 regex 依赖 |
-| JSON 元数据日志 | `.wf/logs/{task}/step-{n}-{slug}.json` |
-| 新增变量 | `${log_dir}`, `${log_path}`, `${prev_log}`, `${step_index}` |
-| 修复 worktree bug | `_on-exit` 回到 repo_root 执行 |
+| 新建 `src/model/log.rs` | `StepLog` 枚举（Command/InWindow/Checkpoint） |
+| 新增 session_id 提取 | `tmux.rs` 添加 `extract_session_id()` 和 `get_transcript_path()` |
+| 变量系统重构 | 删除 `log_dir/log_path/prev_log`，新增 `log_file/task_file` |
+| Project 日志方法 | 新增 `log_file()/task_file()/append_log()/read_logs()` |
+| 普通 step 日志 | 使用 JSONL 追加，记录 stdout/stderr |
+| in_window 日志 | 提取 session_id 和 transcript 路径 |
+| wf log 命令重写 | 读取 JSONL 并格式化输出 |
 
-#### 日志格式
+#### 新日志格式
 
-```json
-{
-  "step": 1,
-  "name": "Develop",
-  "type": "in_window",
-  "command": "claude -p ...",
-  "completed": "2026-02-05T12:38:21+00:00",
-  "exit_code": 0,
-  "status": "success"
-}
+**文件路径**: `.wf/logs/{task}.jsonl`
+
+```jsonl
+{"type":"command","step":0,"exit_code":0,"duration":5.2,"stdout":"...","stderr":""}
+{"type":"in_window","step":1,"session_id":"xxx","transcript":"/path/to/xxx.jsonl","status":"success"}
+{"type":"checkpoint","step":2}
 ```
 
-#### 设计决策
+#### 新变量
 
-**为什么只记录元数据？**
-- Claude CLI 自己维护 transcript（`~/.claude/projects/*/session.jsonl`）
-- `--output-format=stream-json` 的最后一行包含完整 result
-- Judge 可以用 shell 命令提取需要的信息
-- 避免复杂的终端输出处理（ANSI codes、断行等）
+| 变量 | 环境变量 | 说明 |
+|------|----------|------|
+| `${log_file}` | `WF_LOG_FILE` | 任务日志文件路径 |
+| `${task_file}` | `WF_TASK_FILE` | 任务定义文件路径 |
 
----
+#### 已删除
 
-## 待实现功能
-
-### Session 软链接（用户建议）
-
-在日志目录创建软链接指向 Claude 的 transcript，简化 Judge 读取：
-
-```
-.wf/logs/{task}/
-  step-1-xxx.json           # 元数据
-  latest-session -> ~/.claude/projects/{hash}/{session-id}.jsonl
-```
-
-这样 Judge 可以直接：
-```bash
-cat ${log_dir}/latest-session | jq '.result'
-```
-
-**待解决**：
-- 如何获取 session_id（从 Claude JSON 输出解析）
-- 如何定位 Claude projects 目录
+- `${log_dir}` / `WF_LOG_DIR`
+- `${log_path}` / `WF_LOG_PATH`
+- `${prev_log}` / `WF_PREV_LOG`
+- `slugify()` 函数
+- 每个 step 单独的日志文件
 
 ---
 
@@ -70,13 +50,12 @@ cat ${log_dir}/latest-session | jq '.result'
 | 功能 | 状态 |
 |------|------|
 | 核心执行引擎 | ✅ |
-| 日志记录（普通 step） | ✅ |
-| 日志记录（in_window）| ✅ JSON 元数据 |
-| 变量展开（含日志路径）| ✅ |
+| 日志记录（JSONL） | ✅ |
+| Session ID 提取 | ✅ |
+| Transcript 路径解析 | ✅ |
+| 变量展开 | ✅ |
 | Stop Hook | ✅ |
 | TUI 界面 | ✅ |
-| Claude/Codex CLI Skills | ✅ |
-| Session 软链接 | ❌ 待实现 |
 
 ---
 
@@ -85,19 +64,19 @@ cat ${log_dir}/latest-session | jq '.result'
 | 功能 | 文件 |
 |------|------|
 | CLI 定义 | `src/cli.rs` |
+| 日志数据结构 | `src/model/log.rs` |
 | 执行引擎 | `src/cmd/start.rs` |
 | Agent 命令 | `src/cmd/agent.rs` |
 | 控制命令 | `src/cmd/control.rs` |
 | 公共工具 | `src/cmd/common.rs` |
+| 日志查看 | `src/cmd/log.rs` |
 | 变量展开 | `src/util/variable.rs` |
 | tmux 操作 | `src/util/tmux.rs` |
 | 状态存储 | `src/model/state.rs` |
 
 ---
 
-## 测试验证
+## 相关文档
 
-在 `/Users/yansir/code/nextjs-project/try-wt` 测试通过：
-- `wf start` → `wf status` → 日志生成正确
-- JSON 元数据格式正确
-- `_on-exit` 在 repo_root 正确执行
+- `docs/log-system.md` - 日志系统设计文档
+- `.claude/CLAUDE.md` - 项目概述（已更新）

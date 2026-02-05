@@ -10,10 +10,11 @@ pub struct Context {
     pub session: String,
     pub repo_root: String,
     pub step: String,
-    // Log-related fields (optional)
-    pub log_dir: Option<String>,
-    pub log_path: Option<String>,
-    pub prev_log: Option<String>,
+    // Log file path (single JSONL file per task)
+    pub log_file: Option<String>,
+    // Task file path
+    pub task_file: Option<String>,
+    // Step index (0-based)
     pub step_index: Option<usize>,
 }
 
@@ -35,9 +36,8 @@ impl Context {
             session: session.to_string(),
             repo_root: repo_root.to_string(),
             step: step.to_string(),
-            log_dir: None,
-            log_path: None,
-            prev_log: None,
+            log_file: None,
+            task_file: None,
             step_index: None,
         }
     }
@@ -50,9 +50,8 @@ impl Context {
         worktree_dir: &str,
         step: &str,
         step_index: usize,
-        log_dir: &str,
-        log_path: &str,
-        prev_log: Option<&str>,
+        log_file: &str,
+        task_file: &str,
     ) -> Self {
         let worktree = format!("{}/{}/{}", repo_root, worktree_dir, task);
         Self {
@@ -63,9 +62,8 @@ impl Context {
             session: session.to_string(),
             repo_root: repo_root.to_string(),
             step: step.to_string(),
-            log_dir: Some(log_dir.to_string()),
-            log_path: Some(log_path.to_string()),
-            prev_log: prev_log.map(|s| s.to_string()),
+            log_file: Some(log_file.to_string()),
+            task_file: Some(task_file.to_string()),
             step_index: Some(step_index),
         }
     }
@@ -82,14 +80,11 @@ impl Context {
             .replace("${step}", &self.step);
 
         // Expand log-related variables if available
-        if let Some(log_dir) = &self.log_dir {
-            result = result.replace("${log_dir}", log_dir);
+        if let Some(log_file) = &self.log_file {
+            result = result.replace("${log_file}", log_file);
         }
-        if let Some(log_path) = &self.log_path {
-            result = result.replace("${log_path}", log_path);
-        }
-        if let Some(prev_log) = &self.prev_log {
-            result = result.replace("${prev_log}", prev_log);
+        if let Some(task_file) = &self.task_file {
+            result = result.replace("${task_file}", task_file);
         }
         if let Some(step_index) = self.step_index {
             result = result.replace("${step_index}", &step_index.to_string());
@@ -110,14 +105,11 @@ impl Context {
         env.insert("WF_STEP".to_string(), self.step.clone());
 
         // Add log-related environment variables if available
-        if let Some(log_dir) = &self.log_dir {
-            env.insert("WF_LOG_DIR".to_string(), log_dir.clone());
+        if let Some(log_file) = &self.log_file {
+            env.insert("WF_LOG_FILE".to_string(), log_file.clone());
         }
-        if let Some(log_path) = &self.log_path {
-            env.insert("WF_LOG_PATH".to_string(), log_path.clone());
-        }
-        if let Some(prev_log) = &self.prev_log {
-            env.insert("WF_PREV_LOG".to_string(), prev_log.clone());
+        if let Some(task_file) = &self.task_file {
+            env.insert("WF_TASK_FILE".to_string(), task_file.clone());
         }
         if let Some(step_index) = self.step_index {
             env.insert("WF_STEP_INDEX".to_string(), step_index.to_string());
@@ -162,27 +154,22 @@ mod tests {
             ".wf/worktrees",
             "Develop",
             1,
-            "/home/user/project/.wf/logs/auth",
-            "/home/user/project/.wf/logs/auth/step-2-develop.log",
-            Some("/home/user/project/.wf/logs/auth/step-1-setup.log"),
+            "/home/user/project/.wf/logs/auth.jsonl",
+            "/home/user/project/.wf/tasks/auth.md",
         );
 
         assert_eq!(
-            ctx.expand("${log_dir}"),
-            "/home/user/project/.wf/logs/auth"
+            ctx.expand("${log_file}"),
+            "/home/user/project/.wf/logs/auth.jsonl"
         );
         assert_eq!(
-            ctx.expand("${log_path}"),
-            "/home/user/project/.wf/logs/auth/step-2-develop.log"
-        );
-        assert_eq!(
-            ctx.expand("${prev_log}"),
-            "/home/user/project/.wf/logs/auth/step-1-setup.log"
+            ctx.expand("${task_file}"),
+            "/home/user/project/.wf/tasks/auth.md"
         );
         assert_eq!(ctx.expand("${step_index}"), "1");
         assert_eq!(
-            ctx.expand("cat ${prev_log}"),
-            "cat /home/user/project/.wf/logs/auth/step-1-setup.log"
+            ctx.expand("cat ${log_file}"),
+            "cat /home/user/project/.wf/logs/auth.jsonl"
         );
     }
 
@@ -195,15 +182,30 @@ mod tests {
             ".wf/worktrees",
             "Develop",
             1,
-            "/logs",
-            "/logs/step.log",
-            Some("/logs/prev.log"),
+            "/logs/auth.jsonl",
+            "/tasks/auth.md",
         );
 
         let env = ctx.to_env_vars();
-        assert_eq!(env.get("WF_LOG_DIR"), Some(&"/logs".to_string()));
-        assert_eq!(env.get("WF_LOG_PATH"), Some(&"/logs/step.log".to_string()));
-        assert_eq!(env.get("WF_PREV_LOG"), Some(&"/logs/prev.log".to_string()));
+        assert_eq!(env.get("WF_LOG_FILE"), Some(&"/logs/auth.jsonl".to_string()));
+        assert_eq!(env.get("WF_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
         assert_eq!(env.get("WF_STEP_INDEX"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn test_env_vars_basic() {
+        let ctx = Context::new(
+            "auth",
+            "my-project",
+            "/home/user/project",
+            ".wf/worktrees",
+            "Setup",
+        );
+
+        let env = ctx.to_env_vars();
+        assert_eq!(env.get("WF_TASK"), Some(&"auth".to_string()));
+        assert_eq!(env.get("WF_BRANCH"), Some(&"wf/auth".to_string()));
+        assert!(env.get("WF_LOG_FILE").is_none());
+        assert!(env.get("WF_TASK_FILE").is_none());
     }
 }

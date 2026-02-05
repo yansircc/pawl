@@ -124,3 +124,87 @@ pub fn pane_is_active(session: &str, window: &str) -> bool {
     }
 }
 
+/// Extract Claude session ID from a tmux pane by examining environment variables
+/// The session ID is stored in CLAUDE_SESSION_ID environment variable
+pub fn extract_session_id(session: &str, window: &str) -> Option<String> {
+    // First check if window exists
+    if !window_exists(session, window) {
+        return None;
+    }
+
+    // Get the pane's PID
+    let cmd = format!(
+        "tmux list-panes -t '{}:{}' -F '#{{pane_pid}}' 2>/dev/null",
+        session, window
+    );
+    let result = run_command(&cmd).ok()?;
+    if !result.success {
+        return None;
+    }
+
+    let pane_pid = result.stdout.trim();
+    if pane_pid.is_empty() {
+        return None;
+    }
+
+    // Try to get CLAUDE_SESSION_ID from the process tree
+    // Look in /proc on Linux or use lsof on macOS
+    #[cfg(target_os = "linux")]
+    {
+        let env_cmd = format!("cat /proc/{}/environ 2>/dev/null | tr '\\0' '\\n' | grep '^CLAUDE_SESSION_ID=' | cut -d= -f2", pane_pid);
+        if let Ok(result) = run_command(&env_cmd) {
+            if result.success && !result.stdout.trim().is_empty() {
+                return Some(result.stdout.trim().to_string());
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, we can try to find the Claude process and its session ID
+        // by looking at the process tree
+        let ps_cmd = format!(
+            "pgrep -P {} claude 2>/dev/null | head -1",
+            pane_pid
+        );
+        if let Ok(result) = run_command(&ps_cmd) {
+            if result.success && !result.stdout.trim().is_empty() {
+                let claude_pid = result.stdout.trim();
+                // Try to get environment from Claude process
+                let env_cmd = format!(
+                    "ps eww -p {} 2>/dev/null | grep -o 'CLAUDE_SESSION_ID=[^ ]*' | cut -d= -f2",
+                    claude_pid
+                );
+                if let Ok(result) = run_command(&env_cmd) {
+                    if result.success && !result.stdout.trim().is_empty() {
+                        return Some(result.stdout.trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Get transcript path for a Claude session ID
+/// Claude stores transcripts in ~/.claude/projects/{hash}/{session_id}.jsonl
+pub fn get_transcript_path(session_id: &str) -> Option<String> {
+    // Get home directory
+    let home = std::env::var("HOME").ok()?;
+    let claude_dir = format!("{}/.claude/projects", home);
+
+    // Find the transcript file by searching for session_id.jsonl
+    let find_cmd = format!(
+        "find '{}' -name '{}.jsonl' -type f 2>/dev/null | head -1",
+        claude_dir, session_id
+    );
+    let result = run_command(&find_cmd).ok()?;
+
+    if result.success && !result.stdout.trim().is_empty() {
+        Some(result.stdout.trim().to_string())
+    } else {
+        None
+    }
+}
+

@@ -1,10 +1,8 @@
 use anyhow::{bail, Result};
-use chrono::Utc;
-use std::fs;
-use std::io::Write;
+use std::time::Instant;
 
-use crate::model::{StepStatus, TaskState, TaskStatus};
-use crate::util::shell::{run_command_with_env, CommandResult};
+use crate::model::{StepLog, StepStatus, TaskState, TaskStatus};
+use crate::util::shell::run_command_with_env;
 use crate::util::tmux;
 use crate::util::variable::Context;
 
@@ -92,10 +90,8 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
         let repo_root = project.repo_root.clone();
 
         // Build context with log information
-        let log_dir = project.log_dir(task_name);
-        let log_path = project.log_path(task_name, step_idx, &step.name);
-        let prev_log = project.prev_log_path(task_name, step_idx);
-        let prev_log_str = prev_log.as_ref().map(|p| p.to_string_lossy().to_string());
+        let log_file = project.log_file(task_name);
+        let task_file = project.task_file(task_name);
 
         let ctx = Context::new_full(
             task_name,
@@ -104,9 +100,8 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
             &worktree_dir,
             &step.name,
             step_idx,
-            &log_dir.to_string_lossy(),
-            &log_path.to_string_lossy(),
-            prev_log_str.as_deref(),
+            &log_file.to_string_lossy(),
+            &task_file.to_string_lossy(),
         );
 
         println!(
@@ -123,6 +118,11 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
             state.status = TaskStatus::Waiting;
             state.touch();
             project.save_status()?;
+
+            // Log the checkpoint
+            let log_entry = StepLog::Checkpoint { step: step_idx };
+            let _ = project.append_log(task_name, &log_entry);
+
             println!("  → Checkpoint. Use 'wf next {}' to continue.", task_name);
             project.fire_hook("checkpoint", task_name);
             return Ok(());
@@ -158,8 +158,6 @@ fn execute_step(
         state.current_step
     };
 
-    let step_name = project.config.workflow[step_idx].name.clone();
-
     {
         let state = project.status.get_mut(task_name).unwrap();
         state.status = TaskStatus::Running;
@@ -168,29 +166,24 @@ fn execute_step(
     project.save_status()?;
 
     // Record start time
-    let start_time = Utc::now();
+    let start_time = Instant::now();
 
     // Run command with environment variables
     let env = ctx.to_env_vars();
     let result = run_command_with_env(command, &env)?;
 
-    // Record end time and calculate duration
-    let end_time = Utc::now();
-    let duration = end_time.signed_duration_since(start_time);
+    // Calculate duration
+    let duration = start_time.elapsed().as_secs_f64();
 
     // Write step log (best-effort)
-    let status_str = if result.success { "success" } else { "failed" };
-    write_step_log(
-        project,
-        task_name,
-        step_idx,
-        &step_name,
-        command,
-        &start_time,
-        duration.num_milliseconds() as f64 / 1000.0,
-        &result,
-        status_str,
-    );
+    let log_entry = StepLog::Command {
+        step: step_idx,
+        exit_code: result.exit_code,
+        duration,
+        stdout: result.stdout.clone(),
+        stderr: result.stderr.clone(),
+    };
+    let _ = project.append_log(task_name, &log_entry);
 
     if result.success {
         // Success: mark step and advance
@@ -279,77 +272,3 @@ fn execute_in_window(
 
     Ok(())
 }
-
-/// Write step log file (best-effort, errors are silently ignored)
-fn write_step_log(
-    project: &Project,
-    task_name: &str,
-    step_idx: usize,
-    step_name: &str,
-    command: &str,
-    start_time: &chrono::DateTime<Utc>,
-    duration_secs: f64,
-    result: &CommandResult,
-    status: &str,
-) {
-    let log_dir = project.log_dir(task_name);
-    let log_path = project.log_path(task_name, step_idx, step_name);
-
-    // Create log directory if it doesn't exist
-    if fs::create_dir_all(&log_dir).is_err() {
-        return;
-    }
-
-    let content = format!(
-        "=== Step {}: {} ===\n\
-         Command: {}\n\
-         Started: {}\n\
-         \n\
-         {}\
-         \n\
-         Exit code: {}\n\
-         Duration: {:.1}s\n\
-         Status: {}\n",
-        step_idx + 1,
-        step_name,
-        command,
-        start_time.to_rfc3339(),
-        format_output(&result.stdout, &result.stderr),
-        result.exit_code,
-        duration_secs,
-        status,
-    );
-
-    // Best-effort write
-    if let Ok(mut file) = fs::File::create(&log_path) {
-        let _ = file.write_all(content.as_bytes());
-    }
-}
-
-/// Format stdout/stderr for log output
-fn format_output(stdout: &str, stderr: &str) -> String {
-    let mut output = String::new();
-
-    if !stdout.is_empty() {
-        output.push_str("[stdout]\n");
-        output.push_str(stdout);
-        if !stdout.ends_with('\n') {
-            output.push('\n');
-        }
-    }
-
-    if !stderr.is_empty() {
-        output.push_str("[stderr]\n");
-        output.push_str(stderr);
-        if !stderr.ends_with('\n') {
-            output.push('\n');
-        }
-    }
-
-    if output.is_empty() {
-        output.push_str("[no output]\n");
-    }
-
-    output
-}
-

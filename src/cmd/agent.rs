@@ -1,10 +1,6 @@
 use anyhow::{bail, Result};
-use chrono::Utc;
-use serde_json::json;
-use std::fs;
-use std::io::Write;
 
-use crate::model::{StepStatus, TaskStatus};
+use crate::model::{StepLog, StepStatus, TaskStatus};
 use crate::util::shell::run_command_with_env;
 use crate::util::tmux;
 use crate::util::variable::Context;
@@ -38,12 +34,10 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     if let Some(stop_hook) = &step.stop_hook {
         println!("Running stop_hook validation...");
 
-        // Build full context for variable expansion (including log paths)
+        // Build full context for variable expansion
         let session = project.session_name();
-        let log_dir = project.log_dir(&task_name);
-        let log_path = project.log_path(&task_name, step_idx, &step.name);
-        let prev_log = project.prev_log_path(&task_name, step_idx);
-        let prev_log_str = prev_log.as_ref().map(|p| p.to_string_lossy().to_string());
+        let log_file = project.log_file(&task_name);
+        let task_file = project.task_file(&task_name);
 
         let ctx = Context::new_full(
             &task_name,
@@ -52,9 +46,8 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             &project.config.worktree_dir,
             &step.name,
             step_idx,
-            &log_dir.to_string_lossy(),
-            &log_path.to_string_lossy(),
-            prev_log_str.as_deref(),
+            &log_file.to_string_lossy(),
+            &task_file.to_string_lossy(),
         );
 
         let expanded = ctx.expand(stop_hook);
@@ -84,13 +77,20 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     }
 
     // Get step info for logging
-    let step = &project.config.workflow[step_idx];
-    let step_name = step.name.clone();
-    let command = step.run.clone().unwrap_or_default();
     let session = project.session_name();
 
+    // Extract session_id before cleanup (must happen while window still exists)
+    let session_id = tmux::extract_session_id(&session, &task_name);
+    let transcript = session_id.as_ref().and_then(|id| tmux::get_transcript_path(id));
+
     // Write metadata log
-    write_in_window_log(&project, &task_name, step_idx, &step_name, &command, "success");
+    let log_entry = StepLog::InWindow {
+        step: step_idx,
+        session_id,
+        transcript,
+        status: "success".to_string(),
+    };
+    let _ = project.append_log(&task_name, &log_entry);
 
     // Mark step as success
     {
@@ -133,14 +133,21 @@ pub fn fail(task_name: &str, message: Option<&str>) -> Result<()> {
         );
     }
 
-    // Get step info for logging
-    let step = &project.config.workflow[step_idx];
-    let step_name = step.name.clone();
-    let command = step.run.clone().unwrap_or_default();
+    // Get session info for logging
     let session = project.session_name();
 
+    // Extract session_id before cleanup (must happen while window still exists)
+    let session_id = tmux::extract_session_id(&session, &task_name);
+    let transcript = session_id.as_ref().and_then(|id| tmux::get_transcript_path(id));
+
     // Write metadata log
-    write_in_window_log(&project, &task_name, step_idx, &step_name, &command, "failed");
+    let log_entry = StepLog::InWindow {
+        step: step_idx,
+        session_id,
+        transcript,
+        status: "failed".to_string(),
+    };
+    let _ = project.append_log(&task_name, &log_entry);
 
     // Mark step as failed
     {
@@ -189,14 +196,21 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
         );
     }
 
-    // Get step info for logging
-    let step = &project.config.workflow[step_idx];
-    let step_name = step.name.clone();
-    let command = step.run.clone().unwrap_or_default();
+    // Get session info for logging
     let session = project.session_name();
 
+    // Extract session_id before cleanup (must happen while window still exists)
+    let session_id = tmux::extract_session_id(&session, &task_name);
+    let transcript = session_id.as_ref().and_then(|id| tmux::get_transcript_path(id));
+
     // Write metadata log
-    write_in_window_log(&project, &task_name, step_idx, &step_name, &command, "blocked");
+    let log_entry = StepLog::InWindow {
+        step: step_idx,
+        session_id,
+        transcript,
+        status: "blocked".to_string(),
+    };
+    let _ = project.append_log(&task_name, &log_entry);
 
     // Mark step as blocked
     {
@@ -221,41 +235,6 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
     println!("Resolve the issue and use 'wf next {}' to continue.", task_name);
 
     Ok(())
-}
-
-/// Write JSON metadata log for an in_window step
-fn write_in_window_log(
-    project: &Project,
-    task_name: &str,
-    step_idx: usize,
-    step_name: &str,
-    command: &str,
-    status: &str,
-) {
-    let log_dir = project.log_dir(task_name);
-    let log_path = project.log_path(task_name, step_idx, step_name);
-
-    // Create log directory if it doesn't exist (best-effort)
-    if fs::create_dir_all(&log_dir).is_err() {
-        return;
-    }
-
-    let completed_at = Utc::now();
-
-    // Write JSON metadata only
-    let log_data = json!({
-        "step": step_idx + 1,
-        "name": step_name,
-        "type": "in_window",
-        "command": command,
-        "completed": completed_at.to_rfc3339(),
-        "status": status
-    });
-
-    // Best-effort write
-    if let Ok(mut file) = fs::File::create(&log_path) {
-        let _ = file.write_all(serde_json::to_string_pretty(&log_data).unwrap_or_default().as_bytes());
-    }
 }
 
 /// Cleanup tmux window after step completion (best-effort)

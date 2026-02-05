@@ -1,10 +1,6 @@
 use anyhow::{bail, Result};
-use chrono::Utc;
-use serde_json::json;
-use std::fs;
-use std::io::Write;
 
-use crate::model::{StepStatus, TaskStatus};
+use crate::model::{StepLog, StepStatus, TaskStatus};
 use crate::util::tmux;
 
 use super::common::Project;
@@ -235,6 +231,10 @@ pub fn reset(task_name: &str) -> Result<()> {
     project.status.remove(&task_name);
     project.save_status()?;
 
+    // Remove log file (best-effort)
+    let log_file = project.log_file(&task_name);
+    let _ = std::fs::remove_file(&log_file);
+
     println!("Task '{}' reset to initial state.", task_name);
     println!("Note: Git resources (branch, worktree) are NOT automatically cleaned.");
     println!("Clean up manually if needed:");
@@ -264,14 +264,22 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
         state.current_step
     };
 
-    // Get step info for logging
-    let step = &project.config.workflow[step_idx];
-    let step_name = step.name.clone();
-    let command = step.run.clone().unwrap_or_default();
+    // Get session info for logging
+    let session = project.session_name();
+
+    // Extract session_id before it's lost (window may be closing)
+    let session_id = tmux::extract_session_id(&session, task_name);
+    let transcript = session_id.as_ref().and_then(|id| tmux::get_transcript_path(id));
 
     // Write metadata log
     let status_str = if exit_code == 0 { "success" } else { "failed" };
-    write_on_exit_log(&project, task_name, step_idx, &step_name, &command, exit_code, status_str);
+    let log_entry = StepLog::InWindow {
+        step: step_idx,
+        session_id,
+        transcript,
+        status: status_str.to_string(),
+    };
+    let _ = project.append_log(task_name, &log_entry);
 
     if exit_code == 0 {
         // Success: mark step and advance, then continue execution
@@ -305,41 +313,4 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Write JSON metadata log for an in_window step when it exits via _on-exit
-fn write_on_exit_log(
-    project: &Project,
-    task_name: &str,
-    step_idx: usize,
-    step_name: &str,
-    command: &str,
-    exit_code: i32,
-    status: &str,
-) {
-    let log_dir = project.log_dir(task_name);
-    let log_path = project.log_path(task_name, step_idx, step_name);
-
-    // Create log directory if it doesn't exist (best-effort)
-    if fs::create_dir_all(&log_dir).is_err() {
-        return;
-    }
-
-    let completed_at = Utc::now();
-
-    // Write JSON metadata only
-    let log_data = json!({
-        "step": step_idx + 1,
-        "name": step_name,
-        "type": "in_window",
-        "command": command,
-        "completed": completed_at.to_rfc3339(),
-        "exit_code": exit_code,
-        "status": status
-    });
-
-    // Best-effort write
-    if let Ok(mut file) = fs::File::create(&log_path) {
-        let _ = file.write_all(serde_json::to_string_pretty(&log_data).unwrap_or_default().as_bytes());
-    }
 }

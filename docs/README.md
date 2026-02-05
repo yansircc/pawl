@@ -26,6 +26,7 @@ wf 是一个可配置的任务工作流执行器。它让多个 AI agent 在独�
 | [cli.md](./cli.md) | CLI 命令参考 |
 | [execution.md](./execution.md) | 执行模型 |
 | [data-model.md](./data-model.md) | 数据模型和状态存储 |
+| [log-system.md](./log-system.md) | 日志系统设计与链式读取 |
 | [reusable-code.md](./reusable-code.md) | v1 可复用代码索引（含绝对路径） |
 
 ## v1 项目位置
