@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use crate::model::{Config, StatusStore, TaskDefinition};
 use crate::util::git::get_repo_root;
+use crate::util::shell::spawn_background;
+use crate::util::variable::Context;
 
 /// Convert a step name to a safe filename slug
 pub fn slugify(name: &str) -> String {
@@ -127,6 +129,23 @@ impl Project {
         let slug = slugify(step_name);
         let filename = format!("step-{}-{}.log", step_idx + 1, slug);
         self.log_dir(task_name).join(filename)
+    }
+
+    /// Fire a hook (fire-and-forget)
+    pub fn fire_hook(&self, event: &str, task_name: &str) {
+        if let Some(cmd) = self.config.hooks.get(event) {
+            let ctx = Context::new(
+                task_name,
+                &self.session_name(),
+                &self.repo_root,
+                &self.config.worktree_dir,
+                event,
+            );
+            let expanded = ctx.expand(cmd);
+            if let Err(e) = spawn_background(&expanded) {
+                eprintln!("Warning: hook '{}' failed: {}", event, e);
+            }
+        }
     }
 }
 

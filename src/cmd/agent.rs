@@ -141,6 +141,10 @@ pub fn fail(task_name: &str, message: Option<&str>) -> Result<()> {
     // Cleanup tmux window
     cleanup_window(&session, &task_name);
 
+    // Fire hooks
+    project.fire_hook("step.failed", &task_name);
+    project.fire_hook("task.failed", &task_name);
+
     println!("Step {} marked as failed.", step_idx + 1);
     if let Some(msg) = message {
         println!("Reason: {}", msg);
@@ -190,6 +194,9 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
 
     // Cleanup tmux window
     cleanup_window(&session, &task_name);
+
+    // Fire hook
+    project.fire_hook("step.blocked", &task_name);
 
     println!("Step {} marked as blocked.", step_idx + 1);
     if let Some(msg) = message {

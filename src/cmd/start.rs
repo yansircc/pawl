@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Write;
 
 use crate::model::{StepStatus, TaskState, TaskStatus};
-use crate::util::shell::{run_command_with_env, spawn_background, CommandResult};
+use crate::util::shell::{run_command_with_env, CommandResult};
 use crate::util::tmux;
 use crate::util::variable::Context;
 
@@ -48,6 +48,9 @@ pub fn run(task_name: &str) -> Result<()> {
 
     println!("Starting task: {}", task_name);
 
+    // Fire task.started hook
+    project.fire_hook("task.started", &task_name);
+
     // Execute the workflow
     execute(&mut project, &task_name)?;
 
@@ -79,7 +82,7 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
             state.touch();
             project.save_status()?;
             println!("Task '{}' completed!", task_name);
-            fire_hook(project, "task.completed", task_name);
+            project.fire_hook("task.completed", task_name);
             return Ok(());
         }
 
@@ -111,7 +114,7 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
             state.touch();
             project.save_status()?;
             println!("  → Checkpoint. Use 'wf next {}' to continue.", task_name);
-            fire_hook(project, "checkpoint", task_name);
+            project.fire_hook("checkpoint", task_name);
             return Ok(());
         }
 
@@ -189,7 +192,7 @@ fn execute_step(
         }
         project.save_status()?;
         println!("  ✓ Done");
-        fire_hook(project, "step.success", task_name);
+        project.fire_hook("step.success", task_name);
         Ok(true)
     } else {
         // Failure: mark step and stop
@@ -207,7 +210,8 @@ fn execute_step(
                 println!("    {}", line);
             }
         }
-        fire_hook(project, "step.failed", task_name);
+        project.fire_hook("step.failed", task_name);
+        project.fire_hook("task.failed", task_name);
         Ok(false)
     }
 }
@@ -338,19 +342,3 @@ fn format_output(stdout: &str, stderr: &str) -> String {
     output
 }
 
-/// Fire a hook (fire-and-forget)
-fn fire_hook(project: &Project, event: &str, task_name: &str) {
-    if let Some(cmd) = project.config.hooks.get(event) {
-        let ctx = Context::new(
-            task_name,
-            &project.session_name(),
-            &project.repo_root,
-            &project.config.worktree_dir,
-            event,
-        );
-        let expanded = ctx.expand(cmd);
-        if let Err(e) = spawn_background(&expanded) {
-            eprintln!("Warning: hook '{}' failed: {}", event, e);
-        }
-    }
-}
