@@ -10,6 +10,7 @@ pub struct Context {
     pub session: String,
     pub repo_root: String,
     pub step: String,
+    pub base_branch: String,
     // Log file path (single JSONL file per task)
     pub log_file: Option<String>,
     // Task file path
@@ -26,6 +27,7 @@ impl Context {
         repo_root: &str,
         worktree_dir: &str,
         step: &str,
+        base_branch: &str,
     ) -> Self {
         let worktree = format!("{}/{}/{}", repo_root, worktree_dir, task);
         Self {
@@ -36,6 +38,7 @@ impl Context {
             session: session.to_string(),
             repo_root: repo_root.to_string(),
             step: step.to_string(),
+            base_branch: base_branch.to_string(),
             log_file: None,
             task_file: None,
             step_index: None,
@@ -52,6 +55,7 @@ impl Context {
         step_index: usize,
         log_file: &str,
         task_file: &str,
+        base_branch: &str,
     ) -> Self {
         let worktree = format!("{}/{}/{}", repo_root, worktree_dir, task);
         Self {
@@ -62,6 +66,7 @@ impl Context {
             session: session.to_string(),
             repo_root: repo_root.to_string(),
             step: step.to_string(),
+            base_branch: base_branch.to_string(),
             log_file: Some(log_file.to_string()),
             task_file: Some(task_file.to_string()),
             step_index: Some(step_index),
@@ -77,7 +82,8 @@ impl Context {
             .replace("${window}", &self.window)
             .replace("${session}", &self.session)
             .replace("${repo_root}", &self.repo_root)
-            .replace("${step}", &self.step);
+            .replace("${step}", &self.step)
+            .replace("${base_branch}", &self.base_branch);
 
         // Expand log-related variables if available
         if let Some(log_file) = &self.log_file {
@@ -103,6 +109,7 @@ impl Context {
         env.insert("WF_SESSION".to_string(), self.session.clone());
         env.insert("WF_REPO_ROOT".to_string(), self.repo_root.clone());
         env.insert("WF_STEP".to_string(), self.step.clone());
+        env.insert("WF_BASE_BRANCH".to_string(), self.base_branch.clone());
 
         // Add log-related environment variables if available
         if let Some(log_file) = &self.log_file {
@@ -131,10 +138,12 @@ mod tests {
             "/home/user/project",
             ".wf/worktrees",
             "Type check",
+            "main",
         );
 
         assert_eq!(ctx.expand("${task}"), "auth");
         assert_eq!(ctx.expand("${branch}"), "wf/auth");
+        assert_eq!(ctx.expand("${base_branch}"), "main");
         assert_eq!(
             ctx.expand("${worktree}"),
             "/home/user/project/.wf/worktrees/auth"
@@ -142,6 +151,10 @@ mod tests {
         assert_eq!(
             ctx.expand("git checkout ${branch}"),
             "git checkout wf/auth"
+        );
+        assert_eq!(
+            ctx.expand("git branch ${branch} ${base_branch}"),
+            "git branch wf/auth main"
         );
     }
 
@@ -156,6 +169,7 @@ mod tests {
             1,
             "/home/user/project/.wf/logs/auth.jsonl",
             "/home/user/project/.wf/tasks/auth.md",
+            "develop",
         );
 
         assert_eq!(
@@ -167,6 +181,7 @@ mod tests {
             "/home/user/project/.wf/tasks/auth.md"
         );
         assert_eq!(ctx.expand("${step_index}"), "1");
+        assert_eq!(ctx.expand("${base_branch}"), "develop");
         assert_eq!(
             ctx.expand("cat ${log_file}"),
             "cat /home/user/project/.wf/logs/auth.jsonl"
@@ -184,12 +199,14 @@ mod tests {
             1,
             "/logs/auth.jsonl",
             "/tasks/auth.md",
+            "main",
         );
 
         let env = ctx.to_env_vars();
         assert_eq!(env.get("WF_LOG_FILE"), Some(&"/logs/auth.jsonl".to_string()));
         assert_eq!(env.get("WF_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
         assert_eq!(env.get("WF_STEP_INDEX"), Some(&"1".to_string()));
+        assert_eq!(env.get("WF_BASE_BRANCH"), Some(&"main".to_string()));
     }
 
     #[test]
@@ -200,11 +217,13 @@ mod tests {
             "/home/user/project",
             ".wf/worktrees",
             "Setup",
+            "main",
         );
 
         let env = ctx.to_env_vars();
         assert_eq!(env.get("WF_TASK"), Some(&"auth".to_string()));
         assert_eq!(env.get("WF_BRANCH"), Some(&"wf/auth".to_string()));
+        assert_eq!(env.get("WF_BASE_BRANCH"), Some(&"main".to_string()));
         assert!(env.get("WF_LOG_FILE").is_none());
         assert!(env.get("WF_TASK_FILE").is_none());
     }

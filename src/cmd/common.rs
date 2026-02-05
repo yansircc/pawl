@@ -161,6 +161,7 @@ impl Project {
                 &self.repo_root,
                 &self.config.worktree_dir,
                 event,
+                &self.config.base_branch,
             );
             let expanded = ctx.expand(cmd);
             if let Err(e) = spawn_background(&expanded) {

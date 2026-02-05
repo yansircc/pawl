@@ -48,6 +48,7 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             step_idx,
             &log_file.to_string_lossy(),
             &task_file.to_string_lossy(),
+            &project.config.base_branch,
         );
 
         let expanded = ctx.expand(stop_hook);

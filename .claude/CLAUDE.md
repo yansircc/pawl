@@ -76,6 +76,7 @@ src/
 | `${log_file}` | `WF_LOG_FILE` | 任务日志文件路径 (.jsonl) |
 | `${task_file}` | `WF_TASK_FILE` | 任务定义文件路径 (.md) |
 | `${step_index}` | `WF_STEP_INDEX` | 当前 step 索引（0-based）|
+| `${base_branch}` | `WF_BASE_BRANCH` | 基础分支（创建任务分支的起点）|
 
 ### 读取日志
 

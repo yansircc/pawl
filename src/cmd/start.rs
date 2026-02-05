@@ -102,6 +102,7 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
             step_idx,
             &log_file.to_string_lossy(),
             &task_file.to_string_lossy(),
+            &project.config.base_branch,
         );
 
         println!(
@@ -137,7 +138,7 @@ fn execute(project: &mut Project, task_name: &str) -> Result<()> {
             return Ok(());
         } else {
             // Normal step: execute synchronously
-            let success = execute_step(project, task_name, &ctx, &expanded)?;
+            let success = execute_step(project, task_name, &ctx, &expanded, workflow_len)?;
             if !success {
                 return Ok(());
             }
@@ -152,6 +153,7 @@ fn execute_step(
     task_name: &str,
     ctx: &Context,
     command: &str,
+    workflow_len: usize,
 ) -> Result<bool> {
     let step_idx = {
         let state = project.status.get(task_name).unwrap();
@@ -187,15 +189,29 @@ fn execute_step(
 
     if result.success {
         // Success: mark step and advance
-        {
+        let all_done = {
             let state = project.status.get_mut(task_name).unwrap();
             state.mark_step(step_idx, StepStatus::Success);
             state.current_step += 1;
             state.message = None;
-        }
+            // Check if all steps completed
+            state.current_step >= workflow_len
+        };
         project.save_status()?;
         println!("  ✓ Done");
         project.fire_hook("step.success", task_name);
+
+        if all_done {
+            // All steps completed, mark task as completed
+            {
+                let state = project.status.get_mut(task_name).unwrap();
+                state.status = TaskStatus::Completed;
+            }
+            project.save_status()?;
+            println!("Task '{}' completed!", task_name);
+            project.fire_hook("task.completed", task_name);
+            return Ok(false); // Signal to stop loop
+        }
         Ok(true)
     } else {
         // Failure: mark step and stop

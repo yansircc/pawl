@@ -39,16 +39,20 @@
   // 默认: ".wf/worktrees"
   // "worktree_dir": ".wf/worktrees",
 
+  // 基础分支（用于创建任务分支的起点）
+  // 默认: "main"
+  // "base_branch": "main",
+
   // ============================================
   // Workflow
   // ============================================
   // 所有任务共享的执行流程
   // 支持变量: ${task}, ${branch}, ${worktree}, ${window},
-  //          ${session}, ${repo_root}, ${step}
+  //          ${session}, ${repo_root}, ${step}, ${base_branch}
 
   "workflow": [
     // 创建资源
-    { "name": "Create branch", "run": "git branch ${branch}" },
+    { "name": "Create branch", "run": "git branch ${branch} ${base_branch}" },
     { "name": "Create worktree", "run": "git worktree add ${worktree} ${branch}" },
     { "name": "Install deps", "run": "cd ${worktree} && bun i" },
     { "name": "Create window", "run": "tmux new-window -t ${session} -n ${window} -c ${worktree}" },
@@ -102,6 +106,7 @@
 | `multiplexer` | string | `"tmux"` | multiplexer 类型 |
 | `claude_command` | string | `"claude"` | Claude CLI 路径 |
 | `worktree_dir` | string | `".wf/worktrees"` | worktree 存放目录 |
+| `base_branch` | string | `"main"` | 基础分支（创建任务分支的起点）|
 | `workflow` | Step[] | **必填** | workflow 定义 |
 | `hooks` | object | `{}` | 事件 hook 定义 |
 
@@ -140,16 +145,17 @@ key 是事件名，value 是 shell 命令。
 | `${session}` | config.session | `my-project` |
 | `${repo_root}` | git repo 根目录 | `/path/to/project` |
 | `${step}` | 当前 step name | `Type check` |
+| `${base_branch}` | config.base_branch | `main` |
 
 ## 最小配置
 
 ```jsonc
 {
   "workflow": [
-    { "name": "Create branch", "run": "git branch wf/${task}" },
-    { "name": "Create worktree", "run": "git worktree add .wf/worktrees/${task} wf/${task}" },
+    { "name": "Create branch", "run": "git branch ${branch} ${base_branch}" },
+    { "name": "Create worktree", "run": "git worktree add ${worktree} ${branch}" },
     { "name": "Develop", "run": "claude '@.wf/tasks/${task}.md'", "in_window": true },
-    { "name": "Cleanup", "run": "git worktree remove .wf/worktrees/${task} --force; git branch -D wf/${task}" }
+    { "name": "Cleanup", "run": "git worktree remove ${worktree} --force; git branch -D ${branch}" }
   ]
 }
 ```

@@ -23,6 +23,10 @@ pub struct Config {
     #[serde(default = "default_worktree_dir")]
     pub worktree_dir: String,
 
+    /// Base branch for creating task branches (default: "main")
+    #[serde(default = "default_base_branch")]
+    pub base_branch: String,
+
     /// Workflow steps
     pub workflow: Vec<Step>,
 
@@ -41,6 +45,10 @@ fn default_claude_command() -> String {
 
 fn default_worktree_dir() -> String {
     ".wf/worktrees".to_string()
+}
+
+fn default_base_branch() -> String {
+    "main".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
