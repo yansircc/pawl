@@ -157,4 +157,7 @@ pub enum Command {
         /// Exit code from the command
         exit_code: i32,
     },
+
+    /// Open interactive TUI
+    Tui,
 }

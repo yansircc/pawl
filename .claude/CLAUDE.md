@@ -32,6 +32,28 @@ src/
 │   ├── wait.rs       # wf wait (等待状态变化)
 │   ├── enter.rs      # wf enter
 │   └── log.rs        # wf log (支持 --step/--all)
+├── tui/              # 交互式 TUI 界面
+│   ├── app.rs        # 主循环 (事件处理 + 渲染)
+│   ├── state/        # 状态层 (可单元测试)
+│   │   ├── app_state.rs    # 根状态
+│   │   ├── task_list.rs    # 任务列表状态
+│   │   ├── task_detail.rs  # 任务详情状态
+│   │   ├── tmux_view.rs    # Tmux 视图状态
+│   │   └── reducer.rs      # 纯状态转换函数
+│   ├── view/         # 渲染层
+│   │   ├── layout.rs       # 主布局
+│   │   ├── task_list.rs    # 任务列表组件
+│   │   ├── task_detail.rs  # 任务详情组件
+│   │   ├── tmux_pane.rs    # Tmux 内容组件
+│   │   ├── status_bar.rs   # 状态栏
+│   │   ├── help_popup.rs   # 帮助弹窗
+│   │   └── style.rs        # 样式定义
+│   ├── event/        # 事件处理
+│   │   ├── action.rs       # Action 枚举
+│   │   └── input.rs        # 按键处理
+│   └── data/         # 数据层
+│       ├── provider.rs     # DataProvider trait
+│       └── live.rs         # 实际实现
 └── util/
     ├── git.rs        # Git 操作
     ├── shell.rs      # Shell 执行
@@ -61,6 +83,7 @@ src/
 | `wf capture <task> [--json]` | 捕获 tmux 内容 |
 | `wf wait <task> --until <status>` | 等待状态 |
 | `wf log <task> [--step N] [--all]` | 查看日志 |
+| `wf tui` | 打开交互式 TUI 界面 |
 
 ## 开发命令
 

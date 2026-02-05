@@ -38,5 +38,6 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Fail { task, message } => agent::fail(&task, message.as_deref()),
         Command::Block { task, message } => agent::block(&task, message.as_deref()),
         Command::OnExit { task, exit_code } => control::on_exit(&task, exit_code),
+        Command::Tui => crate::tui::run(),
     }
 }
