@@ -41,6 +41,7 @@ impl From<StepStatus> for StepItemStatus {
 #[derive(Debug, Clone)]
 pub struct TaskDetailState {
     pub name: String,
+    #[allow(dead_code)] // Reserved for description display
     pub description: String,
     pub depends: Vec<String>,
     pub status: TaskStatus,

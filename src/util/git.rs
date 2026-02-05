@@ -9,22 +9,26 @@ pub fn get_repo_root() -> Result<String> {
 }
 
 /// Check if a branch exists
+#[allow(dead_code)]
 pub fn branch_exists(branch: &str) -> bool {
     run_command_success(&format!("git show-ref --verify --quiet refs/heads/{}", branch))
 }
 
 /// Check if a worktree exists at the given path
+#[allow(dead_code)]
 pub fn worktree_exists(path: &str) -> bool {
     run_command_success(&format!("git worktree list --porcelain | grep -q 'worktree {}'", path))
 }
 
 /// Get current branch name
+#[allow(dead_code)]
 pub fn current_branch() -> Result<String> {
     run_command_output("git rev-parse --abbrev-ref HEAD")
         .context("Failed to get current branch")
 }
 
 /// Check if working directory is clean
+#[allow(dead_code)]
 pub fn is_clean() -> bool {
     run_command_success("git diff --quiet && git diff --cached --quiet")
 }

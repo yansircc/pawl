@@ -25,6 +25,7 @@ impl StatusStore {
     }
 
     /// Load status from a specific path
+    #[allow(dead_code)]
     pub fn load_from<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let lock_path = path.with_extension("lock");
@@ -66,6 +67,7 @@ impl StatusStore {
     }
 
     /// Save status to a specific path with atomic write
+    #[allow(dead_code)]
     pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
         let lock_path = path.with_extension("lock");

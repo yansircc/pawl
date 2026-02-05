@@ -60,6 +60,7 @@ impl Context {
 }
 
 /// Simple expand function for quick usage
+#[allow(dead_code)]
 pub fn expand(template: &str, task: &str, session: &str, repo_root: &str, worktree_dir: &str, step: &str) -> String {
     Context::new(task, session, repo_root, worktree_dir, step).expand(template)
 }

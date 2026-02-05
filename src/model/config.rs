@@ -108,4 +108,5 @@ impl Config {
 }
 
 // Re-export for convenience (keeping old name for compatibility)
+#[allow(dead_code)]
 pub type Workflow = Vec<Step>;

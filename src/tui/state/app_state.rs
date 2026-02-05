@@ -12,6 +12,7 @@ pub enum ViewMode {
 
 /// Modal dialog state
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // Confirm reserved for future use
 pub enum ModalState {
     Help,
     Confirm { title: String, message: String },
@@ -78,6 +79,7 @@ impl AppState {
         Self::default()
     }
 
+    #[allow(dead_code)] // Used in tests
     pub fn with_tasks(tasks: Vec<super::TaskItem>) -> Self {
         Self {
             task_list: TaskListState::new(tasks),

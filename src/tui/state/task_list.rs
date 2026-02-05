@@ -8,6 +8,7 @@ pub struct TaskItem {
     pub current_step: usize,
     pub total_steps: usize,
     pub step_name: String,
+    #[allow(dead_code)] // Reserved for dependency display
     pub blocked_by: Vec<String>,
     pub message: Option<String>,
 }
@@ -20,6 +21,7 @@ pub struct TaskListState {
 }
 
 impl TaskListState {
+    #[allow(dead_code)] // Used in tests
     pub fn new(tasks: Vec<TaskItem>) -> Self {
         Self { tasks, selected: 0 }
     }

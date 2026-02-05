@@ -12,6 +12,7 @@ pub enum CaptureResult {
 }
 
 /// Check if tmux is available
+#[allow(dead_code)]
 pub fn is_available() -> bool {
     run_command_success("command -v tmux")
 }
@@ -73,6 +74,7 @@ pub fn select_window(session: &str, window: &str) -> Result<()> {
 }
 
 /// Attach to a session
+#[allow(dead_code)]
 pub fn attach(session: &str) -> Result<()> {
     let cmd = format!("tmux attach-session -t '{}'", session);
     run_command(&cmd).with_context(|| format!("Failed to attach to session: {}", session))?;
@@ -91,6 +93,7 @@ pub fn kill_window(session: &str, window: &str) -> Result<()> {
 }
 
 /// Kill a session (no-op if session doesn't exist)
+#[allow(dead_code)]
 pub fn kill_session(name: &str) -> Result<()> {
     // Check if session exists first to avoid spurious errors
     if !session_exists(name) {

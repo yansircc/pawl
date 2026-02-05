@@ -1,5 +1,6 @@
 /// User action that can be triggered by input or timer
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // Some variants reserved for future use
 pub enum Action {
     // Navigation
     Quit,
