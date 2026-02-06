@@ -70,6 +70,10 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         transcript: Option<String>,
     },
+    WindowLost {
+        ts: DateTime<Utc>,
+        step: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +86,77 @@ pub enum AgentResult {
 
 pub fn event_timestamp() -> DateTime<Utc> {
     Utc::now()
+}
+
+impl Event {
+    /// Returns the serde snake_case tag name for this event
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Event::TaskStarted { .. } => "task_started",
+            Event::CommandExecuted { .. } => "command_executed",
+            Event::CheckpointReached { .. } => "checkpoint_reached",
+            Event::CheckpointPassed { .. } => "checkpoint_passed",
+            Event::WindowLaunched { .. } => "window_launched",
+            Event::AgentReported { .. } => "agent_reported",
+            Event::OnExit { .. } => "on_exit",
+            Event::StepSkipped { .. } => "step_skipped",
+            Event::StepRetried { .. } => "step_retried",
+            Event::StepRolledBack { .. } => "step_rolled_back",
+            Event::TaskStopped { .. } => "task_stopped",
+            Event::TaskReset { .. } => "task_reset",
+            Event::WindowLost { .. } => "window_lost",
+        }
+    }
+
+    /// Returns the step index associated with this event, if any
+    pub fn step_index(&self) -> Option<usize> {
+        match self {
+            Event::TaskStarted { .. } | Event::TaskReset { .. } => None,
+            Event::CommandExecuted { step, .. }
+            | Event::CheckpointReached { step, .. }
+            | Event::CheckpointPassed { step, .. }
+            | Event::WindowLaunched { step, .. }
+            | Event::AgentReported { step, .. }
+            | Event::OnExit { step, .. }
+            | Event::StepSkipped { step, .. }
+            | Event::StepRetried { step, .. }
+            | Event::TaskStopped { step, .. }
+            | Event::WindowLost { step, .. } => Some(*step),
+            Event::StepRolledBack { from_step, .. } => Some(*from_step),
+        }
+    }
+
+    /// Returns event-specific variables for hook template expansion
+    pub fn extra_vars(&self) -> HashMap<String, String> {
+        let mut vars = HashMap::new();
+        match self {
+            Event::CommandExecuted { exit_code, duration, .. } => {
+                vars.insert("exit_code".to_string(), exit_code.to_string());
+                vars.insert("duration".to_string(), format!("{:.1}", duration));
+            }
+            Event::AgentReported { result, message, session_id, .. } => {
+                vars.insert("result".to_string(), format!("{:?}", result).to_lowercase());
+                if let Some(msg) = message {
+                    vars.insert("message".to_string(), msg.clone());
+                }
+                if let Some(sid) = session_id {
+                    vars.insert("session_id".to_string(), sid.clone());
+                }
+            }
+            Event::OnExit { exit_code, session_id, .. } => {
+                vars.insert("exit_code".to_string(), exit_code.to_string());
+                if let Some(sid) = session_id {
+                    vars.insert("session_id".to_string(), sid.clone());
+                }
+            }
+            Event::StepRolledBack { from_step, to_step, .. } => {
+                vars.insert("from_step".to_string(), from_step.to_string());
+                vars.insert("to_step".to_string(), to_step.to_string());
+            }
+            _ => {}
+        }
+        vars
+    }
 }
 
 /// Replay events to reconstruct TaskState.
@@ -214,6 +289,13 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.status = TaskStatus::Stopped;
+            }
+            Event::WindowLost { ts, step } => {
+                let Some(s) = state.as_mut() else { continue };
+                s.updated_at = Some(*ts);
+                s.step_status.insert(*step, StepStatus::Failed);
+                s.status = TaskStatus::Failed;
+                s.message = Some("tmux window lost".to_string());
             }
         }
     }
@@ -440,6 +522,19 @@ mod tests {
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.current_step, 0);
         assert_eq!(state.status, TaskStatus::Waiting);
+    }
+
+    #[test]
+    fn test_window_lost() {
+        let events = vec![
+            Event::TaskStarted { ts: ts() },
+            Event::WindowLaunched { ts: ts(), step: 0 },
+            Event::WindowLost { ts: ts(), step: 0 },
+        ];
+        let state = replay(&events, 3).unwrap();
+        assert_eq!(state.status, TaskStatus::Failed);
+        assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
+        assert_eq!(state.message.as_deref(), Some("tmux window lost"));
     }
 
     #[test]

@@ -1,8 +1,10 @@
 use anyhow::{bail, Result};
-use std::io::{BufRead, BufReader};
+use fs2::FileExt;
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use crate::model::event::{replay, Event};
+use crate::model::event::{event_timestamp, replay, Event};
 use crate::model::{Config, TaskDefinition, TaskStatus};
 use crate::tui::state::task_detail::{StepItem, StepItemStatus, StepType};
 use crate::tui::state::{TaskDetailState, TaskItem};
@@ -59,6 +61,42 @@ impl LiveDataProvider {
         Ok(replay(&events, workflow_len))
     }
 
+    fn append_event(&self, task_name: &str, event: &Event) -> Result<()> {
+        let log_file = self.wf_dir.join("logs").join(format!("{}.jsonl", task_name));
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)?;
+        file.lock_exclusive()?;
+        let json = serde_json::to_string(event)?;
+        writeln!(file, "{}", json)?;
+        file.unlock()?;
+        Ok(())
+    }
+
+    /// If task is Running on an in_window step but window is gone, append WindowLost and re-replay.
+    fn try_heal_window_lost(
+        &self,
+        task_name: &str,
+        state: &crate::model::TaskState,
+        config: &Config,
+    ) -> Option<crate::model::TaskState> {
+        let step_idx = state.current_step;
+        if step_idx >= config.workflow.len() || !config.workflow[step_idx].in_window {
+            return None;
+        }
+        let session = self.session_name().ok()?;
+        if tmux::window_exists(&session, task_name) {
+            return None;
+        }
+        let event = Event::WindowLost {
+            ts: event_timestamp(),
+            step: step_idx,
+        };
+        self.append_event(task_name, &event).ok()?;
+        self.replay_task(task_name, config.workflow.len()).ok()?
+    }
+
     fn check_dependencies(&self, task: &TaskDefinition, workflow_len: usize) -> Vec<String> {
         let mut blocking = Vec::new();
         for dep in &task.depends {
@@ -83,6 +121,13 @@ impl DataProvider for LiveDataProvider {
                 let blocked_by = self.check_dependencies(task_def, workflow_len);
 
                 if let Ok(Some(state)) = self.replay_task(&task_def.name, workflow_len) {
+                    let state = if state.status == TaskStatus::Running {
+                        self.try_heal_window_lost(&task_def.name, &state, &config)
+                            .unwrap_or(state)
+                    } else {
+                        state
+                    };
+
                     let step_name = if state.current_step < workflow_len {
                         config.workflow[state.current_step].name.clone()
                     } else {
@@ -121,6 +166,12 @@ impl DataProvider for LiveDataProvider {
         let workflow_len = config.workflow.len();
 
         let state = self.replay_task(name, workflow_len)?;
+        let state = match state {
+            Some(s) if s.status == TaskStatus::Running => {
+                Some(self.try_heal_window_lost(name, &s, &config).unwrap_or(s))
+            }
+            other => other,
+        };
         let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
         let task_status = state.as_ref().map(|s| s.status).unwrap_or(TaskStatus::Pending);
 

@@ -45,9 +45,6 @@ pub fn run(task_name: &str) -> Result<()> {
 
     println!("Starting task: {}", task_name);
 
-    // Fire task.started hook
-    project.fire_hook("task.started", &task_name);
-
     // Execute the workflow
     execute(&project, &task_name)?;
 
@@ -72,9 +69,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
 
         // Check if we've completed all steps
         if step_idx >= workflow_len {
-            // replay() auto-derives Completed, just print and hook
             println!("Task '{}' completed!", task_name);
-            project.fire_hook("task.completed", task_name);
             return Ok(());
         }
 
@@ -113,7 +108,6 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             })?;
 
             println!("  → Checkpoint. Use 'wf next {}' to continue.", task_name);
-            project.fire_hook("checkpoint", task_name);
             return Ok(());
         }
 
@@ -168,13 +162,11 @@ fn execute_step(
 
     if result.success {
         println!("  ✓ Done");
-        project.fire_hook("step.success", task_name);
 
         // Check if all steps completed after this one
         let new_state = project.replay_task(task_name)?.expect("Task state missing");
         if new_state.status == TaskStatus::Completed {
             println!("Task '{}' completed!", task_name);
-            project.fire_hook("task.completed", task_name);
             return Ok(false);
         }
         Ok(true)
@@ -185,8 +177,6 @@ fn execute_step(
                 println!("    {}", line);
             }
         }
-        project.fire_hook("step.failed", task_name);
-        project.fire_hook("task.failed", task_name);
         Ok(false)
     }
 }

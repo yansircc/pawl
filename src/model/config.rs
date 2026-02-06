@@ -30,9 +30,10 @@ pub struct Config {
     /// Workflow steps
     pub workflow: Vec<Step>,
 
-    /// Event hooks: event name -> shell command
+    /// Event hooks: event type (snake_case) -> shell command
+    /// Keys match Event enum serde tags: task_started, command_executed, agent_reported, etc.
     #[serde(default)]
-    pub hooks: HashMap<String, String>,
+    pub on: HashMap<String, String>,
 }
 
 fn default_multiplexer() -> String {
@@ -64,10 +65,10 @@ pub struct Step {
     #[serde(default)]
     pub in_window: bool,
 
-    /// Validation command to run before accepting "wf done"
-    /// If specified, must exit with code 0 for done to succeed
+    /// Verifier command to run before accepting "wf done"
+    /// Must exit 0 for done to succeed; stdout/stderr shown as feedback on failure
     #[serde(default)]
-    pub stop_hook: Option<String>,
+    pub verify: Option<String>,
 }
 
 impl Step {

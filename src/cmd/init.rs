@@ -64,19 +64,22 @@ const DEFAULT_CONFIG: &str = r#"{
   ]
 
   // ============================================
-  // Hooks（可选）
+  // Event Hooks（可选）
   // ============================================
   // 事件触发的 shell 命令，fire-and-forget
+  // key 为 Event 类型名（snake_case），自动在 append_event 时触发
   //
-  // "hooks": {
-  //   "task.completed": "terminal-notifier -title 'wf' -message '${task} completed'",
-  //   "step.failed": "terminal-notifier -title 'wf' -message '${task}: ${step} failed'"
+  // "on": {
+  //   "task_started": "echo '${task} started'",
+  //   "command_executed": "echo '${task} step ${step} exit=${exit_code}'",
+  //   "agent_reported": "echo '${task} agent: ${result} ${message}'",
+  //   "window_lost": "echo '${task} window crashed at step ${step}'"
   // }
 }
 "#;
 
 const VERIFY_STOP_SCRIPT: &str = r#"#!/bin/bash
-# wf verify stop hook - 自动生成
+# wf verify script - auto generated
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')

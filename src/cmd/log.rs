@@ -85,6 +85,7 @@ fn get_event_step(event: &Event) -> Option<usize> {
         Event::StepRolledBack { from_step, .. } => Some(*from_step),
         Event::TaskStopped { step, .. } => Some(*step),
         Event::OnExit { step, .. } => Some(*step),
+        Event::WindowLost { step, .. } => Some(*step),
     }
 }
 
@@ -265,6 +266,18 @@ fn print_event(event: &Event, project: &Project) {
         Event::TaskReset { ts } => {
             println!("=== Task Reset ===");
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::WindowLost { ts, step } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (window lost) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+            println!("tmux window disappeared — auto-marked as failed.");
         }
     }
 }

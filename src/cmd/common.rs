@@ -4,10 +4,11 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use crate::model::event::{replay, Event};
+use crate::model::event::{event_timestamp, replay, Event};
 use crate::model::{Config, TaskDefinition, TaskState, TaskStatus};
 use crate::util::git::get_repo_root;
 use crate::util::shell::spawn_background;
+use crate::util::tmux;
 use crate::util::variable::Context;
 
 const WF_DIR: &str = ".wf";
@@ -96,7 +97,8 @@ impl Project {
         self.wf_dir.join("tasks").join(format!("{}.md", task_name))
     }
 
-    /// Append an event to the task's JSONL log file (with exclusive file lock)
+    /// Append an event to the task's JSONL log file (with exclusive file lock),
+    /// then auto-fire any matching hook from config.on.
     pub fn append_event(&self, task_name: &str, event: &Event) -> Result<()> {
         let log_file = self.log_file(task_name);
         let log_dir = log_file.parent().unwrap();
@@ -114,6 +116,9 @@ impl Project {
         writeln!(file, "{}", json)?;
 
         file.unlock()?;
+
+        // Auto-fire hook if configured
+        self.fire_event_hook(task_name, event);
 
         Ok(())
     }
@@ -149,21 +154,84 @@ impl Project {
         Ok(replay(&events, workflow_len))
     }
 
-    /// Fire a hook (fire-and-forget)
-    pub fn fire_hook(&self, event: &str, task_name: &str) {
-        if let Some(cmd) = self.config.hooks.get(event) {
-            let ctx = Context::new(
+    /// Replay with health check: if Running on an in_window step but tmux window is gone,
+    /// auto-append WindowLost event and return corrected state.
+    pub fn replay_task_with_health_check(&self, task_name: &str) -> Result<Option<TaskState>> {
+        let state = self.replay_task(task_name)?;
+
+        if let Some(ref s) = state {
+            if s.status == TaskStatus::Running {
+                let step_idx = s.current_step;
+                if step_idx < self.config.workflow.len()
+                    && self.config.workflow[step_idx].in_window
+                    && !tmux::window_exists(&self.session_name(), task_name)
+                {
+                    self.append_event(
+                        task_name,
+                        &Event::WindowLost {
+                            ts: event_timestamp(),
+                            step: step_idx,
+                        },
+                    )?;
+                    return self.replay_task(task_name);
+                }
+            }
+        }
+
+        Ok(state)
+    }
+
+    /// Fire a hook for an event (fire-and-forget).
+    /// Looks up config.on by the event's serde tag name, expands variables, spawns in background.
+    fn fire_event_hook(&self, task_name: &str, event: &Event) {
+        let event_type = event.type_name();
+        let Some(cmd) = self.config.on.get(event_type) else {
+            return;
+        };
+
+        // Build context with correct step name (not event name)
+        let step_idx = event.step_index();
+        let step_name = step_idx
+            .and_then(|i| self.config.workflow.get(i))
+            .map(|s| s.name.as_str())
+            .unwrap_or("");
+
+        let log_file = self.log_file(task_name);
+        let task_file = self.task_file(task_name);
+
+        let ctx = if let Some(idx) = step_idx {
+            Context::new_full(
                 task_name,
                 &self.session_name(),
                 &self.repo_root,
                 &self.config.worktree_dir,
-                event,
+                step_name,
+                idx,
+                &log_file.to_string_lossy(),
+                &task_file.to_string_lossy(),
                 &self.config.base_branch,
-            );
-            let expanded = ctx.expand(cmd);
-            if let Err(e) = spawn_background(&expanded) {
-                eprintln!("Warning: hook '{}' failed: {}", event, e);
-            }
+            )
+        } else {
+            Context::new(
+                task_name,
+                &self.session_name(),
+                &self.repo_root,
+                &self.config.worktree_dir,
+                step_name,
+                &self.config.base_branch,
+            )
+        };
+
+        // First pass: standard variable expansion
+        let mut expanded = ctx.expand(cmd);
+
+        // Second pass: event-specific variables (${exit_code}, ${result}, ${message}, etc.)
+        for (key, value) in event.extra_vars() {
+            expanded = expanded.replace(&format!("${{{}}}", key), &value);
+        }
+
+        if let Err(e) = spawn_background(&expanded) {
+            eprintln!("Warning: hook '{}' failed: {}", event_type, e);
         }
     }
 }

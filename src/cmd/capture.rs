@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::model::TaskStatus;
 use crate::util::tmux::{self, CaptureResult};
 
 use super::common::Project;
@@ -31,8 +30,8 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let session = project.session_name();
     let window = &task_name;
 
-    // Get task status via replay
-    let state = project.replay_task(&task_name)?;
+    // Get task status via replay (auto-repairs window-lost)
+    let state = project.replay_task_with_health_check(&task_name)?;
     let (status, current_step, step_name) = if let Some(state) = &state {
         let step_name = if state.current_step < project.config.workflow.len() {
             project.config.workflow[state.current_step].name.clone()
@@ -48,8 +47,6 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         ("pending".to_string(), 0, "--".to_string())
     };
 
-    let task_status = state.as_ref().map(|s| s.status);
-
     // Capture content (also checks if window exists)
     let capture_result = tmux::capture_pane(&session, window, lines)?;
 
@@ -63,9 +60,6 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     } else {
         false
     };
-
-    // Check for anomaly: task is running but window is gone
-    let window_gone_warning = matches!(task_status, Some(TaskStatus::Running)) && !window_exists;
 
     if json {
         let output = CaptureOutput {
@@ -92,11 +86,7 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         );
         println!("{}", "=".repeat(60));
 
-        if window_gone_warning {
-            println!("WARNING: Task is running but tmux window is gone!");
-            println!("         The task may have crashed or the window was killed.");
-            println!("         Use 'wf retry {}' to restart the current step.", task_name);
-        } else if window_exists {
+        if window_exists {
             if content.is_empty() {
                 println!("(no content)");
             } else {

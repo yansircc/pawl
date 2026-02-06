@@ -29,10 +29,10 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
     let step_idx = state.current_step;
 
-    // Check if step has a stop_hook
+    // Run verifier if configured
     let step = &project.config.workflow[step_idx];
-    if let Some(stop_hook) = &step.stop_hook {
-        println!("Running stop_hook validation...");
+    if let Some(verify_cmd) = &step.verify {
+        println!("Running verify...");
 
         let session = project.session_name();
         let log_file = project.log_file(&task_name);
@@ -50,29 +50,24 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             &project.config.base_branch,
         );
 
-        let expanded = ctx.expand(stop_hook);
+        let expanded = ctx.expand(verify_cmd);
         let env = ctx.to_env_vars();
         let result = run_command_with_env(&expanded, &env)?;
 
         if !result.success {
-            eprintln!("Stop hook validation failed (exit code: {})", result.exit_code);
-            if !result.stderr.is_empty() {
-                for line in result.stderr.lines().take(10) {
-                    eprintln!("  {}", line);
-                }
-            }
+            eprintln!("Verify failed (exit code: {})", result.exit_code);
             if !result.stdout.is_empty() {
-                for line in result.stdout.lines().take(10) {
-                    eprintln!("  {}", line);
-                }
+                eprintln!("{}", result.stdout);
+            }
+            if !result.stderr.is_empty() {
+                eprintln!("{}", result.stderr);
             }
             bail!(
-                "Cannot mark step as done: stop_hook validation failed.\n\
-                 Fix the issues and try 'wf done {}' again.",
+                "Verification failed. Fix the issues and try 'wf done {}' again.",
                 task_name
             );
         }
-        println!("Stop hook validation passed.");
+        println!("Verify passed.");
     }
 
     // Extract session_id before cleanup (must happen while window still exists)
@@ -139,10 +134,6 @@ pub fn fail(task_name: &str, message: Option<&str>) -> Result<()> {
     // Cleanup tmux window
     cleanup_window(&session, &task_name);
 
-    // Fire hooks
-    project.fire_hook("step.failed", &task_name);
-    project.fire_hook("task.failed", &task_name);
-
     println!("Step {} marked as failed.", step_idx + 1);
     if let Some(msg) = message {
         println!("Reason: {}", msg);
@@ -189,9 +180,6 @@ pub fn block(task_name: &str, message: Option<&str>) -> Result<()> {
 
     // Cleanup tmux window
     cleanup_window(&session, &task_name);
-
-    // Fire hook
-    project.fire_hook("step.blocked", &task_name);
 
     println!("Step {} marked as blocked.", step_idx + 1);
     if let Some(msg) = message {
