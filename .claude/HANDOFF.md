@@ -44,7 +44,7 @@
 | Event Sourcing（JSONL 单源） | ✅ |
 | Session ID 提取 + Transcript | ✅ |
 | 变量展开（11 个变量） | ✅ |
-| Stop Hook | ✅ |
+| Verify (原 Stop Hook) | ✅ |
 | TUI 界面 | ✅ |
 | `wf init` 引导式初始化 | ✅ |
 

@@ -14,17 +14,17 @@
 
 ---
 
-## Insight 2: `_on-exit` 残留风险
+## Insight 2: ~~`_on-exit` 残留风险~~ [已解决]
 
 in_window 步骤使用 `trap EXIT` 触发 `wf _on-exit`，覆盖了正常退出和 SIGHUP（kill-window）。
 
 ~~**已解决** — `wf done` 和 `_on-exit` 竞争：Event Sourcing 迁移后，`replay()` 中 `OnExit` 事件仅当 `step_status` 中无该 step 记录时才生效，彻底防止了 double-advance。~~
 
-残留风险：
-1. **agent 进程 OOM/SIGKILL** → shell 被强杀 → trap 不执行 → 任务卡在 Running
-2. **tmux server crash** → 所有窗口丢失 → 同上
+~~残留风险：~~
+1. ~~**agent 进程 OOM/SIGKILL** → shell 被强杀 → trap 不执行 → 任务卡在 Running~~
+2. ~~**tmux server crash** → 所有窗口丢失 → 同上~~
 
-解法建议：轻量 watchdog — 定期检查 `tmux::window_exists()`，窗口消失且状态还是 Running 则自动标记 Failed。
+**已解决** — 被动修复机制：新增 `WindowLost` 事件（第 13 种事件类型），在任何读取状态的地方（`wf status`、`wf capture`、TUI 刷新），如果检测到 Running + in_window 步骤 + tmux 窗口消失，自动 append `WindowLost` 事件并返回修复后的 Failed 状态。无需 watchdog 守护进程。
 
 ---
 
@@ -63,10 +63,10 @@ Hook 系统实现完整（7 种事件，fire-and-forget，变量展开），但�
 这是一个杠杆点。想象这些场景：
 ```jsonc
 {
-  "hooks": {
-    "task.completed": "say '${task} 完成了'",
-    "step.failed": "osascript -e 'display notification \"${task}: ${step} failed\"'",
-    "task.completed": "curl -X POST $SLACK_WEBHOOK -d '{\"text\": \"${task} completed\"}'"
+  "on": {
+    "task_started": "say '${task} 开始了'",
+    "agent_reported": "osascript -e 'display notification \"${task}: ${step} ${result}\"'",
+    "command_executed": "curl -X POST $SLACK_WEBHOOK -d '{\"text\": \"${task} step ${step} exit=${exit_code}\"}'"
   }
 }
 ```
@@ -112,7 +112,7 @@ wf start task-c  # 手动
 
 | 优先级 | 改进 | 影响 |
 |--------|------|------|
-| **P0** | 窗口 watchdog（检测 SIGKILL/tmux crash 僵尸状态） | 修复残留的卡死风险 |
+| ~~P0~~ | ~~窗口 watchdog（检测 SIGKILL/tmux crash 僵尸状态）~~ | ~~已通过 WindowLost 被动修复解决~~ |
 | **P1** | `Running` vs `AgentWorking` 状态区分 | 改善可观测性 |
 | **P1** | `wf start --all` + 依赖自动调度 | 兑现"并行开发"的核心承诺 |
 | **P2** | Per-task workflow override | 扩展使用场景 |

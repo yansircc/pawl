@@ -21,7 +21,7 @@ src/
 │   ├── start.rs         # wf start (execution engine core)
 │   ├── status.rs        # wf status / wf list
 │   ├── control.rs       # wf next/retry/back/skip/stop/reset + _on-exit
-│   ├── agent.rs         # wf done/fail/block (with stop_hook validation)
+│   ├── agent.rs         # wf done/fail/block (with verify validation)
 │   ├── capture.rs       # wf capture (tmux content)
 │   ├── wait.rs          # wf wait (poll until status)
 │   ├── enter.rs         # wf enter (attach to tmux window)
@@ -44,7 +44,7 @@ src/
 - **Step**: Execution unit — normal command, checkpoint (no `run`), or in_window (`in_window: true`)
 - **Checkpoint**: Pauses workflow, waits for `wf next`
 - **in_window**: Runs command in tmux window, waits for `wf done/fail/block`
-- **Stop Hook**: Validation command on Step; must exit 0 before `wf done` succeeds
+- **Verify**: Validation command on Step; must exit 0 before `wf done` succeeds
 
 ## Config (`.wf/config.jsonc`)
 
@@ -56,7 +56,7 @@ src/
   worktree_dir?: string,    // default: ".wf/worktrees"
   base_branch?: string,     // default: "main"
   workflow: Step[],         // required
-  hooks?: Record<string, string>  // event hooks
+  on?: Record<string, string>     // event hooks (key = Event serde tag)
 }
 
 // Step
@@ -64,7 +64,7 @@ src/
   name: string,             // required
   run?: string,             // shell command (omit for checkpoint)
   in_window?: boolean,      // default: false
-  stop_hook?: string        // validation command for wf done
+  verify?: string           // verifier command for wf done (must exit 0)
 }
 ```
 
@@ -98,7 +98,7 @@ JSONL is the **single source of truth** — no `status.json`. State is reconstru
 
 Per-task event log: `.wf/logs/{task}.jsonl`
 
-12 event types:
+13 event types:
 - `task_started` — initializes Running, step=0
 - `command_executed` — exit_code==0 ? Success+advance : Failed
 - `checkpoint_reached` — Waiting
@@ -111,8 +111,11 @@ Per-task event log: `.wf/logs/{task}.jsonl`
 - `step_rolled_back` — current_step=to_step, Waiting
 - `task_stopped` — Stopped
 - `task_reset` — clears all state (replay restarts)
+- `window_lost` — tmux window disappeared, auto-marked as Failed
 
 Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
+
+Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${result}`, `${message}`, `${session_id}`) are injected alongside standard context variables.
 
 ## CLI Commands
 
@@ -148,7 +151,7 @@ start(task)
      └─ in_window step → send to tmux → return (wait for `wf done/fail/block`)
 
 done(task)
-  ├─ run stop_hook (if any) → fail? reject
+  ├─ run verify (if any) → fail? reject
   ├─ append_event(AgentReported { result: Done })
   ├─ continue_execution (run remaining steps)
   └─ cleanup tmux window
