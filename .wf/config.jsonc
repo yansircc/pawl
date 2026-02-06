@@ -12,28 +12,31 @@
   // Worktree 存放目录（相对于 repo root，默认: ".wf/worktrees"）
   // "worktree_dir": ".wf/worktrees",
 
+  // 基础分支（用于创建任务分支的起点，默认: "main"）
+  // "base_branch": "main",
+
   // ============================================
   // Workflow
   // ============================================
   // 所有任务共享的执行流程
   // 支持变量: ${task}, ${branch}, ${worktree}, ${window},
-  //          ${session}, ${repo_root}, ${step}
+  //          ${session}, ${repo_root}, ${step}, ${base_branch}
 
   "workflow": [
     // 创建资源
-    { "name": "Create branch", "run": "git branch ${branch}" },
+    { "name": "Create branch", "run": "git branch ${branch} ${base_branch}" },
     { "name": "Create worktree", "run": "git worktree add ${worktree} ${branch}" },
     { "name": "Create window", "run": "tmux new-window -t ${session} -n ${window} -c ${worktree}" },
 
     // 开发（在 tmux window 中执行）
     {
       "name": "Develop",
-      "run": "claude -p '@.wf/tasks/${task}.md'",
+      "run": "claude --settings ${repo_root}/.wf/hooks/settings.json -p '@.wf/tasks/${task}.md'",
       "in_window": true
     },
 
-    // 人工确认开发完成（checkpoint）
-    { "name": "Review development" },
+    // 人工确认开发完成
+    { "name": "Review development", "verify": "human" },
 
     // 合并到主分支
     {
@@ -52,7 +55,7 @@
   // Event Hooks（可选）
   // ============================================
   // 事件触发的 shell 命令，fire-and-forget
-  // key 为 Event 类型名（snake_case），在 append_event 时自动触发
+  // key 为 Event 类型名（snake_case），自动在 append_event 时触发
   //
   // "on": {
   //   "task_started": "echo '${task} started'",
