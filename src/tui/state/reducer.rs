@@ -181,7 +181,6 @@ pub fn reduce(state: AppState, action: Action) -> AppState {
         | Action::SkipTask(_)
         | Action::DoneTask(_)
         | Action::FailTask(_)
-        | Action::BlockTask(_)
         | Action::Refresh => state,
     }
 }

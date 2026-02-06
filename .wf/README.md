@@ -37,9 +37,11 @@ This README helps you write a `config.jsonc` workflow configuration for your pro
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | **required** | step display name |
-| `run` | string? | _(omit for checkpoint)_ | shell command to execute |
+| `run` | string? | _(omit for gate step)_ | shell command to execute |
 | `in_window` | bool? | `false` | run in tmux window (agent mode) |
-| `verify` | string? | — | verifier command; must exit 0 for `wf done` to succeed |
+| `verify` | string? | — | `"human"` for manual approval, or shell command (must exit 0) |
+| `on_fail` | string? | — | `"retry"` for auto-retry, `"human"` to wait for decision |
+| `max_retries` | number? | `3` | max auto-retries when `on_fail="retry"` |
 
 ## Variables
 
@@ -75,17 +77,17 @@ Runs synchronously. If exit code is 0, proceeds to next step. Otherwise, task fa
 { "name": "Install deps", "run": "cd ${worktree} && npm install" }
 ```
 
-### Checkpoint
+### Gate Step (Human Verify)
 
-Omit the `run` field. Workflow pauses until a human runs `wf next <task>`.
+Omit the `run` field and set `verify: "human"`. Workflow pauses until a human runs `wf next` or `wf done`.
 
 ```jsonc
-{ "name": "Review changes" }
+{ "name": "Review changes", "verify": "human" }
 ```
 
 ### in_window Step
 
-Runs in a tmux window. The workflow pauses until the agent calls `wf done/fail/block`.
+Runs in a tmux window. The workflow pauses until the agent calls `wf done/fail`.
 
 ```jsonc
 {
@@ -100,7 +102,6 @@ Runs in a tmux window. The workflow pauses until the agent calls `wf done/fail/b
 ```
 .wf/
 ├── config.jsonc      # This file — workflow configuration
-├── status.json       # Runtime state (managed by wf, do not edit)
 ├── tasks/            # Task definitions
 │   └── {name}.md     # Markdown with optional YAML frontmatter
 ├── logs/             # Execution logs
@@ -249,7 +250,35 @@ Add validation before allowing `wf done`:
 }
 ```
 
-### 10. Working in the Worktree
+### 10. Auto-Retry on Verify Failure
+
+Use `on_fail: "retry"` to automatically retry when verify fails:
+
+```jsonc
+{
+  "name": "Develop",
+  "run": "claude -p '@${task_file}'",
+  "in_window": true,
+  "verify": "cd ${worktree} && npm run typecheck && npm run lint",
+  "on_fail": "retry",
+  "max_retries": 3
+}
+```
+
+### 11. Human Decision on Failure
+
+Use `on_fail: "human"` to pause and let a human decide:
+
+```jsonc
+{
+  "name": "Build",
+  "run": "cd ${worktree} && npm run build",
+  "verify": "cd ${worktree} && npm test",
+  "on_fail": "human"
+}
+```
+
+### 12. Working in the Worktree
 
 Always `cd ${worktree}` for commands that need to run in the task's worktree:
 

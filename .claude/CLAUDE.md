@@ -7,10 +7,10 @@ An orchestrator for AI coding agents. Manages agent lifecycle (setup → develop
 ```
 src/
 ├── main.rs              # Entry point
-├── cli.rs               # clap CLI (20 subcommands)
+├── cli.rs               # clap CLI (19 subcommands)
 ├── model/
 │   ├── config.rs        # Config + Step structs, JSONC loader
-│   ├── event.rs         # Event enum (12 variants), AgentResult, replay()
+│   ├── event.rs         # Event enum (14 variants), AgentResult, replay()
 │   ├── state.rs         # TaskState, TaskStatus, StepStatus (projection types)
 │   └── task.rs          # TaskDefinition + YAML frontmatter parser
 ├── cmd/
@@ -18,10 +18,10 @@ src/
 │   ├── common.rs        # Project context, event append/read/replay helpers
 │   ├── init.rs          # wf init (guided TUI)
 │   ├── create.rs        # wf create
-│   ├── start.rs         # wf start (execution engine core)
+│   ├── start.rs         # wf start (execution engine core, verify helpers)
 │   ├── status.rs        # wf status / wf list
 │   ├── control.rs       # wf next/retry/back/skip/stop/reset + _on-exit
-│   ├── agent.rs         # wf done/fail/block (with verify validation)
+│   ├── agent.rs         # wf done/fail (with verify validation)
 │   ├── capture.rs       # wf capture (tmux content)
 │   ├── wait.rs          # wf wait (poll until status)
 │   ├── enter.rs         # wf enter (attach to tmux window)
@@ -41,10 +41,11 @@ src/
 
 ## Core Concepts
 
-- **Step**: Execution unit — normal command, checkpoint (no `run`), or in_window (`in_window: true`)
-- **Checkpoint**: Pauses workflow, waits for `wf next`
-- **in_window**: Runs command in tmux window, waits for `wf done/fail/block`
-- **Verify**: Validation command on Step; must exit 0 before `wf done` succeeds
+- **Step**: 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_window`
+- **Gate step**: No `run` command — waits for `wf next` / `wf done`
+- **in_window**: Runs command in tmux window, waits for `wf done/fail`
+- **Verify**: `"human"` for manual approval, or a shell command (must exit 0)
+- **on_fail**: `"retry"` for auto-retry (up to max_retries), `"human"` to wait for decision
 
 ## Config (`.wf/config.jsonc`)
 
@@ -62,9 +63,11 @@ src/
 // Step
 {
   name: string,             // required
-  run?: string,             // shell command (omit for checkpoint)
+  run?: string,             // shell command (omit for gate step)
   in_window?: boolean,      // default: false
-  verify?: string           // verifier command for wf done (must exit 0)
+  verify?: string,          // "human" or shell command (must exit 0)
+  on_fail?: string,         // "retry" or "human"
+  max_retries?: number      // default: 3 (when on_fail="retry")
 }
 ```
 
@@ -90,7 +93,7 @@ All variables are available as `${var}` in config and as `WF_VAR` env vars in su
 
 **TaskStatus**: `Pending` → `Running` → `Waiting` / `Completed` / `Failed` / `Stopped`
 
-**StepStatus**: `Success` | `Failed` | `Blocked` | `Skipped`
+**StepStatus**: `Success` | `Failed` | `Skipped`
 
 ## Event Sourcing
 
@@ -98,14 +101,15 @@ JSONL is the **single source of truth** — no `status.json`. State is reconstru
 
 Per-task event log: `.wf/logs/{task}.jsonl`
 
-13 event types:
+14 event types:
 - `task_started` — initializes Running, step=0
 - `command_executed` — exit_code==0 ? Success+advance : Failed
-- `checkpoint_reached` — Waiting
-- `checkpoint_passed` — advance step
+- `step_waiting` — step paused, waiting for approval
+- `step_approved` — approval granted, advance step
 - `window_launched` — Running (in_window step sent to tmux)
-- `agent_reported` — Done/Failed/Blocked result from agent
+- `agent_reported` — Done/Failed result from agent
 - `on_exit` — tmux exit handler (ignored if AgentReported already handled the step)
+- `verify_failed` — verify command failed (feedback stored)
 - `step_skipped` — Skipped+advance
 - `step_retried` — clear step_status, Running
 - `step_rolled_back` — current_step=to_step, Waiting
@@ -115,7 +119,7 @@ Per-task event log: `.wf/logs/{task}.jsonl`
 
 Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
 
-Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${result}`, `${message}`, `${session_id}`) are injected alongside standard context variables.
+Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${result}`, `${message}`, `${session_id}`, `${feedback}`) are injected alongside standard context variables.
 
 ## CLI Commands
 
@@ -126,7 +130,7 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `wf list` | List all tasks |
 | `wf start <task>` | Start task execution |
 | `wf status [task] [--json]` | Show status |
-| `wf next <task>` | Continue past checkpoint |
+| `wf next <task>` | Approve waiting step |
 | `wf retry <task>` | Retry failed step |
 | `wf back <task>` | Go back one step |
 | `wf skip <task>` | Skip current step |
@@ -136,9 +140,8 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `wf capture <task> [-l N] [--json]` | Capture tmux content |
 | `wf wait <task> --until <status> [-t sec]` | Wait for status |
 | `wf log <task> [--step N] [--all]` | View logs |
-| `wf done <task> [-m msg]` | Agent: mark step done |
-| `wf fail <task> [-m msg]` | Agent: mark step failed |
-| `wf block <task> [-m msg]` | Agent: mark step blocked |
+| `wf done <task> [-m msg]` | Mark step done / approve |
+| `wf fail <task> [-m msg]` | Mark step failed / reject |
 | `wf tui` | Open interactive TUI |
 
 ## Execution Flow
@@ -146,15 +149,22 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 ```
 start(task)
   └─ execute loop:
-     ├─ Checkpoint → status=Waiting, return (wait for `wf next`)
-     ├─ Normal step → run sync → exit 0? next step : Failed
-     └─ in_window step → send to tmux → return (wait for `wf done/fail/block`)
+     ├─ Gate step (no run) → StepWaiting, return (wait for wf next/done)
+     ├─ Normal step → run sync → check verify:
+     │   ├─ no verify → use exit code
+     │   ├─ verify: "human" → StepWaiting (wait for wf done)
+     │   └─ verify: command → run it
+     │       ├─ pass → advance
+     │       └─ fail → handle_verify_failure(on_fail strategy)
+     └─ in_window step → send to tmux → return (wait for wf done/fail)
 
 done(task)
-  ├─ run verify (if any) → fail? reject
-  ├─ append_event(AgentReported { result: Done })
-  ├─ continue_execution (run remaining steps)
-  └─ cleanup tmux window
+  ├─ Running: run verify → pass? emit AgentReported(Done) → continue
+  └─ Waiting: emit StepApproved → continue
+
+fail(task)
+  ├─ Running: emit AgentReported(Failed)
+  └─ Waiting: on_fail="retry"? StepRetried : AgentReported(Failed)
 ```
 
 ## File System Layout

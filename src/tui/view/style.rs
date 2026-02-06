@@ -26,7 +26,6 @@ impl Theme {
             StepItemStatus::Success => Color::Green,
             StepItemStatus::Failed => Color::Red,
             StepItemStatus::Skipped => Color::DarkGray,
-            StepItemStatus::Blocked => Color::Yellow,
         }
     }
 
@@ -103,6 +102,5 @@ pub fn status_marker(status: StepItemStatus) -> &'static str {
         StepItemStatus::Success => "o",
         StepItemStatus::Failed => "x",
         StepItemStatus::Skipped => "-",
-        StepItemStatus::Blocked => "!",
     }
 }

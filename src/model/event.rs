@@ -18,11 +18,11 @@ pub enum Event {
         stdout: String,
         stderr: String,
     },
-    CheckpointReached {
+    StepWaiting {
         ts: DateTime<Utc>,
         step: usize,
     },
-    CheckpointPassed {
+    StepApproved {
         ts: DateTime<Utc>,
         step: usize,
     },
@@ -70,6 +70,11 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         transcript: Option<String>,
     },
+    VerifyFailed {
+        ts: DateTime<Utc>,
+        step: usize,
+        feedback: String,
+    },
     WindowLost {
         ts: DateTime<Utc>,
         step: usize,
@@ -81,7 +86,6 @@ pub enum Event {
 pub enum AgentResult {
     Done,
     Failed,
-    Blocked,
 }
 
 pub fn event_timestamp() -> DateTime<Utc> {
@@ -94,8 +98,8 @@ impl Event {
         match self {
             Event::TaskStarted { .. } => "task_started",
             Event::CommandExecuted { .. } => "command_executed",
-            Event::CheckpointReached { .. } => "checkpoint_reached",
-            Event::CheckpointPassed { .. } => "checkpoint_passed",
+            Event::StepWaiting { .. } => "step_waiting",
+            Event::StepApproved { .. } => "step_approved",
             Event::WindowLaunched { .. } => "window_launched",
             Event::AgentReported { .. } => "agent_reported",
             Event::OnExit { .. } => "on_exit",
@@ -104,6 +108,7 @@ impl Event {
             Event::StepRolledBack { .. } => "step_rolled_back",
             Event::TaskStopped { .. } => "task_stopped",
             Event::TaskReset { .. } => "task_reset",
+            Event::VerifyFailed { .. } => "verify_failed",
             Event::WindowLost { .. } => "window_lost",
         }
     }
@@ -113,14 +118,15 @@ impl Event {
         match self {
             Event::TaskStarted { .. } | Event::TaskReset { .. } => None,
             Event::CommandExecuted { step, .. }
-            | Event::CheckpointReached { step, .. }
-            | Event::CheckpointPassed { step, .. }
+            | Event::StepWaiting { step, .. }
+            | Event::StepApproved { step, .. }
             | Event::WindowLaunched { step, .. }
             | Event::AgentReported { step, .. }
             | Event::OnExit { step, .. }
             | Event::StepSkipped { step, .. }
             | Event::StepRetried { step, .. }
             | Event::TaskStopped { step, .. }
+            | Event::VerifyFailed { step, .. }
             | Event::WindowLost { step, .. } => Some(*step),
             Event::StepRolledBack { from_step, .. } => Some(*from_step),
         }
@@ -152,6 +158,9 @@ impl Event {
             Event::StepRolledBack { from_step, to_step, .. } => {
                 vars.insert("from_step".to_string(), from_step.to_string());
                 vars.insert("to_step".to_string(), to_step.to_string());
+            }
+            Event::VerifyFailed { feedback, .. } => {
+                vars.insert("feedback".to_string(), feedback.clone());
             }
             _ => {}
         }
@@ -198,12 +207,12 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                     s.message = Some(format!("Exit code: {}", exit_code));
                 }
             }
-            Event::CheckpointReached { ts, .. } => {
+            Event::StepWaiting { ts, .. } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.status = TaskStatus::Waiting;
             }
-            Event::CheckpointPassed { ts, step } => {
+            Event::StepApproved { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.current_step = step + 1;
@@ -233,11 +242,6 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                     AgentResult::Failed => {
                         s.step_status.insert(*step, StepStatus::Failed);
                         s.status = TaskStatus::Failed;
-                        s.message = message.clone();
-                    }
-                    AgentResult::Blocked => {
-                        s.step_status.insert(*step, StepStatus::Blocked);
-                        s.status = TaskStatus::Waiting;
                         s.message = message.clone();
                     }
                 }
@@ -289,6 +293,13 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.status = TaskStatus::Stopped;
+            }
+            Event::VerifyFailed { ts, step, feedback } => {
+                let Some(s) = state.as_mut() else { continue };
+                s.updated_at = Some(*ts);
+                s.step_status.insert(*step, StepStatus::Failed);
+                s.status = TaskStatus::Failed;
+                s.message = Some(feedback.clone());
             }
             Event::WindowLost { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
@@ -364,19 +375,35 @@ mod tests {
     }
 
     #[test]
-    fn test_checkpoint_flow() {
+    fn test_step_waiting_approved() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::CheckpointReached { ts: ts(), step: 0 },
+            Event::StepWaiting { ts: ts(), step: 0 },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);
 
         let mut events2 = events;
-        events2.push(Event::CheckpointPassed { ts: ts(), step: 0 });
+        events2.push(Event::StepApproved { ts: ts(), step: 0 });
         let state = replay(&events2, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Running);
         assert_eq!(state.current_step, 1);
+    }
+
+    #[test]
+    fn test_verify_failed() {
+        let events = vec![
+            Event::TaskStarted { ts: ts() },
+            Event::VerifyFailed {
+                ts: ts(),
+                step: 0,
+                feedback: "tests failed".to_string(),
+            },
+        ];
+        let state = replay(&events, 3).unwrap();
+        assert_eq!(state.status, TaskStatus::Failed);
+        assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
+        assert_eq!(state.message.as_deref(), Some("tests failed"));
     }
 
     #[test]

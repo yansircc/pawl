@@ -24,7 +24,6 @@ pub enum Action {
     SkipTask(String),
     DoneTask(String),
     FailTask(String),
-    BlockTask(String),
 
     // Modal
     ShowHelp,

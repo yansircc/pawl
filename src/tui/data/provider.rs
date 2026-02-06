@@ -20,7 +20,6 @@ pub enum TaskAction {
     Skip(String),
     Done(String),
     Fail(String),
-    Block(String),
 }
 
 /// Trait for loading data and executing actions

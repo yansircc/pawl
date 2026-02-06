@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use std::time::Instant;
 
+use crate::model::config::Step;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
 use crate::util::shell::run_command_with_env;
@@ -100,15 +101,24 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         );
 
         // Handle different step types
-        if step.is_checkpoint() {
-            // Checkpoint: emit event and wait
-            project.append_event(task_name, &Event::CheckpointReached {
-                ts: event_timestamp(),
-                step: step_idx,
-            })?;
-
-            println!("  → Checkpoint. Use 'wf next {}' to continue.", task_name);
-            return Ok(());
+        if step.is_gate() {
+            if step.verify_is_human() {
+                // Gate with human verify: wait for approval
+                project.append_event(task_name, &Event::StepWaiting {
+                    ts: event_timestamp(),
+                    step: step_idx,
+                })?;
+                println!("  → Waiting for approval. Use 'wf next {}' or 'wf done {}' to continue.", task_name, task_name);
+                return Ok(());
+            } else {
+                // Plain gate without verify: auto-advance (shouldn't normally happen, but safe)
+                project.append_event(task_name, &Event::StepWaiting {
+                    ts: event_timestamp(),
+                    step: step_idx,
+                })?;
+                println!("  → Waiting for approval. Use 'wf next {}' to continue.", task_name);
+                return Ok(());
+            }
         }
 
         let command = step.run.as_ref().unwrap();
@@ -125,7 +135,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             return Ok(());
         } else {
             // Normal step: execute synchronously
-            let should_continue = execute_step(project, task_name, &ctx, &expanded)?;
+            let should_continue = execute_step(project, task_name, &step, &ctx, &expanded)?;
             if !should_continue {
                 return Ok(());
             }
@@ -137,6 +147,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
 fn execute_step(
     project: &Project,
     task_name: &str,
+    step: &Step,
     ctx: &Context,
     command: &str,
 ) -> Result<bool> {
@@ -150,7 +161,7 @@ fn execute_step(
 
     let duration = start_time.elapsed().as_secs_f64();
 
-    // Emit CommandExecuted event (replaces both log append and status update)
+    // Emit CommandExecuted event
     project.append_event(task_name, &Event::CommandExecuted {
         ts: event_timestamp(),
         step: step_idx,
@@ -163,13 +174,31 @@ fn execute_step(
     if result.success {
         println!("  ✓ Done");
 
-        // Check if all steps completed after this one
-        let new_state = project.replay_task(task_name)?.expect("Task state missing");
-        if new_state.status == TaskStatus::Completed {
-            println!("Task '{}' completed!", task_name);
-            return Ok(false);
+        // After successful run, check verify
+        match run_verify(project, task_name, step, step_idx)? {
+            VerifyOutcome::Passed => {
+                // Check if all steps completed
+                let new_state = project.replay_task(task_name)?.expect("Task state missing");
+                if new_state.status == TaskStatus::Completed {
+                    println!("Task '{}' completed!", task_name);
+                    return Ok(false);
+                }
+                Ok(true)
+            }
+            VerifyOutcome::HumanRequired => {
+                // verify: "human" — wait for human approval
+                project.append_event(task_name, &Event::StepWaiting {
+                    ts: event_timestamp(),
+                    step: step_idx,
+                })?;
+                println!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name);
+                Ok(false)
+            }
+            VerifyOutcome::Failed { feedback } => {
+                handle_verify_failure(project, task_name, step_idx, &feedback, step)?;
+                Ok(false)
+            }
         }
-        Ok(true)
     } else {
         println!("  ✗ Failed (exit code {})", result.exit_code);
         if !result.stderr.is_empty() {
@@ -218,4 +247,124 @@ fn execute_in_window(
     tmux::send_keys(session, window, &wrapped)?;
 
     Ok(())
+}
+
+// --- Verify helpers ---
+
+pub enum VerifyOutcome {
+    Passed,
+    Failed { feedback: String },
+    HumanRequired,
+}
+
+/// Run the verify command for a step, if any.
+pub fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
+    match &step.verify {
+        None => Ok(VerifyOutcome::Passed),
+        Some(v) if v == "human" => Ok(VerifyOutcome::HumanRequired),
+        Some(cmd) => {
+            let session = project.session_name();
+            let log_file = project.log_file(task_name);
+            let task_file = project.task_file(task_name);
+
+            let ctx = Context::new_full(
+                task_name,
+                &session,
+                &project.repo_root,
+                &project.config.worktree_dir,
+                &step.name,
+                step_idx,
+                &log_file.to_string_lossy(),
+                &task_file.to_string_lossy(),
+                &project.config.base_branch,
+            );
+
+            let expanded = ctx.expand(cmd);
+            let env = ctx.to_env_vars();
+            let result = run_command_with_env(&expanded, &env)?;
+
+            if result.success {
+                Ok(VerifyOutcome::Passed)
+            } else {
+                let mut feedback = String::new();
+                if !result.stdout.is_empty() {
+                    feedback.push_str(&result.stdout);
+                }
+                if !result.stderr.is_empty() {
+                    if !feedback.is_empty() {
+                        feedback.push('\n');
+                    }
+                    feedback.push_str(&result.stderr);
+                }
+                Ok(VerifyOutcome::Failed { feedback })
+            }
+        }
+    }
+}
+
+/// Handle a verify failure: emit VerifyFailed, then apply on_fail strategy.
+pub fn handle_verify_failure(
+    project: &Project,
+    task_name: &str,
+    step_idx: usize,
+    feedback: &str,
+    step: &Step,
+) -> Result<()> {
+    // Emit VerifyFailed event
+    project.append_event(task_name, &Event::VerifyFailed {
+        ts: event_timestamp(),
+        step: step_idx,
+        feedback: feedback.to_string(),
+    })?;
+
+    if step.on_fail_retry() {
+        let retry_count = count_verify_failures(project, task_name, step_idx)?;
+        if retry_count <= step.effective_max_retries() {
+            println!("  Verify failed (attempt {}/{}). Auto-retrying...",
+                     retry_count, step.effective_max_retries());
+            project.append_event(task_name, &Event::StepRetried {
+                ts: event_timestamp(),
+                step: step_idx,
+            })?;
+            continue_execution(project, task_name)?;
+        } else {
+            println!("  Verify failed. Max retries ({}) reached.", step.effective_max_retries());
+        }
+    } else if step.on_fail_human() {
+        project.append_event(task_name, &Event::StepWaiting {
+            ts: event_timestamp(),
+            step: step_idx,
+        })?;
+        println!("  Verify failed. Waiting for human decision.");
+        println!("  Use 'wf retry {}' to retry or 'wf skip {}' to skip.", task_name, task_name);
+    } else {
+        // Default: just fail (VerifyFailed already set status to Failed)
+        println!("  ✗ Verify failed.");
+        if !feedback.is_empty() {
+            for line in feedback.lines().take(5) {
+                println!("    {}", line);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Count VerifyFailed events for a specific step since last TaskStarted/TaskReset.
+fn count_verify_failures(project: &Project, task_name: &str, step_idx: usize) -> Result<usize> {
+    let events = project.read_events(task_name)?;
+    let mut count = 0;
+
+    // Iterate from end, counting VerifyFailed for this step until we hit a boundary
+    for event in events.iter().rev() {
+        match event {
+            Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
+            Event::VerifyFailed { step, .. } if *step == step_idx => {
+                count += 1;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(count)
 }

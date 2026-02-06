@@ -2,51 +2,40 @@
 
 ## 本次 Session 完成的工作
 
-### Event Sourcing 迁移
+### Step 验证模型改造
 
-将持久化从双源（`status.json` + JSONL 日志）迁移到单源 Event Sourcing 架构。JSONL 事件日志成为唯一的 source of truth，`status.json` 彻底移除。
+将 Step 模型从 checkpoint/block 体系迁移到 4 个正交属性（`run`, `verify`, `on_fail`, `in_window`），消除了 checkpoint 和 block 概念。
 
-**新增文件**:
-- `src/model/event.rs` — Event 枚举（12 种事件）、AgentResult、`replay()` 函数、13 个单元测试
+**Phase 1: 删除 block 概念**
+- 删除 `AgentResult::Blocked`、`StepStatus::Blocked`、`wf block` CLI 命令
+- 清理 TUI 中所有 Blocked 引用（8 个文件）
 
-**删除文件**:
-- `src/model/log.rs` — StepLog 被 Event 完全取代
+**Phase 2: 配置模型扩展**
+- Step 新增 `on_fail`（"retry"/"human"）和 `max_retries` 字段
+- 新增 `is_gate()`、`verify_is_human()`、`on_fail_retry()`、`on_fail_human()`、`effective_max_retries()` 方法
+- `is_checkpoint()` 删除
 
-**重写文件**:
+**Phase 3: 事件模型改造**
+- `CheckpointReached` → `StepWaiting`，`CheckpointPassed` → `StepApproved`
+- 新增 `VerifyFailed` 事件（含 `feedback` 字段）
+- 14 种事件类型，更新 replay/type_name/step_index/extra_vars
 
-| 文件 | 改动 |
-|------|------|
-| `src/model/state.rs` | 移除 StatusStore 及所有 mutation helpers，仅保留 TaskState/TaskStatus/StepStatus 纯数据结构 |
-| `src/model/mod.rs` | 更新 exports：移除 log/StatusStore，添加 event/Event/AgentResult |
-| `src/cmd/common.rs` | 移除 `status` 字段/`save_status()`/`append_log()`/`read_logs()`；新增 `append_event()`（带 fs2 文件锁）/`read_events()`/`replay_task()` |
-| `src/cmd/start.rs` | 所有 status 写入 + log append → `append_event()`；`&mut Project` → `&Project` |
-| `src/cmd/control.rs` | next/retry/back/skip/stop/reset/on_exit 全部改为 event append |
-| `src/cmd/agent.rs` | done/fail/block 改为 `AgentReported` event |
-| `src/cmd/status.rs` | `project.status.get()` → `project.replay_task()` |
-| `src/cmd/log.rs` | 读 Event 替代 StepLog |
-| `src/cmd/capture.rs` | 替换 status.get() |
-| `src/cmd/wait.rs` | 轮询改为读 JSONL + replay |
-| `src/tui/data/live.rs` | 移除 StatusStore::load()，改为逐任务 replay |
+**Phase 4: 执行引擎改造**
+- `start.rs`：新增 `run_verify()`、`handle_verify_failure()`、`count_verify_failures()`
+- 执行循环支持 gate+human verify、普通步骤后 verify、on_fail 策略（auto-retry/human/default）
+- `control.rs`：`on_exit()` 集成 verify 逻辑
+- `agent.rs`：`done()`/`fail()` 扩展支持 Waiting 状态
 
-**关键设计决策**:
-- `replay()` 中 OnExit 事件仅当 step 尚未被 AgentReported 处理时才生效（防竞争）
-- TaskReset 不删文件，只 append 事件（replay 遇到后清空状态）
-- 所有 cmd 函数改为 `&Project`（不可变借用），消除借用检查器冲突
-- `append_event()` 使用 `fs2::lock_exclusive()` + 错误传播 `?`
+**Phase 5+6: 显示层 + 文档**
+- TUI：`StepType::Checkpoint` → `StepType::HumanVerify`
+- init.rs：DEFAULT_CONFIG 使用 `verify: "human"` 替代空 checkpoint
+- 更新 CLAUDE.md、.wf/README.md
 
----
+**Greenfield 清理**
+- 删除过时的 `docs/` 目录（10 个文件）
+- 删除已完成的 spec、过时的 HANDOFF.md 和 insights.md
 
-## 之前 Session 完成的功能
-
-| 功能 | 状态 |
-|------|------|
-| 核心执行引擎 + E2E 测试 | ✅ |
-| Event Sourcing（JSONL 单源） | ✅ |
-| Session ID 提取 + Transcript | ✅ |
-| 变量展开（11 个变量） | ✅ |
-| Verify (原 Stop Hook) | ✅ |
-| TUI 界面 | ✅ |
-| `wf init` 引导式初始化 | ✅ |
+**改动文件汇总**: 22 个 Rust 源文件修改，14 个文档文件删除/更新
 
 ---
 
@@ -55,22 +44,12 @@
 | 功能 | 文件 |
 |------|------|
 | CLI 定义 | `src/cli.rs` |
-| 配置模型 | `src/model/config.rs` |
-| 事件模型 + replay | `src/model/event.rs` |
+| 配置模型（Step 4 属性） | `src/model/config.rs` |
+| 事件模型 + replay（14 种） | `src/model/event.rs` |
 | 状态投影类型 | `src/model/state.rs` |
-| 执行引擎 | `src/cmd/start.rs` |
-| Agent 命令 | `src/cmd/agent.rs` |
-| 控制命令 | `src/cmd/control.rs` |
+| 执行引擎 + verify helpers | `src/cmd/start.rs` |
+| Agent 命令（done/fail） | `src/cmd/agent.rs` |
+| 控制命令（next/retry/on_exit） | `src/cmd/control.rs` |
 | 公共工具（事件读写） | `src/cmd/common.rs` |
-| 变量展开 | `src/util/variable.rs` |
-| tmux 操作 | `src/util/tmux.rs` |
-| TUI 数据层 | `src/tui/data/live.rs` |
-
----
-
-## 相关文档
-
-- `.claude/CLAUDE.md` - 项目概述（已更新）
-- `.claude/insights.md` - 深度分析（已更新，标记已解决项）
-- `docs/config.md` - 配置文件参考
-- `docs/log-system.md` - 日志系统设计（内容可能需要更新以反映 Event Sourcing）
+| 项目概述 | `.claude/CLAUDE.md` |
+| 配置指南 | `.wf/README.md` |

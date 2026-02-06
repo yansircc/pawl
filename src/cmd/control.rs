@@ -5,6 +5,7 @@ use crate::model::{Event, TaskStatus};
 use crate::util::tmux;
 
 use super::common::Project;
+use super::start;
 use super::start::continue_execution;
 
 /// Advance to next step (pass checkpoint or continue after in_window)
@@ -19,7 +20,7 @@ pub fn next(task_name: &str) -> Result<()> {
 
     match state.status {
         TaskStatus::Waiting => {
-            project.append_event(&task_name, &Event::CheckpointPassed {
+            project.append_event(&task_name, &Event::StepApproved {
                 ts: event_timestamp(),
                 step: state.current_step,
             })?;
@@ -223,6 +224,7 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
     }
 
     let step_idx = state.current_step;
+    let step = &project.config.workflow[step_idx];
 
     // Get session info for logging
     let session = project.session_name();
@@ -244,9 +246,49 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
     let new_state = project.replay_task(task_name)?;
 
     if let Some(new_state) = new_state {
+        // If OnExit was ignored (already handled by AgentReported), do nothing
+        if new_state.step_status.contains_key(&step_idx) && new_state.current_step <= step_idx {
+            // Step was already handled — only check if it advanced us
+            if new_state.status == TaskStatus::Running && new_state.current_step > step_idx {
+                // Check verify after successful on_exit
+                let step = step.clone();
+                match start::run_verify(&project, task_name, &step, step_idx)? {
+                    start::VerifyOutcome::Passed => {
+                        continue_execution(&project, task_name)?;
+                    }
+                    start::VerifyOutcome::HumanRequired => {
+                        project.append_event(task_name, &Event::StepWaiting {
+                            ts: event_timestamp(),
+                            step: step_idx,
+                        })?;
+                    }
+                    start::VerifyOutcome::Failed { feedback } => {
+                        start::handle_verify_failure(&project, task_name, step_idx, &feedback, &step)?;
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         if new_state.status == TaskStatus::Running && new_state.current_step > step_idx {
-            println!("Step {} completed successfully.", step_idx + 1);
-            continue_execution(&project, task_name)?;
+            // Step completed successfully via OnExit — check verify
+            let step = step.clone();
+            match start::run_verify(&project, task_name, &step, step_idx)? {
+                start::VerifyOutcome::Passed => {
+                    println!("Step {} completed successfully.", step_idx + 1);
+                    continue_execution(&project, task_name)?;
+                }
+                start::VerifyOutcome::HumanRequired => {
+                    project.append_event(task_name, &Event::StepWaiting {
+                        ts: event_timestamp(),
+                        step: step_idx,
+                    })?;
+                    println!("Step {} completed. Waiting for human verification.", step_idx + 1);
+                }
+                start::VerifyOutcome::Failed { feedback } => {
+                    start::handle_verify_failure(&project, task_name, step_idx, &feedback, &step)?;
+                }
+            }
         } else if new_state.status == TaskStatus::Failed {
             eprintln!(
                 "Task '{}' failed at step {} (exit code: {}). Use 'wf retry {}' to retry.",
@@ -256,7 +298,6 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
                 task_name
             );
         }
-        // If OnExit was ignored (already handled by AgentReported), do nothing
     }
 
     Ok(())

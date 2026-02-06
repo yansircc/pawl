@@ -137,8 +137,8 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
 
     let mut steps: Vec<StepInfo> = Vec::new();
     for (i, step) in workflow.iter().enumerate() {
-        let step_type = if step.is_checkpoint() {
-            Some("checkpoint".to_string())
+        let step_type = if step.is_gate() {
+            Some("gate".to_string())
         } else if step.in_window {
             Some("in_window".to_string())
         } else {
@@ -313,7 +313,6 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
                         StepStatus::Success => "✓",
                         StepStatus::Failed => "✗",
                         StepStatus::Skipped => "○",
-                        StepStatus::Blocked => "!",
                     }
                 } else {
                     "✓"
@@ -327,8 +326,8 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
             " "
         };
 
-        let step_type = if step.is_checkpoint() {
-            "(checkpoint)"
+        let step_type = if step.is_gate() {
+            "(gate)"
         } else if step.in_window {
             "(in_window)"
         } else {
@@ -356,7 +355,6 @@ fn format_step_status(status: StepStatus) -> String {
     match status {
         StepStatus::Success => "success".to_string(),
         StepStatus::Failed => "failed".to_string(),
-        StepStatus::Blocked => "blocked".to_string(),
         StepStatus::Skipped => "skipped".to_string(),
     }
 }

@@ -161,9 +161,6 @@ fn handle_action(
         Action::FailTask(name) => {
             state = execute_task_action(state, TaskAction::Fail(name), provider);
         }
-        Action::BlockTask(name) => {
-            state = execute_task_action(state, TaskAction::Block(name), provider);
-        }
 
         _ => {}
     }
@@ -233,7 +230,6 @@ fn execute_task_action(
         TaskAction::Skip(_) => "Skipped",
         TaskAction::Done(_) => "Marked done",
         TaskAction::Fail(_) => "Marked failed",
-        TaskAction::Block(_) => "Marked blocked",
     };
 
     match provider.execute_action(&action) {

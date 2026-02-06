@@ -57,7 +57,7 @@ pub struct Step {
     /// Step name
     pub name: String,
 
-    /// Command to run (None = checkpoint)
+    /// Command to run (None = gate step)
     #[serde(default)]
     pub run: Option<String>,
 
@@ -65,16 +65,43 @@ pub struct Step {
     #[serde(default)]
     pub in_window: bool,
 
-    /// Verifier command to run before accepting "wf done"
-    /// Must exit 0 for done to succeed; stdout/stderr shown as feedback on failure
+    /// Verifier: a shell command (must exit 0) or "human" for manual approval
     #[serde(default)]
     pub verify: Option<String>,
+
+    /// Failure strategy: "retry" (auto-retry) or "human" (wait for decision)
+    #[serde(default)]
+    pub on_fail: Option<String>,
+
+    /// Max auto-retries when on_fail="retry" (default: 3)
+    #[serde(default)]
+    pub max_retries: Option<usize>,
 }
 
 impl Step {
-    /// Check if this step is a checkpoint (no run command)
-    pub fn is_checkpoint(&self) -> bool {
+    /// Gate step: no run command (waits for approval or passes through)
+    pub fn is_gate(&self) -> bool {
         self.run.is_none()
+    }
+
+    /// verify: "human" — human verifier (manual approval required)
+    pub fn verify_is_human(&self) -> bool {
+        self.verify.as_deref() == Some("human")
+    }
+
+    /// on_fail: "retry" — auto-retry on failure
+    pub fn on_fail_retry(&self) -> bool {
+        self.on_fail.as_deref() == Some("retry")
+    }
+
+    /// on_fail: "human" — wait for human decision on failure
+    pub fn on_fail_human(&self) -> bool {
+        self.on_fail.as_deref() == Some("human")
+    }
+
+    /// Effective max retries (default: 3)
+    pub fn effective_max_retries(&self) -> usize {
+        self.max_retries.unwrap_or(3)
     }
 }
 

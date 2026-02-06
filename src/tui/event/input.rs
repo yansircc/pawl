@@ -196,7 +196,6 @@ fn handle_tmux_view_key(key: KeyEvent, state: &AppState) -> Option<Action> {
         // Agent operations in tmux view
         KeyCode::Char('D') => Some(Action::DoneTask(task_name.clone())),
         KeyCode::Char('F') => Some(Action::FailTask(task_name.clone())),
-        KeyCode::Char('B') => Some(Action::BlockTask(task_name.clone())),
 
         // Task operations
         KeyCode::Char('n') => Some(Action::NextTask(task_name.clone())),

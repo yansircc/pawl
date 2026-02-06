@@ -115,7 +115,7 @@ fn render_steps(frame: &mut Frame, area: Rect, state: &TaskDetailState) {
 
             let step_type_str = match step.step_type {
                 StepType::Normal => "",
-                StepType::Checkpoint => " (checkpoint)",
+                StepType::HumanVerify => " (human verify)",
                 StepType::InWindow => " (in_window)",
             };
 

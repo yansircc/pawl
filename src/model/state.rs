@@ -45,6 +45,5 @@ pub enum TaskStatus {
 pub enum StepStatus {
     Success,
     Failed,
-    Blocked,
     Skipped,
 }

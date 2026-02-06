@@ -47,8 +47,8 @@ const DEFAULT_CONFIG: &str = r#"{
       "in_window": true
     },
 
-    // 人工确认开发完成（checkpoint）
-    { "name": "Review development" },
+    // 人工确认开发完成
+    { "name": "Review development", "verify": "human" },
 
     // 合并到主分支
     {
@@ -91,11 +91,11 @@ LAST_LINE=0; [ -f "$STATE_FILE" ] && LAST_LINE=$(cat "$STATE_FILE")
 CURRENT_LINE=$(wc -l < "$TRANSCRIPT" | tr -d ' ')
 [ "$CURRENT_LINE" -le "$LAST_LINE" ] && exit 0
 
-tail -n +$((LAST_LINE + 1)) "$TRANSCRIPT" | grep -q 'wf done\|wf fail\|wf block' && { rm -f "$STATE_FILE"; exit 0; }
+tail -n +$((LAST_LINE + 1)) "$TRANSCRIPT" | grep -q 'wf done\|wf fail' && { rm -f "$STATE_FILE"; exit 0; }
 
 echo "$CURRENT_LINE" > "$STATE_FILE"
 TASK="${WF_TASK:-task}"
-echo "{\"decision\":\"block\",\"reason\":\"【自检】请确认任务完成后执行：\\n- 成功: wf done ${TASK}\\n- 失败: wf fail ${TASK} -m 原因\\n- 阻塞: wf block ${TASK} -m 原因\"}"
+echo "{\"decision\":\"block\",\"reason\":\"【自检】请确认任务完成后执行：\\n- 成功: wf done ${TASK}\\n- 失败: wf fail ${TASK} -m 原因\"}"
 exit 0
 "#;
 

@@ -140,15 +140,6 @@ pub enum Command {
         message: Option<String>,
     },
 
-    /// Mark current step as blocked (for agent use)
-    Block {
-        /// Task name
-        task: String,
-        /// Optional message
-        #[arg(short, long)]
-        message: Option<String>,
-    },
-
     /// Internal: called on window exit
     #[command(name = "_on-exit", hide = true)]
     OnExit {

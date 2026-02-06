@@ -180,8 +180,8 @@ impl DataProvider for LiveDataProvider {
             .iter()
             .enumerate()
             .map(|(i, step)| {
-                let step_type = if step.is_checkpoint() {
-                    StepType::Checkpoint
+                let step_type = if step.is_gate() || step.verify_is_human() {
+                    StepType::HumanVerify
                 } else if step.in_window {
                     StepType::InWindow
                 } else {
@@ -251,7 +251,6 @@ impl DataProvider for LiveDataProvider {
             TaskAction::Skip(name) => control::skip(name),
             TaskAction::Done(name) => agent::done(name, None),
             TaskAction::Fail(name) => agent::fail(name, None),
-            TaskAction::Block(name) => agent::block(name, None),
         }
     }
 }

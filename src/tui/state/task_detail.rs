@@ -12,7 +12,7 @@ pub struct StepItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepType {
     Normal,
-    Checkpoint,
+    HumanVerify,
     InWindow,
 }
 
@@ -23,7 +23,6 @@ pub enum StepItemStatus {
     Success,
     Failed,
     Skipped,
-    Blocked,
 }
 
 impl From<StepStatus> for StepItemStatus {
@@ -32,7 +31,6 @@ impl From<StepStatus> for StepItemStatus {
             StepStatus::Success => StepItemStatus::Success,
             StepStatus::Failed => StepItemStatus::Failed,
             StepStatus::Skipped => StepItemStatus::Skipped,
-            StepStatus::Blocked => StepItemStatus::Blocked,
         }
     }
 }
@@ -109,7 +107,7 @@ mod tests {
                 StepItem {
                     index: 1,
                     name: "step2".to_string(),
-                    step_type: StepType::Checkpoint,
+                    step_type: StepType::HumanVerify,
                     status: StepItemStatus::Current,
                 },
             ],
@@ -175,10 +173,6 @@ mod tests {
         assert_eq!(
             StepItemStatus::from(StepStatus::Skipped),
             StepItemStatus::Skipped
-        );
-        assert_eq!(
-            StepItemStatus::from(StepStatus::Blocked),
-            StepItemStatus::Blocked
         );
     }
 }

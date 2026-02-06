@@ -76,8 +76,8 @@ fn get_event_step(event: &Event) -> Option<usize> {
         Event::TaskStarted { .. } => None,
         Event::TaskReset { .. } => None,
         Event::CommandExecuted { step, .. } => Some(*step),
-        Event::CheckpointReached { step, .. } => Some(*step),
-        Event::CheckpointPassed { step, .. } => Some(*step),
+        Event::StepWaiting { step, .. } => Some(*step),
+        Event::StepApproved { step, .. } => Some(*step),
         Event::WindowLaunched { step, .. } => Some(*step),
         Event::AgentReported { step, .. } => Some(*step),
         Event::StepSkipped { step, .. } => Some(*step),
@@ -85,6 +85,7 @@ fn get_event_step(event: &Event) -> Option<usize> {
         Event::StepRolledBack { from_step, .. } => Some(*from_step),
         Event::TaskStopped { step, .. } => Some(*step),
         Event::OnExit { step, .. } => Some(*step),
+        Event::VerifyFailed { step, .. } => Some(*step),
         Event::WindowLost { step, .. } => Some(*step),
     }
 }
@@ -142,7 +143,7 @@ fn print_event(event: &Event, project: &Project) {
                 }
             }
         }
-        Event::CheckpointReached { ts, step } => {
+        Event::StepWaiting { ts, step } => {
             let step_name = project
                 .config
                 .workflow
@@ -150,11 +151,11 @@ fn print_event(event: &Event, project: &Project) {
                 .map(|s| s.name.as_str())
                 .unwrap_or("Unknown");
 
-            println!("=== Step {}: {} (checkpoint) ===", step + 1, step_name);
+            println!("=== Step {}: {} (waiting) ===", step + 1, step_name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-            println!("Checkpoint reached.");
+            println!("Waiting for approval.");
         }
-        Event::CheckpointPassed { ts, step } => {
+        Event::StepApproved { ts, step } => {
             let step_name = project
                 .config
                 .workflow
@@ -162,7 +163,7 @@ fn print_event(event: &Event, project: &Project) {
                 .map(|s| s.name.as_str())
                 .unwrap_or("Unknown");
 
-            println!("=== Step {}: {} (checkpoint passed) ===", step + 1, step_name);
+            println!("=== Step {}: {} (approved) ===", step + 1, step_name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::WindowLaunched { ts, step } => {
@@ -266,6 +267,21 @@ fn print_event(event: &Event, project: &Project) {
         Event::TaskReset { ts } => {
             println!("=== Task Reset ===");
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::VerifyFailed { ts, step, feedback } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (verify failed) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+            if !feedback.is_empty() {
+                println!("\n[feedback]");
+                println!("{}", feedback);
+            }
         }
         Event::WindowLost { ts, step } => {
             let step_name = project
