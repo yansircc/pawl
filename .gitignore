@@ -4,3 +4,4 @@
 .wf/*
 !.wf/tasks/
 !.wf/config.jsonc
+!.wf/README.md
