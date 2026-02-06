@@ -2,43 +2,49 @@
 
 ## 本次 Session 完成的工作
 
-### Unified Step Pipeline 重构
+### E2E 端到端测试（全 13 命令）
 
-统一步骤管线重构，消除 on_exit 竞态复杂度，精简事件和命令。
+在 mock 项目中对 wf CLI 全部 13 个命令 + 1 个内部命令进行了完整端到端测试。
 
-**Event 模型 14→11**
-- 删除: `CommandExecuted`, `OnExit`, `AgentReported`, `StepRetried`, `StepRolledBack`, `AgentResult` enum
-- 新增: `StepCompleted { ts, step, exit_code, duration?, stdout?, stderr? }` — 统一替代同步执行/on_exit/agent done
-- 新增: `StepReset { ts, step, auto: bool }` — 替代 StepRetried + StepRolledBack
+**测试方法**: 用 8 步轻量工作流替代生产配置，覆盖所有步骤类型（normal, verify:command, on_fail:retry, gate, verify:human, in_window, on_fail:human）。
 
-**统一管线**
-- `handle_step_completion()` — 单一入口处理 verify + on_fail
-- `apply_on_fail()` — 替代散布的 `handle_verify_failure()`
-- `on_exit()` 从 93 行简化到 47 行，无竞态处理
-- `VerifyOutcome` 删除 `HumanRequired`，verify:"human" 通过 Failed{feedback:""} 路由到 apply_on_fail
+**测试结果**: 全部 PASS（除发现 1 个 bug 并当场修复）。
 
-**CLI 命令 19→13**
-- 删除: `wf next`, `wf retry`, `wf back`, `wf skip`, `wf fail`
-- 修改: `wf reset <task> [--step]` — `--step` 做步骤重试（替代 `wf retry`）
-- `agent.rs` → `approve.rs`，只保留 `done()`
+覆盖的场景：
+- 基础命令: init(重复报错), create(正常/依赖/重复), list, status(文本/JSON)
+- Happy Path: setup→build→flaky-test(重试2次)→gate→review(verify:human)→develop(in_window)→risky-deploy(on_fail:human)→cleanup
+- Skip: 4 个步骤跳过（step_skipped 事件）
+- 依赖: 阻塞/满足后启动
+- 生命周期: stop(Running→Stopped), reset(→Pending), reset --step(步骤重试)
+- wait: 已达到状态立即返回, 等待 waiting, 超时报错
+- _on-exit: exit_code=0(继续), exit_code=1(Failed)
+- Window Lost: kill -9 杀 shell → wf status 健康检查自动检测
+- 错误条件: 7 种非法操作全部正确报错
+- 事件钩子: on.task_started/step_completed 变量展开正确
+- log: 最新事件, --step N 过滤, --all 全部
+- capture: 文本/JSON 格式, enter 切换窗口
 
-**TaskDefinition 新增 skip**
-- `skip: Vec<String>` — 按步骤名自动跳过
-- 支持 YAML 列表和内联数组格式
+### Bug 修复: StepWaiting 不更新 current_step
 
-**Greenfield 清理**
-- 删除 `extract_session_id()` 和 `get_transcript_path()` dead code（不用 `#[allow(dead_code)]`）
-
-**净变更**: ~570 行净删除，27 测试全部通过
+- **文件**: `src/model/event.rs`
+- **问题**: `StepCompleted(exit_code=0)` 将 `current_step` 推进到 `step+1`，随后 `StepWaiting` 不修改 `current_step`。`wf done` 读取错误的 `current_step` 批准了下一个步骤，导致步骤被跳过。
+- **影响**: verify:human 等待后 `wf done` 会跳过下一步（如 develop in_window 被完全跳过）
+- **修复**: `StepWaiting` handler 中增加 `s.current_step = *step`
+- **回归测试**: `test_step_waiting_after_completed_resets_current_step`
+- 28 测试全部通过
 
 ---
 
 ## 历史 Session
 
+### Session 3: Unified Step Pipeline 重构
+- Event 14→11, CLI 19→13, ~570 行净删除
+- `handle_step_completion()` + `apply_on_fail()` 统一管线
+- TaskDefinition 新增 skip, Greenfield 清理 dead code
+
 ### Session 2: Step 验证模型改造
-- Step 从 checkpoint/block 体系迁移到 4 正交属性（run, verify, on_fail, in_window）
-- 事件重命名: CheckpointReached → StepWaiting, CheckpointPassed → StepApproved
-- 新增 VerifyFailed 事件，verify helpers（run_verify, handle_verify_failure, count_verify_failures）
+- Step 迁移到 4 正交属性（run, verify, on_fail, in_window）
+- 事件重命名, 新增 VerifyFailed, verify helpers
 
 ### Session 1: TUI 删除 + Event Sourcing
 - 删除 TUI 模块（-3,372 行）

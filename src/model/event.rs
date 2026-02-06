@@ -159,9 +159,10 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                     s.message = Some(format!("Exit code: {}", exit_code));
                 }
             }
-            Event::StepWaiting { ts, .. } => {
+            Event::StepWaiting { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
+                s.current_step = *step;
                 s.status = TaskStatus::Waiting;
             }
             Event::StepApproved { ts, step } => {
@@ -290,6 +291,27 @@ mod tests {
         let state = replay(&events2, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Running);
         assert_eq!(state.current_step, 1);
+    }
+
+    #[test]
+    fn test_step_waiting_after_completed_resets_current_step() {
+        // Regression: StepCompleted(exit_code=0) advances current_step to step+1,
+        // then StepWaiting (verify:human) must pull it back to the waiting step.
+        let events = vec![
+            Event::TaskStarted { ts: ts() },
+            Event::StepCompleted {
+                ts: ts(),
+                step: 0,
+                exit_code: 0,
+                duration: None,
+                stdout: None,
+                stderr: None,
+            },
+            Event::StepWaiting { ts: ts(), step: 0 },
+        ];
+        let state = replay(&events, 3).unwrap();
+        assert_eq!(state.status, TaskStatus::Waiting);
+        assert_eq!(state.current_step, 0); // must point to the waiting step, not 1
     }
 
     #[test]
