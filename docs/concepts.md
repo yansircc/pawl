@@ -82,28 +82,20 @@ Step 的有序列表。所有任务共享同一个 workflow 定义。
 5. 任何 step 失败：暂停，等待人工介入
 6. 全部执行完：任务标记 completed
 
-## Hook
+## Event Hook
 
-事件触发的 shell 命令。
+事件触发的 shell 命令，在 `append_event()` 写入 JSONL 后自动触发。
 
 ```jsonc
-"hooks": {
-  "task.completed": "curl -X POST ...",
-  "step.failed": "terminal-notifier -message '${task} failed'"
+"on": {
+  "task_started": "echo '${task} started'",
+  "command_executed": "echo '${task} step ${step} exit=${exit_code}'",
+  "agent_reported": "echo '${task} agent: ${result} ${message}'",
+  "window_lost": "echo '${task} window crashed'"
 }
 ```
 
-### 事件列表
-
-| 事件 | 触发时机 |
-|------|---------|
-| `task.started` | 任务开始执行 workflow |
-| `task.completed` | workflow 全部执行完成 |
-| `task.failed` | step 失败 |
-| `step.success` | 任意 step 成功 |
-| `step.failed` | 任意 step 失败 |
-| `step.blocked` | step 被标记为 blocked |
-| `checkpoint` | 到达 checkpoint |
+key 为 Event enum 的 serde tag（snake_case），所有 13 种事件类型均可挂载 hook。事件特有字段（`${exit_code}`、`${result}`、`${message}`、`${session_id}`、`${duration}`）自动注入。
 
 Hook 的执行是 fire-and-forget，不影响 workflow 推进。Hook 失败只打印警告，不阻塞。
 

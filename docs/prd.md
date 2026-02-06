@@ -95,10 +95,11 @@ wf init
 - `wf fail [reason]` — 标记失败
 - `wf block [reason]` — 标记需要人工介入
 
-### FR-9: Hook
+### FR-9: Event Hook
 
-- 在 config 中定义事件触发的 shell 命令
-- 支持 `task.completed`, `step.failed` 等事件
+- 在 `config.on` 中定义事件触发的 shell 命令
+- key 为 Event serde tag（`task_started`, `agent_reported` 等 13 种）
+- 在 `append_event()` 中自动触发，fire-and-forget
 
 ### FR-10: 依赖管理
 

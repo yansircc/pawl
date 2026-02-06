@@ -89,9 +89,9 @@
   // ============================================
   // 事件触发的 shell 命令，fire-and-forget
 
-  "hooks": {
-    "task.completed": "terminal-notifier -title 'wf' -message '${task} completed'",
-    "step.failed": "terminal-notifier -title 'wf' -message '${task}: ${step} failed'"
+  "on": {
+    "command_executed": "terminal-notifier -title 'wf' -message '${task} completed'",
+    "agent_reported": "terminal-notifier -title 'wf' -message '${task}: ${step} failed'"
   }
 }
 ```
@@ -108,7 +108,7 @@
 | `worktree_dir` | string | `".wf/worktrees"` | worktree 存放目录 |
 | `base_branch` | string | `"main"` | 基础分支（创建任务分支的起点）|
 | `workflow` | Step[] | **必填** | workflow 定义 |
-| `hooks` | object | `{}` | 事件 hook 定义 |
+| `on` | object | `{}` | 事件 hook（key = Event serde tag） |
 
 ### Step
 
@@ -118,19 +118,13 @@
 | `run` | string | 否 | shell 命令。省略则为 checkpoint |
 | `in_window` | bool | 否 | 是否发送到 tmux window 执行 |
 
-### Hooks
+### Event Hooks (`on`)
 
-key 是事件名，value 是 shell 命令。
+key 是 Event enum 的 serde tag（snake_case），value 是 shell 命令。在 `append_event()` 写入 JSONL 后自动触发，fire-and-forget。
 
-| 事件 | 触发时机 |
-|------|---------|
-| `task.started` | 任务开始 |
-| `task.completed` | 任务完成 |
-| `task.failed` | step 失败 |
-| `step.success` | 任意 step 成功 |
-| `step.failed` | 任意 step 失败 |
-| `step.blocked` | step 被标记 blocked |
-| `checkpoint` | 到达 checkpoint |
+所有 13 种事件类型都可作为 key：`task_started`、`command_executed`、`checkpoint_reached`、`checkpoint_passed`、`window_launched`、`agent_reported`、`on_exit`、`step_skipped`、`step_retried`、`step_rolled_back`、`task_stopped`、`task_reset`、`window_lost`。
+
+除标准变量外，事件特有的字段也可用：`${exit_code}`、`${result}`、`${message}`、`${session_id}`、`${duration}`。
 
 ## 变量
 

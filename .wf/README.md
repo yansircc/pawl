@@ -39,11 +39,11 @@ This README helps you write a `config.jsonc` workflow configuration for your pro
 | `name` | string | **required** | step display name |
 | `run` | string? | _(omit for checkpoint)_ | shell command to execute |
 | `in_window` | bool? | `false` | run in tmux window (agent mode) |
-| `stop_hook` | string? | — | validation command; must exit 0 for `wf done` to succeed |
+| `verify` | string? | — | verifier command; must exit 0 for `wf done` to succeed |
 
 ## Variables
 
-All variables are expanded in `run` and `stop_hook` fields. They are also set as environment variables (`WF_*`) in subprocesses.
+All variables are expanded in `run` and `verify` fields. They are also set as environment variables (`WF_*`) in subprocesses.
 
 | Variable | Env Var | Example Value |
 |----------|---------|---------------|
@@ -236,7 +236,7 @@ Always specify `${base_branch}` when creating a branch:
 { "run": "git branch ${branch}" }
 ```
 
-### 9. Stop Hook for Quality Gates
+### 9. Verify (Quality Gates)
 
 Add validation before allowing `wf done`:
 
@@ -245,7 +245,7 @@ Add validation before allowing `wf done`:
   "name": "Develop",
   "run": "claude -p '@${task_file}'",
   "in_window": true,
-  "stop_hook": "cd ${worktree} && npm run typecheck && npm run lint"
+  "verify": "cd ${worktree} && npm run typecheck && npm run lint"
 }
 ```
 

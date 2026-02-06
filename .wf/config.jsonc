@@ -49,12 +49,15 @@
   ]
 
   // ============================================
-  // Hooks（可选）
+  // Event Hooks（可选）
   // ============================================
   // 事件触发的 shell 命令，fire-and-forget
+  // key 为 Event 类型名（snake_case），在 append_event 时自动触发
   //
-  // "hooks": {
-  //   "task.completed": "terminal-notifier -title 'wf' -message '${task} completed'",
-  //   "step.failed": "terminal-notifier -title 'wf' -message '${task}: ${step} failed'"
+  // "on": {
+  //   "task_started": "echo '${task} started'",
+  //   "command_executed": "echo '${task} step ${step} exit=${exit_code}'",
+  //   "agent_reported": "echo '${task} agent: ${result} ${message}'",
+  //   "window_lost": "echo '${task} window crashed at step ${step}'"
   // }
 }

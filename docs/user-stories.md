@@ -203,9 +203,9 @@ wf start profile              # 正常启动
 
 ```jsonc
 // config.jsonc
-"hooks": {
-  "task.completed": "terminal-notifier -title 'wf' -message '${task} completed'",
-  "step.failed": "terminal-notifier -title 'wf' -message '${task}: ${step} failed'"
+"on": {
+  "command_executed": "terminal-notifier -title 'wf' -message '${task} completed'",
+  "agent_reported": "terminal-notifier -title 'wf' -message '${task}: ${step} failed'"
 }
 ```
 

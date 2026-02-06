@@ -262,9 +262,8 @@ wf done
 ```
 
 行为：
-1. 标记当前 step 为 `success`
-2. 触发 `step.success` hook
-3. 继续执行后续 steps
+1. 标记当前 step 为 `success`（append `AgentReported { result: Done }` 事件）
+2. 继续执行后续 steps
 
 环境变量 `WT_TASK` 和 `WT_STEP` 自动设置。
 
@@ -277,10 +276,9 @@ wf block "数据库 schema 需要确认"
 ```
 
 行为：
-1. 标记当前 step 为 `blocked`
+1. 标记当前 step 为 `blocked`（append `AgentReported { result: Blocked }` 事件）
 2. 记录 reason
-3. 触发 `step.blocked` hook
-4. 任务状态变为 `waiting`
+3. 任务状态变为 `waiting`
 
 ### `wf fail [reason]`
 
@@ -291,10 +289,9 @@ wf fail "API 文档不完整"
 ```
 
 行为：
-1. 标记当前 step 为 `failed`
+1. 标记当前 step 为 `failed`（append `AgentReported { result: Failed }` 事件）
 2. 记录 reason
-3. 触发 `step.failed` hook
-4. 任务状态变为 `failed`
+3. 任务状态变为 `failed`
 
 ---
 

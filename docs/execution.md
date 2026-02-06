@@ -14,8 +14,8 @@ fn execute(task: &mut Task, workflow: &[Step], config: &Config) {
         match step.step_type() {
             // Checkpoint: 暂停等待人工
             Checkpoint => {
+                // append_event(CheckpointReached) — 自动触发 on.checkpoint_reached hook
                 task.status = Waiting;
-                fire_hook("checkpoint", task, step, config);
                 return;
             }
 
@@ -23,16 +23,12 @@ fn execute(task: &mut Task, workflow: &[Step], config: &Config) {
             Run { in_window: false } => {
                 task.status = Running;
                 let result = run_shell(&step.run, task, config);
-                log_result(task, step, &result);
+                // append_event(CommandExecuted) — 自动触发 on.command_executed hook
 
                 match result {
-                    Ok(_) => {
-                        fire_hook("step.success", task, step, config);
-                        task.current_step += 1;
-                    }
+                    Ok(_) => task.current_step += 1,
                     Err(_) => {
                         task.status = Failed;
-                        fire_hook("step.failed", task, step, config);
                         return;
                     }
                 }
@@ -41,16 +37,15 @@ fn execute(task: &mut Task, workflow: &[Step], config: &Config) {
             // in_window step: 发送到 window，等待状态标记
             Run { in_window: true } => {
                 task.status = Running;
+                // append_event(WindowLaunched) — 自动触发 on.window_launched hook
                 send_to_window(&step.run, task, config);
-                // wf done/fail/block 会更新状态
                 return;
             }
         }
     }
 
-    // 所有 step 执行完毕
+    // 所有 step 执行完毕 — replay() auto-derives Completed
     task.status = Completed;
-    fire_hook("task.completed", task, config);
 }
 ```
 
@@ -198,19 +193,7 @@ Status: failed
 
 ## Hook 执行
 
-Hook 是 fire-and-forget：
-
-```rust
-fn fire_hook(event: &str, task: &Task, config: &Config) {
-    if let Some(cmd) = config.hooks.get(event) {
-        let expanded = expand(cmd, task, config);
-        // 后台执行，不等待结果
-        spawn_background("sh", &["-c", &expanded]);
-    }
-}
-```
-
-Hook 失败只打印警告到 stderr，不影响 workflow。
+Hook 在 `append_event()` 中自动触发：写入 JSONL 后，检查 `config.on` 有无匹配 event type 的 hook，有则后台执行。Hook 失败只打印警告到 stderr，不影响 workflow。
 
 ## wf next 的完整流程
 

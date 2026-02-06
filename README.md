@@ -126,7 +126,7 @@ wf capture <task>        # Capture tmux window content
 These are called by AI agents running inside tmux windows:
 
 ```bash
-wf done <task>           # Mark step complete (runs stop_hook if set)
+wf done <task>           # Mark step complete (runs verify if set)
 wf fail <task>           # Mark step failed
 wf block <task>          # Mark step blocked (needs human help)
 ```
