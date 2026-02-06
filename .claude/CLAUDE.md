@@ -7,31 +7,25 @@ An orchestrator for AI coding agents. Manages agent lifecycle (setup → develop
 ```
 src/
 ├── main.rs              # Entry point
-├── cli.rs               # clap CLI (19 subcommands)
+├── cli.rs               # clap CLI (13 subcommands)
 ├── model/
 │   ├── config.rs        # Config + Step structs, JSONC loader
-│   ├── event.rs         # Event enum (14 variants), AgentResult, replay()
+│   ├── event.rs         # Event enum (11 variants), replay()
 │   ├── state.rs         # TaskState, TaskStatus, StepStatus (projection types)
-│   └── task.rs          # TaskDefinition + YAML frontmatter parser
+│   └── task.rs          # TaskDefinition + YAML frontmatter parser (with skip)
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
 │   ├── common.rs        # Project context, event append/read/replay helpers
 │   ├── init.rs          # wf init (guided TUI)
 │   ├── create.rs        # wf create
-│   ├── start.rs         # wf start (execution engine core, verify helpers)
+│   ├── start.rs         # wf start (execution engine, unified pipeline, verify helpers)
 │   ├── status.rs        # wf status / wf list
-│   ├── control.rs       # wf next/retry/back/skip/stop/reset + _on-exit
-│   ├── agent.rs         # wf done/fail (with verify validation)
+│   ├── control.rs       # wf stop/reset + _on-exit
+│   ├── approve.rs       # wf done (approve waiting step or complete in_window step)
 │   ├── capture.rs       # wf capture (tmux content)
 │   ├── wait.rs          # wf wait (poll until status)
 │   ├── enter.rs         # wf enter (attach to tmux window)
 │   └── log.rs           # wf log (--step/--all)
-├── tui/
-│   ├── app.rs           # Main loop
-│   ├── state/           # App state, reducer, per-view state
-│   ├── view/            # Layout, style, task_list, task_detail, tmux_pane, popups
-│   ├── event/           # Action enum, key input mapping
-│   └── data/            # Data provider, live refresh
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name
     ├── shell.rs         # run_command variants, CommandResult
@@ -42,10 +36,11 @@ src/
 ## Core Concepts
 
 - **Step**: 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_window`
-- **Gate step**: No `run` command — waits for `wf next` / `wf done`
-- **in_window**: Runs command in tmux window, waits for `wf done/fail`
+- **Gate step**: No `run` command — waits for `wf done`
+- **in_window**: Runs command in tmux window, waits for `wf done`
 - **Verify**: `"human"` for manual approval, or a shell command (must exit 0)
 - **on_fail**: `"retry"` for auto-retry (up to max_retries), `"human"` to wait for decision
+- **skip** (per-task): Task frontmatter `skip: [step_name, ...]` auto-skips listed steps
 
 ## Config (`.wf/config.jsonc`)
 
@@ -69,6 +64,20 @@ src/
   on_fail?: string,         // "retry" or "human"
   max_retries?: number      // default: 3 (when on_fail="retry")
 }
+```
+
+## Task Definition (`.wf/tasks/{task}.md`)
+
+```yaml
+---
+name: my-task
+depends:
+  - other-task
+skip:
+  - cleanup        # skip this workflow step for this task
+---
+
+Task description in markdown.
 ```
 
 ## Variables
@@ -101,25 +110,22 @@ JSONL is the **single source of truth** — no `status.json`. State is reconstru
 
 Per-task event log: `.wf/logs/{task}.jsonl`
 
-14 event types:
+11 event types:
 - `task_started` — initializes Running, step=0
-- `command_executed` — exit_code==0 ? Success+advance : Failed
+- `step_completed` — exit_code==0 ? Success+advance : Failed (unified: sync, on_exit, done)
 - `step_waiting` — step paused, waiting for approval
 - `step_approved` — approval granted, advance step
 - `window_launched` — Running (in_window step sent to tmux)
-- `agent_reported` — Done/Failed result from agent
-- `on_exit` — tmux exit handler (ignored if AgentReported already handled the step)
-- `verify_failed` — verify command failed (feedback stored)
 - `step_skipped` — Skipped+advance
-- `step_retried` — clear step_status, Running
-- `step_rolled_back` — current_step=to_step, Waiting
+- `step_reset` — reset step to Running (auto=true for retry, auto=false for manual)
 - `task_stopped` — Stopped
 - `task_reset` — clears all state (replay restarts)
+- `verify_failed` — verify command failed (feedback stored)
 - `window_lost` — tmux window disappeared, auto-marked as Failed
 
 Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
 
-Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${result}`, `${message}`, `${session_id}`, `${feedback}`) are injected alongside standard context variables.
+Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${duration}`, `${auto}`, `${feedback}`) are injected alongside standard context variables.
 
 ## CLI Commands
 
@@ -130,41 +136,43 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `wf list` | List all tasks |
 | `wf start <task>` | Start task execution |
 | `wf status [task] [--json]` | Show status |
-| `wf next <task>` | Approve waiting step |
-| `wf retry <task>` | Retry failed step |
-| `wf back <task>` | Go back one step |
-| `wf skip <task>` | Skip current step |
 | `wf stop <task>` | Stop running task |
 | `wf reset <task>` | Reset to initial state |
+| `wf reset --step <task>` | Retry current step |
 | `wf enter <task>` | Attach to tmux window |
 | `wf capture <task> [-l N] [--json]` | Capture tmux content |
 | `wf wait <task> --until <status> [-t sec]` | Wait for status |
 | `wf log <task> [--step N] [--all]` | View logs |
 | `wf done <task> [-m msg]` | Mark step done / approve |
-| `wf fail <task> [-m msg]` | Mark step failed / reject |
-| `wf tui` | Open interactive TUI |
 
 ## Execution Flow
 
 ```
 start(task)
   └─ execute loop:
-     ├─ Gate step (no run) → StepWaiting, return (wait for wf next/done)
-     ├─ Normal step → run sync → check verify:
-     │   ├─ no verify → use exit code
+     ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
+     ├─ Gate step (no run) → StepWaiting, return (wait for wf done)
+     ├─ Normal step → run sync → StepCompleted → handle_step_completion:
+     │   ├─ exit_code != 0 → apply_on_fail(on_fail strategy)
+     │   ├─ no verify → advance
      │   ├─ verify: "human" → StepWaiting (wait for wf done)
      │   └─ verify: command → run it
      │       ├─ pass → advance
-     │       └─ fail → handle_verify_failure(on_fail strategy)
-     └─ in_window step → send to tmux → return (wait for wf done/fail)
+     │       └─ fail → apply_on_fail(on_fail strategy)
+     └─ in_window step → send to tmux → return (wait for wf done)
 
 done(task)
-  ├─ Running: run verify → pass? emit AgentReported(Done) → continue
+  ├─ Running: run verify → pass? emit StepCompleted → continue
   └─ Waiting: emit StepApproved → continue
 
-fail(task)
-  ├─ Running: emit AgentReported(Failed)
-  └─ Waiting: on_fail="retry"? StepRetried : AgentReported(Failed)
+on_exit(task, exit_code)
+  └─ emit StepCompleted → handle_step_completion
+
+apply_on_fail(strategy):
+  ├─ on_fail="retry" → StepReset{auto:true} → continue (up to max_retries)
+  ├─ on_fail="human" → StepWaiting (wait for wf done)
+  ├─ verify="human" → StepWaiting (wait for wf done)
+  └─ default → stay Failed
 ```
 
 ## File System Layout

@@ -1,4 +1,4 @@
-pub mod agent;
+pub mod approve;
 pub mod capture;
 pub mod common;
 pub mod control;
@@ -22,20 +22,15 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::List => status::list(false),
         Command::Start { task } => start::run(&task),
         Command::Status { task, json } => status::run(task.as_deref(), json),
-        Command::Next { task } => control::next(&task),
-        Command::Retry { task } => control::retry(&task),
-        Command::Back { task } => control::back(&task),
-        Command::Skip { task } => control::skip(&task),
         Command::Stop { task } => control::stop(&task),
-        Command::Reset { task } => control::reset(&task),
+        Command::Reset { task, step } => control::reset(&task, step),
         Command::Enter { task } => enter::run(&task),
         Command::Capture { task, lines, json } => capture::run(&task, lines, json),
         Command::Wait { task, until, timeout, interval } => {
             wait::run(&task, &until, timeout, interval)
         }
         Command::Log { task, step, all } => log::run(&task, step, all),
-        Command::Done { task, message } => agent::done(&task, message.as_deref()),
-        Command::Fail { task, message } => agent::fail(&task, message.as_deref()),
+        Command::Done { task, message } => approve::done(&task, message.as_deref()),
         Command::OnExit { task, exit_code } => control::on_exit(&task, exit_code),
     }
 }

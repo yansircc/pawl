@@ -13,6 +13,10 @@ pub struct TaskDefinition {
     #[serde(default)]
     pub depends: Vec<String>,
 
+    /// Steps to skip for this task (by step name)
+    #[serde(default)]
+    pub skip: Vec<String>,
+
     /// Task description (markdown body)
     #[serde(default)]
     pub description: String,
@@ -24,6 +28,8 @@ struct Frontmatter {
     name: Option<String>,
     #[serde(default)]
     depends: Vec<String>,
+    #[serde(default)]
+    skip: Vec<String>,
 }
 
 impl TaskDefinition {
@@ -57,9 +63,15 @@ impl TaskDefinition {
             .map(|f| f.depends.clone())
             .unwrap_or_default();
 
+        let skip = frontmatter
+            .as_ref()
+            .map(|f| f.skip.clone())
+            .unwrap_or_default();
+
         Ok(Self {
             name,
             depends,
+            skip,
             description: body,
         })
     }
@@ -111,11 +123,13 @@ fn parse_frontmatter(content: &str) -> Result<(Option<Frontmatter>, String)> {
     Ok((Some(frontmatter), body))
 }
 
-/// Simple YAML parser for frontmatter (handles name and depends only)
+/// Simple YAML parser for frontmatter (handles name, depends, and skip)
 fn parse_simple_yaml(yaml: &str) -> Result<Frontmatter> {
     let mut name: Option<String> = None;
     let mut depends: Vec<String> = Vec::new();
+    let mut skip: Vec<String> = Vec::new();
     let mut in_depends = false;
+    let mut in_skip = false;
 
     for line in yaml.lines() {
         let trimmed = line.trim();
@@ -123,12 +137,14 @@ fn parse_simple_yaml(yaml: &str) -> Result<Frontmatter> {
             continue;
         }
 
-        // Check for list item (dependency)
+        // Check for list item
         if line.starts_with("  - ") || line.starts_with("\t- ") || line.starts_with("- ") {
-            if in_depends {
-                let dep = line.trim().trim_start_matches('-').trim();
-                if !dep.is_empty() {
-                    depends.push(dep.to_string());
+            let item = line.trim().trim_start_matches('-').trim();
+            if !item.is_empty() {
+                if in_depends {
+                    depends.push(item.to_string());
+                } else if in_skip {
+                    skip.push(item.to_string());
                 }
             }
             continue;
@@ -139,10 +155,12 @@ fn parse_simple_yaml(yaml: &str) -> Result<Frontmatter> {
             let key = key.trim();
             let value = value.trim();
 
+            in_depends = false;
+            in_skip = false;
+
             match key {
                 "name" => {
                     name = Some(value.to_string());
-                    in_depends = false;
                 }
                 "depends" => {
                     in_depends = true;
@@ -158,14 +176,26 @@ fn parse_simple_yaml(yaml: &str) -> Result<Frontmatter> {
                         in_depends = false;
                     }
                 }
-                _ => {
-                    in_depends = false;
+                "skip" => {
+                    in_skip = true;
+                    // Handle inline array: skip: [setup, cleanup]
+                    if value.starts_with('[') && value.ends_with(']') {
+                        let inner = &value[1..value.len() - 1];
+                        for item in inner.split(',') {
+                            let item = item.trim();
+                            if !item.is_empty() {
+                                skip.push(item.to_string());
+                            }
+                        }
+                        in_skip = false;
+                    }
                 }
+                _ => {}
             }
         }
     }
 
-    Ok(Frontmatter { name, depends })
+    Ok(Frontmatter { name, depends, skip })
 }
 
 #[cfg(test)]
@@ -189,6 +219,7 @@ This is the task body.
         let task = TaskDefinition::parse(content, "default").unwrap();
         assert_eq!(task.name, "auth");
         assert_eq!(task.depends, vec!["database", "config"]);
+        assert!(task.skip.is_empty());
         assert!(task.description.contains("Task description"));
     }
 
@@ -198,6 +229,7 @@ This is the task body.
         let task = TaskDefinition::parse(content, "myfile").unwrap();
         assert_eq!(task.name, "myfile");
         assert!(task.depends.is_empty());
+        assert!(task.skip.is_empty());
     }
 
     #[test]
@@ -210,5 +242,32 @@ Body
 "#;
         let task = TaskDefinition::parse(content, "default").unwrap();
         assert_eq!(task.depends, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_skip() {
+        let content = r#"---
+name: hotfix
+skip:
+  - setup
+  - cleanup
+---
+Quick fix task
+"#;
+        let task = TaskDefinition::parse(content, "default").unwrap();
+        assert_eq!(task.name, "hotfix");
+        assert_eq!(task.skip, vec!["setup", "cleanup"]);
+    }
+
+    #[test]
+    fn test_parse_skip_inline() {
+        let content = r#"---
+name: hotfix
+skip: [setup, cleanup]
+---
+Body
+"#;
+        let task = TaskDefinition::parse(content, "default").unwrap();
+        assert_eq!(task.skip, vec!["setup", "cleanup"]);
     }
 }

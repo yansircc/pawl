@@ -71,8 +71,7 @@ const DEFAULT_CONFIG: &str = r#"{
   //
   // "on": {
   //   "task_started": "echo '${task} started'",
-  //   "command_executed": "echo '${task} step ${step} exit=${exit_code}'",
-  //   "agent_reported": "echo '${task} agent: ${result} ${message}'",
+  //   "step_completed": "echo '${task} step ${step} exit=${exit_code}'",
   //   "window_lost": "echo '${task} window crashed at step ${step}'"
   // }
 }
@@ -91,11 +90,11 @@ LAST_LINE=0; [ -f "$STATE_FILE" ] && LAST_LINE=$(cat "$STATE_FILE")
 CURRENT_LINE=$(wc -l < "$TRANSCRIPT" | tr -d ' ')
 [ "$CURRENT_LINE" -le "$LAST_LINE" ] && exit 0
 
-tail -n +$((LAST_LINE + 1)) "$TRANSCRIPT" | grep -q 'wf done\|wf fail' && { rm -f "$STATE_FILE"; exit 0; }
+tail -n +$((LAST_LINE + 1)) "$TRANSCRIPT" | grep -q 'wf done' && { rm -f "$STATE_FILE"; exit 0; }
 
 echo "$CURRENT_LINE" > "$STATE_FILE"
 TASK="${WF_TASK:-task}"
-echo "{\"decision\":\"block\",\"reason\":\"【自检】请确认任务完成后执行：\\n- 成功: wf done ${TASK}\\n- 失败: wf fail ${TASK} -m 原因\"}"
+echo "{\"decision\":\"block\",\"reason\":\"【自检】请确认任务完成后执行 wf done ${TASK}\"}"
 exit 0
 "#;
 

@@ -45,7 +45,7 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
 
         let matching: Vec<&Event> = events
             .iter()
-            .filter(|e| get_event_step(e) == Some(step_idx))
+            .filter(|e| e.step_index() == Some(step_idx))
             .collect();
 
         if matching.is_empty() {
@@ -71,23 +71,13 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     Ok(())
 }
 
-fn get_event_step(event: &Event) -> Option<usize> {
-    match event {
-        Event::TaskStarted { .. } => None,
-        Event::TaskReset { .. } => None,
-        Event::CommandExecuted { step, .. } => Some(*step),
-        Event::StepWaiting { step, .. } => Some(*step),
-        Event::StepApproved { step, .. } => Some(*step),
-        Event::WindowLaunched { step, .. } => Some(*step),
-        Event::AgentReported { step, .. } => Some(*step),
-        Event::StepSkipped { step, .. } => Some(*step),
-        Event::StepRetried { step, .. } => Some(*step),
-        Event::StepRolledBack { from_step, .. } => Some(*from_step),
-        Event::TaskStopped { step, .. } => Some(*step),
-        Event::OnExit { step, .. } => Some(*step),
-        Event::VerifyFailed { step, .. } => Some(*step),
-        Event::WindowLost { step, .. } => Some(*step),
-    }
+fn step_name(project: &Project, step: usize) -> &str {
+    project
+        .config
+        .workflow
+        .get(step)
+        .map(|s| s.name.as_str())
+        .unwrap_or("Unknown")
 }
 
 fn print_event(event: &Event, project: &Project) {
@@ -96,7 +86,7 @@ fn print_event(event: &Event, project: &Project) {
             println!("=== Task Started ===");
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
-        Event::CommandExecuted {
+        Event::StepCompleted {
             ts,
             step,
             exit_code,
@@ -104,160 +94,69 @@ fn print_event(event: &Event, project: &Project) {
             stdout,
             stderr,
         } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (command) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (completed, exit {}) ===", step + 1, name, exit_code);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-            println!("Exit code: {}", exit_code);
-            println!("Duration: {:.1}s", duration);
+            if let Some(d) = duration {
+                println!("Duration: {:.1}s", d);
+            }
 
-            if !stdout.is_empty() {
-                println!("\n[stdout]");
-                let lines: Vec<&str> = stdout.lines().collect();
-                if lines.len() > 50 {
-                    for line in lines.iter().take(25) {
-                        println!("{}", line);
+            if let Some(out) = stdout {
+                if !out.is_empty() {
+                    println!("\n[stdout]");
+                    let lines: Vec<&str> = out.lines().collect();
+                    if lines.len() > 50 {
+                        for line in lines.iter().take(25) {
+                            println!("{}", line);
+                        }
+                        println!("... ({} lines omitted) ...", lines.len() - 50);
+                        for line in lines.iter().skip(lines.len() - 25) {
+                            println!("{}", line);
+                        }
+                    } else {
+                        print!("{}", out);
+                        if !out.ends_with('\n') {
+                            println!();
+                        }
                     }
-                    println!("... ({} lines omitted) ...", lines.len() - 50);
-                    for line in lines.iter().skip(lines.len() - 25) {
-                        println!("{}", line);
-                    }
-                } else {
-                    print!("{}", stdout);
-                    if !stdout.ends_with('\n') {
+                }
+            }
+
+            if let Some(err) = stderr {
+                if !err.is_empty() {
+                    println!("\n[stderr]");
+                    print!("{}", err);
+                    if !err.ends_with('\n') {
                         println!();
                     }
                 }
             }
-
-            if !stderr.is_empty() {
-                println!("\n[stderr]");
-                print!("{}", stderr);
-                if !stderr.ends_with('\n') {
-                    println!();
-                }
-            }
         }
         Event::StepWaiting { ts, step } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (waiting) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (waiting) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             println!("Waiting for approval.");
         }
         Event::StepApproved { ts, step } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (approved) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (approved) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::WindowLaunched { ts, step } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (window launched) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (window launched) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-        }
-        Event::AgentReported {
-            ts,
-            step,
-            result,
-            session_id,
-            transcript,
-            message,
-        } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (agent: {:?}) ===", step + 1, step_name, result);
-            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-
-            if let Some(sid) = session_id {
-                println!("Session ID: {}", sid);
-            }
-            if let Some(path) = transcript {
-                println!("Transcript: {}", path);
-            }
-            if let Some(msg) = message {
-                println!("Message: {}", msg);
-            }
-        }
-        Event::OnExit {
-            ts,
-            step,
-            exit_code,
-            session_id,
-            transcript,
-        } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (on_exit) ===", step + 1, step_name);
-            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-            println!("Exit code: {}", exit_code);
-
-            if let Some(sid) = session_id {
-                println!("Session ID: {}", sid);
-            }
-            if let Some(path) = transcript {
-                println!("Transcript: {}", path);
-            }
         }
         Event::StepSkipped { ts, step } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (skipped) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (skipped) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
-        Event::StepRetried { ts, step } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (retried) ===", step + 1, step_name);
-            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-        }
-        Event::StepRolledBack {
-            ts,
-            from_step,
-            to_step,
-        } => {
-            println!("=== Rolled back: step {} → step {} ===", from_step + 1, to_step + 1);
+        Event::StepReset { ts, step, auto } => {
+            let name = step_name(project, *step);
+            let mode = if *auto { "auto" } else { "manual" };
+            println!("=== Step {}: {} (reset, {}) ===", step + 1, name, mode);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::TaskStopped { ts, step } => {
@@ -269,14 +168,8 @@ fn print_event(event: &Event, project: &Project) {
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::VerifyFailed { ts, step, feedback } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (verify failed) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (verify failed) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             if !feedback.is_empty() {
                 println!("\n[feedback]");
@@ -284,14 +177,8 @@ fn print_event(event: &Event, project: &Project) {
             }
         }
         Event::WindowLost { ts, step } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (window lost) ===", step + 1, step_name);
+            let name = step_name(project, *step);
+            println!("=== Step {}: {} (window lost) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             println!("tmux window disappeared — auto-marked as failed.");
         }

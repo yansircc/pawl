@@ -41,40 +41,19 @@ pub enum Command {
         json: bool,
     },
 
-    /// Advance to next step
-    Next {
-        /// Task name
-        task: String,
-    },
-
-    /// Retry current step
-    Retry {
-        /// Task name
-        task: String,
-    },
-
-    /// Go back to previous step
-    Back {
-        /// Task name
-        task: String,
-    },
-
-    /// Skip current step
-    Skip {
-        /// Task name
-        task: String,
-    },
-
     /// Stop a running task
     Stop {
         /// Task name
         task: String,
     },
 
-    /// Reset task to initial state
+    /// Reset task (full reset, or --step to retry current step)
     Reset {
         /// Task name
         task: String,
+        /// Only reset current step (retry) instead of full task reset
+        #[arg(long)]
+        step: bool,
     },
 
     /// Enter task window
@@ -122,17 +101,8 @@ pub enum Command {
         all: bool,
     },
 
-    /// Mark current step as done (for agent use)
+    /// Mark current step as done / approve waiting step
     Done {
-        /// Task name
-        task: String,
-        /// Optional message
-        #[arg(short, long)]
-        message: Option<String>,
-    },
-
-    /// Mark current step as failed (for agent use)
-    Fail {
         /// Task name
         task: String,
         /// Optional message

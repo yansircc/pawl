@@ -13,7 +13,7 @@ An orchestrator for AI coding agents. Each agent gets its own git worktree, its 
 
 AI coding agents (Claude, Codex, etc.) are powerful but messy to run in parallel. They conflict on files, break each other's imports, and leave merge chaos behind. Manual worktree/branch/merge management doesn't scale past 2-3 agents.
 
-`wf` gives each agent an isolated workspace and a structured lifecycle: setup, develop, verify, merge, clean up. The agent communicates back via a simple protocol (`wf done / wf fail / wf block`). Everything in the pipeline is a shell command — no plugins, no SDKs.
+`wf` gives each agent an isolated workspace and a structured lifecycle: setup, develop, verify, merge, clean up. The agent communicates back via `wf done`. Everything in the pipeline is a shell command — no plugins, no SDKs.
 
 ## Install
 
@@ -38,9 +38,6 @@ vim .wf/tasks/auth-login.md
 
 # 4. Start the task
 wf start auth-login
-
-# 5. Monitor with TUI
-wf tui
 ```
 
 ## How It Works
@@ -59,6 +56,7 @@ You define a workflow in `.wf/config.jsonc` — a list of steps that run for eve
       "run": "claude -p '@.wf/tasks/${task}.md'",
       "in_window": true
     },
+    { "name": "Review development", "verify": "human" },
     { "name": "Type check", "run": "cd ${worktree} && npm run typecheck" },
     { "name": "Merge", "run": "cd ${repo_root} && git merge --squash ${branch}" },
     { "name": "Cleanup", "run": "git worktree remove ${worktree} --force; git branch -D ${branch}; true" }
@@ -70,9 +68,20 @@ You define a workflow in `.wf/config.jsonc` — a list of steps that run for eve
 
 | Type | Config | Behavior |
 |------|--------|----------|
-| **Command** | `{ "name": "...", "run": "..." }` | Runs synchronously. Fails on non-zero exit. |
-| **Checkpoint** | `{ "name": "..." }` | Pauses until you run `wf next`. |
-| **Agent** | `{ "run": "...", "in_window": true }` | Runs in tmux. Waits for `wf done/fail/block`. |
+| **Command** | `{ "run": "..." }` | Runs synchronously. Fails on non-zero exit. |
+| **Gate** | `{ "name": "..." }` | No `run` — pauses until `wf done`. |
+| **Agent** | `{ "run": "...", "in_window": true }` | Runs in tmux. Waits for `wf done`. |
+| **Verified** | `{ "run": "...", "verify": "human" }` | Runs, then waits for human approval. |
+
+### Step Properties
+
+| Property | Values | Description |
+|----------|--------|-------------|
+| `run` | shell command | Command to execute (omit for gate step) |
+| `in_window` | `true`/`false` | Run in tmux window instead of sync |
+| `verify` | `"human"` or shell command | Post-step verification |
+| `on_fail` | `"retry"` or `"human"` | Failure strategy |
+| `max_retries` | number (default: 3) | Max auto-retries when `on_fail="retry"` |
 
 ### Variables
 
@@ -86,6 +95,7 @@ All `${var}` references are expanded before execution:
 | `${session}` | `my-project` |
 | `${repo_root}` | `/project` |
 | `${base_branch}` | `main` |
+| `${step}` | `Develop` |
 | `${task_file}` | `/project/.wf/tasks/auth-login.md` |
 | `${log_file}` | `/project/.wf/logs/auth-login.jsonl` |
 
@@ -97,18 +107,15 @@ All `${var}` references are expanded before execution:
 wf init                  # Initialize .wf/ directory
 wf create <name>         # Create a task
 wf start <task>          # Start workflow execution
-wf tui                   # Interactive dashboard
 ```
 
 ### Flow Control
 
 ```bash
-wf next <task>           # Continue past checkpoint
-wf retry <task>          # Retry failed step
-wf back <task>           # Go back one step
-wf skip <task>           # Skip current step
+wf done <task>           # Approve waiting step / mark in_window step done
 wf stop <task>           # Stop running task
 wf reset <task>          # Reset to initial state
+wf reset --step <task>   # Retry current step
 ```
 
 ### Monitoring
@@ -119,21 +126,9 @@ wf list                  # List all tasks
 wf log <task> --all      # View execution logs
 wf log <task> --step 3   # View specific step log
 wf capture <task>        # Capture tmux window content
+wf wait <task> --until completed  # Wait for status
+wf enter <task>          # Attach to tmux window
 ```
-
-### Agent Commands
-
-These are called by AI agents running inside tmux windows:
-
-```bash
-wf done <task>           # Mark step complete (runs verify if set)
-wf fail <task>           # Mark step failed
-wf block <task>          # Mark step blocked (needs human help)
-```
-
-## TUI
-
-`wf tui` opens an interactive terminal UI showing all tasks, their progress, and live tmux window content.
 
 ## Task Files
 
@@ -144,6 +139,8 @@ Tasks are defined as markdown in `.wf/tasks/`:
 name: auth-login
 depends:
   - database-setup
+skip:
+  - cleanup
 ---
 
 Implement the login API endpoint with email/password authentication.
