@@ -20,7 +20,8 @@ pub struct Context {
 }
 
 impl Context {
-    /// Create a new context for a task (basic, without log info)
+    /// Create a new context for a task.
+    /// Pass `None` for step_index/log_file/task_file when not in a step execution context.
     pub fn new(
         task: &str,
         session: &str,
@@ -28,6 +29,9 @@ impl Context {
         worktree_dir: &str,
         step: &str,
         base_branch: &str,
+        step_index: Option<usize>,
+        log_file: Option<&str>,
+        task_file: Option<&str>,
     ) -> Self {
         let worktree = format!("{}/{}/{}", repo_root, worktree_dir, task);
         Self {
@@ -39,37 +43,9 @@ impl Context {
             repo_root: repo_root.to_string(),
             step: step.to_string(),
             base_branch: base_branch.to_string(),
-            log_file: None,
-            task_file: None,
-            step_index: None,
-        }
-    }
-
-    /// Create a full context with log information
-    pub fn new_full(
-        task: &str,
-        session: &str,
-        repo_root: &str,
-        worktree_dir: &str,
-        step: &str,
-        step_index: usize,
-        log_file: &str,
-        task_file: &str,
-        base_branch: &str,
-    ) -> Self {
-        let worktree = format!("{}/{}/{}", repo_root, worktree_dir, task);
-        Self {
-            task: task.to_string(),
-            branch: format!("wf/{}", task),
-            worktree,
-            window: task.to_string(),
-            session: session.to_string(),
-            repo_root: repo_root.to_string(),
-            step: step.to_string(),
-            base_branch: base_branch.to_string(),
-            log_file: Some(log_file.to_string()),
-            task_file: Some(task_file.to_string()),
-            step_index: Some(step_index),
+            log_file: log_file.map(|s| s.to_string()),
+            task_file: task_file.map(|s| s.to_string()),
+            step_index,
         }
     }
 
@@ -139,6 +115,9 @@ mod tests {
             ".wf/worktrees",
             "Type check",
             "main",
+            None,
+            None,
+            None,
         );
 
         assert_eq!(ctx.expand("${task}"), "auth");
@@ -160,16 +139,16 @@ mod tests {
 
     #[test]
     fn test_expand_full_context() {
-        let ctx = Context::new_full(
+        let ctx = Context::new(
             "auth",
             "my-project",
             "/home/user/project",
             ".wf/worktrees",
             "Develop",
-            1,
-            "/home/user/project/.wf/logs/auth.jsonl",
-            "/home/user/project/.wf/tasks/auth.md",
             "develop",
+            Some(1),
+            Some("/home/user/project/.wf/logs/auth.jsonl"),
+            Some("/home/user/project/.wf/tasks/auth.md"),
         );
 
         assert_eq!(
@@ -190,16 +169,16 @@ mod tests {
 
     #[test]
     fn test_env_vars_full() {
-        let ctx = Context::new_full(
+        let ctx = Context::new(
             "auth",
             "my-project",
             "/home/user/project",
             ".wf/worktrees",
             "Develop",
-            1,
-            "/logs/auth.jsonl",
-            "/tasks/auth.md",
             "main",
+            Some(1),
+            Some("/logs/auth.jsonl"),
+            Some("/tasks/auth.md"),
         );
 
         let env = ctx.to_env_vars();
@@ -218,6 +197,9 @@ mod tests {
             ".wf/worktrees",
             "Setup",
             "main",
+            None,
+            None,
+            None,
         );
 
         let env = ctx.to_env_vars();

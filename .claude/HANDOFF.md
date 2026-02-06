@@ -2,49 +2,46 @@
 
 ## 本次 Session 完成的工作
 
-### E2E 端到端测试（全 13 命令）
+### 零基审查报告验证 + 代码质量修复（5 项）
 
-在 mock 项目中对 wf CLI 全部 13 个命令 + 1 个内部命令进行了完整端到端测试。
+对零基审查报告中 11 项发现逐条验证，裁定 5 项同意、6 项不同意（误报），并实施了同意的 5 项修复。
 
-**测试方法**: 用 8 步轻量工作流替代生产配置，覆盖所有步骤类型（normal, verify:command, on_fail:retry, gate, verify:human, in_window, on_fail:human）。
+**修复内容**：
 
-**测试结果**: 全部 PASS（除发现 1 个 bug 并当场修复）。
+| # | 修改 | 文件 |
+|---|------|------|
+| 1 | 合并 `Context::new()` / `new_full()` 为单一 `new()` 方法，可选参数用 `Option` | `variable.rs`, `start.rs`, `common.rs` |
+| 2 | 提取 `emit_waiting()` 辅助函数消除 `apply_on_fail` 中重复的 StepWaiting 逻辑 | `start.rs` |
+| 3 | `step`/`worktree_dir`/`repo_root` 从 `.clone()` 改为引用 | `start.rs` |
+| 4 | 在 `TaskStatus` 上添加 `is_terminal()` + `can_reach()` 方法，简化 `is_terminal_mismatch` | `state.rs`, `wait.rs` |
+| 5 | `step_name()` 越界时 eprintln warning + 返回 `"step_{idx}"` 而非静默 `"Unknown"` | `log.rs` |
 
-覆盖的场景：
-- 基础命令: init(重复报错), create(正常/依赖/重复), list, status(文本/JSON)
-- Happy Path: setup→build→flaky-test(重试2次)→gate→review(verify:human)→develop(in_window)→risky-deploy(on_fail:human)→cleanup
-- Skip: 4 个步骤跳过（step_skipped 事件）
-- 依赖: 阻塞/满足后启动
-- 生命周期: stop(Running→Stopped), reset(→Pending), reset --step(步骤重试)
-- wait: 已达到状态立即返回, 等待 waiting, 超时报错
-- _on-exit: exit_code=0(继续), exit_code=1(Failed)
-- Window Lost: kill -9 杀 shell → wf status 健康检查自动检测
-- 错误条件: 7 种非法操作全部正确报错
-- 事件钩子: on.task_started/step_completed 变量展开正确
-- log: 最新事件, --step N 过滤, --all 全部
-- capture: 文本/JSON 格式, enter 切换窗口
+**驳回的 6 项**（不需要修复）：
+- shell.rs wrapper 函数（合理的 API 分层）
+- git.rs 多层校验（系统边界防御性校验）
+- VerifyOutcome pub（跨模块使用，报告事实错误）
+- JSON 投影结构体（正常 API 设计）
+- 格式化函数（实际使用次数被低估）
+- .to_string() 调用（Rust 所有权要求）
 
-### Bug 修复: StepWaiting 不更新 current_step
-
-- **文件**: `src/model/event.rs`
-- **问题**: `StepCompleted(exit_code=0)` 将 `current_step` 推进到 `step+1`，随后 `StepWaiting` 不修改 `current_step`。`wf done` 读取错误的 `current_step` 批准了下一个步骤，导致步骤被跳过。
-- **影响**: verify:human 等待后 `wf done` 会跳过下一步（如 develop in_window 被完全跳过）
-- **修复**: `StepWaiting` handler 中增加 `s.current_step = *step`
-- **回归测试**: `test_step_waiting_after_completed_resets_current_step`
-- 28 测试全部通过
+28 测试全部通过。净删除 ~18 行。
 
 ---
 
 ## 历史 Session
 
+### Session 4: E2E 端到端测试 + Bug 修复
+- 全 13 命令端到端测试 PASS
+- 修复 StepWaiting 不更新 current_step 的 bug
+- 新增回归测试 `test_step_waiting_after_completed_resets_current_step`
+
 ### Session 3: Unified Step Pipeline 重构
 - Event 14→11, CLI 19→13, ~570 行净删除
 - `handle_step_completion()` + `apply_on_fail()` 统一管线
-- TaskDefinition 新增 skip, Greenfield 清理 dead code
 
 ### Session 2: Step 验证模型改造
 - Step 迁移到 4 正交属性（run, verify, on_fail, in_window）
-- 事件重命名, 新增 VerifyFailed, verify helpers
+- 新增 VerifyFailed 事件, verify helpers
 
 ### Session 1: TUI 删除 + Event Sourcing
 - 删除 TUI 模块（-3,372 行）
@@ -59,10 +56,11 @@
 | CLI 定义（13 命令） | `src/cli.rs` |
 | 配置模型（Step 4 属性） | `src/model/config.rs` |
 | 事件模型 + replay（11 种） | `src/model/event.rs` |
-| 状态投影类型 | `src/model/state.rs` |
+| 状态投影类型（含 TaskStatus 方法） | `src/model/state.rs` |
 | 任务定义（含 skip） | `src/model/task.rs` |
 | 执行引擎 + 统一管线 | `src/cmd/start.rs` |
 | 审批命令（done） | `src/cmd/approve.rs` |
 | 控制命令（stop/reset/on_exit） | `src/cmd/control.rs` |
-| 公共工具（事件读写） | `src/cmd/common.rs` |
+| 公共工具（事件读写、钩子） | `src/cmd/common.rs` |
+| 变量上下文（统一构造函数） | `src/util/variable.rs` |
 | 项目概述 | `.claude/CLAUDE.md` |

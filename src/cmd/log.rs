@@ -71,13 +71,15 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     Ok(())
 }
 
-fn step_name(project: &Project, step: usize) -> &str {
-    project
-        .config
-        .workflow
-        .get(step)
-        .map(|s| s.name.as_str())
-        .unwrap_or("Unknown")
+fn step_name(project: &Project, step: usize) -> String {
+    match project.config.workflow.get(step) {
+        Some(s) => s.name.clone(),
+        None => {
+            eprintln!("Warning: step index {} out of range (workflow has {} steps), event log may be corrupted",
+                step, project.config.workflow.len());
+            format!("step_{}", step)
+        }
+    }
 }
 
 fn print_event(event: &Event, project: &Project) {

@@ -143,18 +143,5 @@ fn parse_status(s: &str) -> Result<TaskStatus> {
 }
 
 fn is_terminal_mismatch(current: TaskStatus, target: TaskStatus) -> bool {
-    if current == target {
-        return false;
-    }
-
-    match current {
-        TaskStatus::Completed => true,
-        TaskStatus::Failed | TaskStatus::Stopped => {
-            matches!(
-                target,
-                TaskStatus::Running | TaskStatus::Waiting | TaskStatus::Completed
-            )
-        }
-        _ => false,
-    }
+    current != target && !current.can_reach(target)
 }

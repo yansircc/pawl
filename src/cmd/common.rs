@@ -199,28 +199,17 @@ impl Project {
         let log_file = self.log_file(task_name);
         let task_file = self.task_file(task_name);
 
-        let ctx = if let Some(idx) = step_idx {
-            Context::new_full(
-                task_name,
-                &self.session_name(),
-                &self.repo_root,
-                &self.config.worktree_dir,
-                step_name,
-                idx,
-                &log_file.to_string_lossy(),
-                &task_file.to_string_lossy(),
-                &self.config.base_branch,
-            )
-        } else {
-            Context::new(
-                task_name,
-                &self.session_name(),
-                &self.repo_root,
-                &self.config.worktree_dir,
-                step_name,
-                &self.config.base_branch,
-            )
-        };
+        let ctx = Context::new(
+            task_name,
+            &self.session_name(),
+            &self.repo_root,
+            &self.config.worktree_dir,
+            step_name,
+            &self.config.base_branch,
+            step_idx,
+            Some(&log_file.to_string_lossy()),
+            Some(&task_file.to_string_lossy()),
+        );
 
         // First pass: standard variable expansion
         let mut expanded = ctx.expand(cmd);

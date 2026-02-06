@@ -40,6 +40,28 @@ pub enum TaskStatus {
     Stopped,
 }
 
+impl TaskStatus {
+    /// Whether this status is terminal (no further transitions possible without a reset).
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Stopped)
+    }
+
+    /// Whether `target` is reachable from `self` without a reset.
+    pub fn can_reach(self, target: Self) -> bool {
+        if self == target {
+            return true;
+        }
+        match self {
+            Self::Completed => false,
+            Self::Failed | Self::Stopped => {
+                // Failed/Stopped can only naturally reach other Failed/Stopped
+                !matches!(target, Self::Running | Self::Waiting | Self::Completed)
+            }
+            _ => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StepStatus {

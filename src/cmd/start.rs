@@ -76,9 +76,9 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             return Ok(());
         }
 
-        let step = project.config.workflow[step_idx].clone();
-        let worktree_dir = project.config.worktree_dir.clone();
-        let repo_root = project.repo_root.clone();
+        let step = &project.config.workflow[step_idx];
+        let worktree_dir = &project.config.worktree_dir;
+        let repo_root = &project.repo_root;
 
         // Check if this step should be skipped for this task
         if task_def.skip.contains(&step.name) {
@@ -98,16 +98,16 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         let log_file = project.log_file(task_name);
         let task_file = project.task_file(task_name);
 
-        let ctx = Context::new_full(
+        let ctx = Context::new(
             task_name,
             &session,
-            &repo_root,
-            &worktree_dir,
+            repo_root,
+            worktree_dir,
             &step.name,
-            step_idx,
-            &log_file.to_string_lossy(),
-            &task_file.to_string_lossy(),
             &project.config.base_branch,
+            Some(step_idx),
+            Some(&log_file.to_string_lossy()),
+            Some(&task_file.to_string_lossy()),
         );
 
         println!(
@@ -251,21 +251,11 @@ fn apply_on_fail(
             println!("  Verify failed. Max retries ({}) reached.", step.effective_max_retries());
         }
     } else if step.on_fail_human() {
-        project.append_event(task_name, &Event::StepWaiting {
-            ts: event_timestamp(),
-            step: step_idx,
-        })?;
-        println!("  Verify failed. Waiting for human decision.");
-        println!("  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name);
-        return Ok(false);
+        return emit_waiting(project, task_name, step_idx,
+            &format!("  Verify failed. Waiting for human decision.\n  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name));
     } else if step.verify_is_human() {
-        // verify: "human" — wait for human approval
-        project.append_event(task_name, &Event::StepWaiting {
-            ts: event_timestamp(),
-            step: step_idx,
-        })?;
-        println!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name);
-        return Ok(false);
+        return emit_waiting(project, task_name, step_idx,
+            &format!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name));
     } else {
         // Default: just fail
         println!("  ✗ Failed.");
@@ -276,6 +266,16 @@ fn apply_on_fail(
         }
     }
 
+    Ok(false)
+}
+
+/// Emit a StepWaiting event and print a message. Returns Ok(false) to stop the execution loop.
+fn emit_waiting(project: &Project, task_name: &str, step_idx: usize, message: &str) -> Result<bool> {
+    project.append_event(task_name, &Event::StepWaiting {
+        ts: event_timestamp(),
+        step: step_idx,
+    })?;
+    println!("{}", message);
     Ok(false)
 }
 
@@ -339,16 +339,16 @@ pub fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usi
             let log_file = project.log_file(task_name);
             let task_file = project.task_file(task_name);
 
-            let ctx = Context::new_full(
+            let ctx = Context::new(
                 task_name,
                 &session,
                 &project.repo_root,
                 &project.config.worktree_dir,
                 &step.name,
-                step_idx,
-                &log_file.to_string_lossy(),
-                &task_file.to_string_lossy(),
                 &project.config.base_branch,
+                Some(step_idx),
+                Some(&log_file.to_string_lossy()),
+                Some(&task_file.to_string_lossy()),
             );
 
             let expanded = ctx.expand(cmd);
