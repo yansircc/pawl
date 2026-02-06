@@ -87,9 +87,9 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
 
     for task_def in &tasks {
         let name = &task_def.name;
-        let blocking = project.check_dependencies(&task_def)?;
+        let blocking = project.check_dependencies(task_def)?;
 
-        let summary = if let Some(state) = project.status.get(name) {
+        let summary = if let Some(state) = project.replay_task(name)? {
             let step_name = if state.current_step < workflow_len {
                 project.config.workflow[state.current_step].name.clone()
             } else {
@@ -133,8 +133,8 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
 
-    let state = project.status.get(task_name);
-    let current_step = state.map(|s| s.current_step).unwrap_or(0);
+    let state = project.replay_task(task_name)?;
+    let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
 
     let mut steps: Vec<StepInfo> = Vec::new();
     for (i, step) in workflow.iter().enumerate() {
@@ -146,7 +146,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
             None
         };
 
-        let step_status = if let Some(state) = state {
+        let step_status = if let Some(state) = &state {
             if i < current_step {
                 state
                     .step_status
@@ -179,13 +179,14 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
         },
         depends: task_def.depends.clone(),
         status: state
+            .as_ref()
             .map(|s| format_status(s.status))
             .unwrap_or_else(|| "pending".to_string()),
         current_step: current_step + 1,
         total_steps: workflow_len,
-        message: state.and_then(|s| s.message.clone()),
-        started_at: state.and_then(|s| s.started_at.map(|t| t.to_rfc3339())),
-        updated_at: state.and_then(|s| s.updated_at.map(|t| t.to_rfc3339())),
+        message: state.as_ref().and_then(|s| s.message.clone()),
+        started_at: state.as_ref().and_then(|s| s.started_at.map(|t| t.to_rfc3339())),
+        updated_at: state.as_ref().and_then(|s| s.updated_at.map(|t| t.to_rfc3339())),
         workflow: steps,
     };
 
@@ -213,11 +214,11 @@ fn show_all_tasks(project: &Project) -> Result<()> {
     for task_def in &tasks {
         let name = &task_def.name;
 
-        let (step_str, status_str, info) = if let Some(state) = project.status.get(name) {
+        let (step_str, status_str, info) = if let Some(state) = project.replay_task(name)? {
             let step_name = if state.current_step < workflow_len {
-                &project.config.workflow[state.current_step].name
+                project.config.workflow[state.current_step].name.clone()
             } else {
-                "Done"
+                "Done".to_string()
             };
             let step_str = format!("[{}/{}] {}", state.current_step + 1, workflow_len, step_name);
 
@@ -225,7 +226,6 @@ fn show_all_tasks(project: &Project) -> Result<()> {
 
             let info = match state.status {
                 TaskStatus::Running => {
-                    // Check if tmux window is alive
                     let session = project.session_name();
                     let window_alive = tmux::window_exists(&session, name);
                     if window_alive {
@@ -241,8 +241,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
                     state.message.clone().unwrap_or_default()
                 }
                 TaskStatus::Pending => {
-                    // Check dependencies
-                    let blocking = project.check_dependencies(&task_def)?;
+                    let blocking = project.check_dependencies(task_def)?;
                     if !blocking.is_empty() {
                         format!("waiting: {}", blocking.join(", "))
                     } else {
@@ -254,8 +253,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
 
             (step_str, status_str, info)
         } else {
-            // Task not started
-            let blocking = project.check_dependencies(&task_def)?;
+            let blocking = project.check_dependencies(task_def)?;
             let info = if !blocking.is_empty() {
                 format!("waiting: {}", blocking.join(", "))
             } else {
@@ -283,13 +281,13 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
     println!("Task: {}", task_name);
     println!();
 
-    // Dependencies
     if !task_def.depends.is_empty() {
         println!("Dependencies: {}", task_def.depends.join(", "));
     }
 
-    // Current state
-    if let Some(state) = project.status.get(task_name) {
+    let state = project.replay_task(task_name)?;
+
+    if let Some(state) = &state {
         println!("Status: {}", format_status(state.status));
         println!(
             "Step: {}/{}",
@@ -305,7 +303,6 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
             println!("Message: {}", msg);
         }
 
-        // Check for anomaly: running but window gone
         if state.status == TaskStatus::Running {
             let session = project.session_name();
             if !tmux::window_exists(&session, task_name) {
@@ -322,16 +319,11 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
         println!();
     }
 
-    // Workflow steps
     println!("Workflow:");
     for (i, step) in workflow.iter().enumerate() {
-        let current = project
-            .status
-            .get(task_name)
-            .map(|s| s.current_step)
-            .unwrap_or(0);
+        let current = state.as_ref().map(|s| s.current_step).unwrap_or(0);
 
-        let marker = if let Some(state) = project.status.get(task_name) {
+        let marker = if let Some(state) = &state {
             if i < current {
                 if let Some(status) = state.step_status.get(&i) {
                     match status {

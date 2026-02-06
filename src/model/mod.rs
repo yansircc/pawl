@@ -1,9 +1,9 @@
 pub mod config;
-pub mod log;
+pub mod event;
 pub mod state;
 pub mod task;
 
 pub use config::Config;
-pub use log::StepLog;
-pub use state::{StatusStore, StepStatus, TaskState, TaskStatus};
+pub use event::{AgentResult, Event};
+pub use state::{StepStatus, TaskState, TaskStatus};
 pub use task::TaskDefinition;

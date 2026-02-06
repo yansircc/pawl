@@ -31,8 +31,9 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let session = project.session_name();
     let window = &task_name;
 
-    // Get task status
-    let (status, current_step, step_name) = if let Some(state) = project.status.get(&task_name) {
+    // Get task status via replay
+    let state = project.replay_task(&task_name)?;
+    let (status, current_step, step_name) = if let Some(state) = &state {
         let step_name = if state.current_step < project.config.workflow.len() {
             project.config.workflow[state.current_step].name.clone()
         } else {
@@ -47,8 +48,7 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         ("pending".to_string(), 0, "--".to_string())
     };
 
-    // Get task status to check for anomalies
-    let task_status = project.status.get(&task_name).map(|s| s.status);
+    let task_status = state.as_ref().map(|s| s.status);
 
     // Capture content (also checks if window exists)
     let capture_result = tmux::capture_pane(&session, window, lines)?;
@@ -82,7 +82,6 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        // Human-readable output
         println!("Task: {}", task_name);
         println!("Window: {}:{}", session, window);
         println!("Status: {} (step {}: {})", status, current_step, step_name);

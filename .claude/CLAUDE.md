@@ -1,136 +1,177 @@
-# wf - Workflow Task Runner
+# wf — AI Agent Orchestrator
 
-一个可配置的任务工作流执行器，让多个 AI agent 在独立的 git worktree 中并行开发。
+An orchestrator for AI coding agents. Manages agent lifecycle (setup → develop → verify → merge → cleanup) with git worktree isolation and tmux-based execution.
 
-## 核心概念
-
-- **Task**: 定义在 `.wf/tasks/*.md` 的任务文件
-- **Step**: workflow 中的执行单元（普通命令/checkpoint/in_window）
-- **Checkpoint**: 暂停点，等待 `wf next` 继续
-- **in_window**: 在 tmux window 中执行，等待 `wf done/fail/block`
-- **Stop Hook**: `wf done` 前的验证命令，验证失败则拒绝标记完成
-
-## 项目结构
+## Architecture
 
 ```
 src/
-├── main.rs           # 入口
-├── cli.rs            # clap CLI 定义
+├── main.rs              # Entry point
+├── cli.rs               # clap CLI (20 subcommands)
 ├── model/
-│   ├── config.rs     # Config + JSONC 加载 + Step.stop_hook
-│   ├── log.rs        # StepLog 枚举（JSONL 日志条目）
-│   ├── state.rs      # StatusStore + 原子写入 + 文件锁
-│   └── task.rs       # TaskDefinition + frontmatter 解析
+│   ├── config.rs        # Config + Step structs, JSONC loader
+│   ├── event.rs         # Event enum (12 variants), AgentResult, replay()
+│   ├── state.rs         # TaskState, TaskStatus, StepStatus (projection types)
+│   └── task.rs          # TaskDefinition + YAML frontmatter parser
 ├── cmd/
-│   ├── common.rs     # Project 上下文 + log_file/task_file/append_log/read_logs
-│   ├── init.rs       # wf init
-│   ├── create.rs     # wf create
-│   ├── start.rs      # wf start (执行引擎)
-│   ├── status.rs     # wf status/list (支持 --json)
-│   ├── control.rs    # wf next/retry/back/skip/stop/reset + _on-exit
-│   ├── agent.rs      # wf done/fail/block (含 stop_hook 验证)
-│   ├── capture.rs    # wf capture (tmux 内容捕获)
-│   ├── wait.rs       # wf wait (等待状态变化)
-│   ├── enter.rs      # wf enter
-│   └── log.rs        # wf log (支持 --step/--all)
-├── tui/              # 交互式 TUI 界面
-│   ├── app.rs        # 主循环
-│   ├── state/        # 状态层
-│   ├── view/         # 渲染层
-│   ├── event/        # 事件处理
-│   └── data/         # 数据层
+│   ├── mod.rs           # Command dispatch
+│   ├── common.rs        # Project context, event append/read/replay helpers
+│   ├── init.rs          # wf init (guided TUI)
+│   ├── create.rs        # wf create
+│   ├── start.rs         # wf start (execution engine core)
+│   ├── status.rs        # wf status / wf list
+│   ├── control.rs       # wf next/retry/back/skip/stop/reset + _on-exit
+│   ├── agent.rs         # wf done/fail/block (with stop_hook validation)
+│   ├── capture.rs       # wf capture (tmux content)
+│   ├── wait.rs          # wf wait (poll until status)
+│   ├── enter.rs         # wf enter (attach to tmux window)
+│   └── log.rs           # wf log (--step/--all)
+├── tui/
+│   ├── app.rs           # Main loop
+│   ├── state/           # App state, reducer, per-view state
+│   ├── view/            # Layout, style, task_list, task_detail, tmux_pane, popups
+│   ├── event/           # Action enum, key input mapping
+│   └── data/            # Data provider, live refresh
 └── util/
-    ├── git.rs        # Git 操作
-    ├── shell.rs      # Shell 执行
-    ├── tmux.rs       # Tmux 操作 + session_id 提取
-    └── variable.rs   # 变量展开
+    ├── git.rs           # get_repo_root, validate_branch_name
+    ├── shell.rs         # run_command variants, CommandResult
+    ├── tmux.rs          # Session/window/pane ops, session_id extraction
+    └── variable.rs      # Context struct, expand(), to_env_vars()
 ```
 
-## 日志系统
+## Core Concepts
 
-### 日志格式
+- **Step**: Execution unit — normal command, checkpoint (no `run`), or in_window (`in_window: true`)
+- **Checkpoint**: Pauses workflow, waits for `wf next`
+- **in_window**: Runs command in tmux window, waits for `wf done/fail/block`
+- **Stop Hook**: Validation command on Step; must exit 0 before `wf done` succeeds
 
-每个任务一个 JSONL 文件：`.wf/logs/{task}.jsonl`
+## Config (`.wf/config.jsonc`)
 
-每个 step 完成后追加一行 JSON：
+```typescript
+{
+  session?: string,         // tmux session name (default: project dir name)
+  multiplexer?: string,     // default: "tmux"
+  claude_command?: string,  // default: "claude"
+  worktree_dir?: string,    // default: ".wf/worktrees"
+  base_branch?: string,     // default: "main"
+  workflow: Step[],         // required
+  hooks?: Record<string, string>  // event hooks
+}
 
-**普通命令 step:**
-```json
-{"type":"command","step":0,"exit_code":0,"duration":5.2,"stdout":"...","stderr":""}
+// Step
+{
+  name: string,             // required
+  run?: string,             // shell command (omit for checkpoint)
+  in_window?: boolean,      // default: false
+  stop_hook?: string        // validation command for wf done
+}
 ```
 
-**in_window step:**
-```json
-{"type":"in_window","step":1,"session_id":"xxx","transcript":"/path/to/xxx.jsonl","status":"success"}
+## Variables
+
+All variables are available as `${var}` in config and as `WF_VAR` env vars in subprocesses.
+
+| Variable | Env Var | Value |
+|----------|---------|-------|
+| `${task}` | `WF_TASK` | Task name |
+| `${branch}` | `WF_BRANCH` | `wf/{task}` |
+| `${worktree}` | `WF_WORKTREE` | `{repo_root}/{worktree_dir}/{task}` |
+| `${window}` | `WF_WINDOW` | Same as task name |
+| `${session}` | `WF_SESSION` | Tmux session name |
+| `${repo_root}` | `WF_REPO_ROOT` | Git repository root |
+| `${step}` | `WF_STEP` | Current step name |
+| `${base_branch}` | `WF_BASE_BRANCH` | Config base_branch value |
+| `${log_file}` | `WF_LOG_FILE` | `.wf/logs/{task}.jsonl` |
+| `${task_file}` | `WF_TASK_FILE` | `.wf/tasks/{task}.md` |
+| `${step_index}` | `WF_STEP_INDEX` | Current step index (0-based) |
+
+## State Machine
+
+**TaskStatus**: `Pending` → `Running` → `Waiting` / `Completed` / `Failed` / `Stopped`
+
+**StepStatus**: `Success` | `Failed` | `Blocked` | `Skipped`
+
+## Event Sourcing
+
+JSONL is the **single source of truth** — no `status.json`. State is reconstructed via `replay()`.
+
+Per-task event log: `.wf/logs/{task}.jsonl`
+
+12 event types:
+- `task_started` — initializes Running, step=0
+- `command_executed` — exit_code==0 ? Success+advance : Failed
+- `checkpoint_reached` — Waiting
+- `checkpoint_passed` — advance step
+- `window_launched` — Running (in_window step sent to tmux)
+- `agent_reported` — Done/Failed/Blocked result from agent
+- `on_exit` — tmux exit handler (ignored if AgentReported already handled the step)
+- `step_skipped` — Skipped+advance
+- `step_retried` — clear step_status, Running
+- `step_rolled_back` — current_step=to_step, Waiting
+- `task_stopped` — Stopped
+- `task_reset` — clears all state (replay restarts)
+
+Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `wf init` | Initialize project |
+| `wf create <name> [desc] [--depends a,b]` | Create task |
+| `wf list` | List all tasks |
+| `wf start <task>` | Start task execution |
+| `wf status [task] [--json]` | Show status |
+| `wf next <task>` | Continue past checkpoint |
+| `wf retry <task>` | Retry failed step |
+| `wf back <task>` | Go back one step |
+| `wf skip <task>` | Skip current step |
+| `wf stop <task>` | Stop running task |
+| `wf reset <task>` | Reset to initial state |
+| `wf enter <task>` | Attach to tmux window |
+| `wf capture <task> [-l N] [--json]` | Capture tmux content |
+| `wf wait <task> --until <status> [-t sec]` | Wait for status |
+| `wf log <task> [--step N] [--all]` | View logs |
+| `wf done <task> [-m msg]` | Agent: mark step done |
+| `wf fail <task> [-m msg]` | Agent: mark step failed |
+| `wf block <task> [-m msg]` | Agent: mark step blocked |
+| `wf tui` | Open interactive TUI |
+
+## Execution Flow
+
+```
+start(task)
+  └─ execute loop:
+     ├─ Checkpoint → status=Waiting, return (wait for `wf next`)
+     ├─ Normal step → run sync → exit 0? next step : Failed
+     └─ in_window step → send to tmux → return (wait for `wf done/fail/block`)
+
+done(task)
+  ├─ run stop_hook (if any) → fail? reject
+  ├─ append_event(AgentReported { result: Done })
+  ├─ continue_execution (run remaining steps)
+  └─ cleanup tmux window
 ```
 
-**checkpoint step:**
-```json
-{"type":"checkpoint","step":2}
+## File System Layout
+
+```
+.wf/
+├── config.jsonc          # Workflow configuration
+├── tasks/                # Task definitions (markdown + YAML frontmatter)
+│   └── {task}.md
+├── logs/                 # Event logs (JSONL) — single source of truth
+│   └── {task}.jsonl
+├── worktrees/            # Git worktrees (one per task)
+│   └── {task}/
+└── hooks/                # Generated hook files (e.g. settings.json)
 ```
 
-### 日志相关变量
-
-| 变量 | 环境变量 | 说明 |
-|------|----------|------|
-| `${log_file}` | `WF_LOG_FILE` | 任务日志文件路径 (.jsonl) |
-| `${task_file}` | `WF_TASK_FILE` | 任务定义文件路径 (.md) |
-| `${step_index}` | `WF_STEP_INDEX` | 当前 step 索引（0-based）|
-| `${base_branch}` | `WF_BASE_BRANCH` | 基础分支（创建任务分支的起点）|
-
-### 读取日志
+## Dev Commands
 
 ```bash
-# 查看任务所有日志
-wf log <task> --all
-
-# 查看特定 step 日志
-wf log <task> --step 2
-
-# 使用 jq 读取 JSONL
-jq -s '.[] | select(.step==1)' .wf/logs/task.jsonl
-
-# 获取最后一个 step 的 transcript
-tail -1 .wf/logs/task.jsonl | jq -r '.transcript'
+cargo build               # Build
+cargo install --path .     # Install to ~/.cargo/bin
+cargo test                 # Run tests
 ```
-
-## CLI 命令
-
-| 命令 | 说明 |
-|------|------|
-| `wf init` | 初始化项目 |
-| `wf create <name>` | 创建任务 |
-| `wf list` | 列出所有任务 |
-| `wf start <task>` | 启动任务 |
-| `wf status [task] [--json]` | 查看状态 |
-| `wf next <task>` | 通过 checkpoint |
-| `wf retry <task>` | 重试当前步骤 |
-| `wf back <task>` | 回退一步 |
-| `wf skip <task>` | 跳过当前步骤 |
-| `wf stop <task>` | 停止任务 |
-| `wf reset <task>` | 重置任务 |
-| `wf done <task>` | 标记完成 (agent) |
-| `wf fail <task>` | 标记失败 (agent) |
-| `wf block <task>` | 标记阻塞 (agent) |
-| `wf enter <task>` | 进入 tmux window |
-| `wf capture <task> [--json]` | 捕获 tmux 内容 |
-| `wf wait <task> --until <status>` | 等待状态 |
-| `wf log <task> [--step N] [--all]` | 查看日志 |
-| `wf tui` | 打开交互式 TUI 界面 |
-
-## 开发命令
-
-```bash
-cargo build           # 构建
-cargo install --path . # 安装到 ~/.cargo/bin
-cargo test            # 运行测试
-```
-
-## 相关文档
-
-- `docs/README.md` - 文档索引
-- `docs/cli.md` - CLI 命令参考
-- `docs/config.md` - 配置文件参考
-- `docs/execution.md` - 执行模型
-- `docs/data-model.md` - 数据模型
-- `docs/log-system.md` - 日志系统设计

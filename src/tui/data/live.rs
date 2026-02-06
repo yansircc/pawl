@@ -1,7 +1,9 @@
 use anyhow::{bail, Result};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use crate::model::{Config, StatusStore, TaskDefinition, TaskStatus};
+use crate::model::event::{replay, Event};
+use crate::model::{Config, TaskDefinition, TaskStatus};
 use crate::tui::state::task_detail::{StepItem, StepItemStatus, StepType};
 use crate::tui::state::{TaskDetailState, TaskItem};
 use crate::util::{git, tmux};
@@ -30,20 +32,38 @@ impl LiveDataProvider {
         Config::load(&self.wf_dir)
     }
 
-    fn load_status(&self) -> Result<StatusStore> {
-        StatusStore::load(&self.wf_dir)
-    }
-
     fn session_name(&self) -> Result<String> {
         let config = self.load_config()?;
         Ok(config.session_name(&self.repo_root))
     }
 
-    fn check_dependencies(&self, task: &TaskDefinition, status: &StatusStore) -> Vec<String> {
+    fn replay_task(&self, task_name: &str, workflow_len: usize) -> Result<Option<crate::model::TaskState>> {
+        let log_file = self.wf_dir.join("logs").join(format!("{}.jsonl", task_name));
+        if !log_file.exists() {
+            return Ok(None);
+        }
+
+        let file = std::fs::File::open(&log_file)?;
+        let reader = BufReader::new(file);
+        let mut events = Vec::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: Event = serde_json::from_str(&line)?;
+            events.push(event);
+        }
+
+        Ok(replay(&events, workflow_len))
+    }
+
+    fn check_dependencies(&self, task: &TaskDefinition, workflow_len: usize) -> Vec<String> {
         let mut blocking = Vec::new();
         for dep in &task.depends {
-            match status.get(dep) {
-                Some(state) if state.status == TaskStatus::Completed => {}
+            match self.replay_task(dep, workflow_len) {
+                Ok(Some(state)) if state.status == TaskStatus::Completed => {}
                 _ => blocking.push(dep.clone()),
             }
         }
@@ -54,16 +74,15 @@ impl LiveDataProvider {
 impl DataProvider for LiveDataProvider {
     fn load_tasks(&self) -> Result<Vec<TaskItem>> {
         let config = self.load_config()?;
-        let status = self.load_status()?;
         let tasks = TaskDefinition::load_all(self.wf_dir.join("tasks"))?;
         let workflow_len = config.workflow.len();
 
         let items: Vec<TaskItem> = tasks
             .iter()
             .map(|task_def| {
-                let blocked_by = self.check_dependencies(task_def, &status);
+                let blocked_by = self.check_dependencies(task_def, workflow_len);
 
-                if let Some(state) = status.get(&task_def.name) {
+                if let Ok(Some(state)) = self.replay_task(&task_def.name, workflow_len) {
                     let step_name = if state.current_step < workflow_len {
                         config.workflow[state.current_step].name.clone()
                     } else {
@@ -98,12 +117,12 @@ impl DataProvider for LiveDataProvider {
 
     fn load_task_detail(&self, name: &str) -> Result<TaskDetailState> {
         let config = self.load_config()?;
-        let status = self.load_status()?;
         let task_def = TaskDefinition::load(self.wf_dir.join("tasks").join(format!("{}.md", name)))?;
+        let workflow_len = config.workflow.len();
 
-        let state = status.get(name);
-        let current_step = state.map(|s| s.current_step).unwrap_or(0);
-        let task_status = state.map(|s| s.status).unwrap_or(TaskStatus::Pending);
+        let state = self.replay_task(name, workflow_len)?;
+        let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
+        let task_status = state.as_ref().map(|s| s.status).unwrap_or(TaskStatus::Pending);
 
         let steps: Vec<StepItem> = config
             .workflow
@@ -118,7 +137,7 @@ impl DataProvider for LiveDataProvider {
                     StepType::Normal
                 };
 
-                let status = if let Some(state) = state {
+                let status = if let Some(state) = &state {
                     if i < current_step {
                         state
                             .step_status
@@ -150,7 +169,7 @@ impl DataProvider for LiveDataProvider {
             task_status,
             current_step,
             steps,
-            state.and_then(|s| s.message.clone()),
+            state.as_ref().and_then(|s| s.message.clone()),
         ))
     }
 

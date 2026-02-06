@@ -1,21 +1,22 @@
 use anyhow::{bail, Result};
+use fs2::FileExt;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use crate::model::{Config, StatusStore, StepLog, TaskDefinition};
+use crate::model::event::{replay, Event};
+use crate::model::{Config, TaskDefinition, TaskState, TaskStatus};
 use crate::util::git::get_repo_root;
 use crate::util::shell::spawn_background;
 use crate::util::variable::Context;
 
 const WF_DIR: &str = ".wf";
 
-/// Project context with loaded config and status
+/// Project context with loaded config
 pub struct Project {
     pub repo_root: String,
     pub wf_dir: PathBuf,
     pub config: Config,
-    pub status: StatusStore,
 }
 
 impl Project {
@@ -29,19 +30,12 @@ impl Project {
         }
 
         let config = Config::load(&wf_dir)?;
-        let status = StatusStore::load(&wf_dir)?;
 
         Ok(Self {
             repo_root,
             wf_dir,
             config,
-            status,
         })
-    }
-
-    /// Save status back to disk
-    pub fn save_status(&self) -> Result<()> {
-        self.status.save(&self.wf_dir)
     }
 
     /// Get session name
@@ -65,7 +59,6 @@ impl Project {
 
     /// Resolve task name from name or 1-based index
     pub fn resolve_task_name(&self, name_or_index: &str) -> Result<String> {
-        // Check if it's a number (1-based index)
         if let Ok(index) = name_or_index.parse::<usize>() {
             let tasks = self.load_all_tasks()?;
             if index == 0 || index > tasks.len() {
@@ -77,8 +70,6 @@ impl Project {
             }
             return Ok(tasks[index - 1].name.clone());
         }
-
-        // It's a task name
         Ok(name_or_index.to_string())
     }
 
@@ -86,13 +77,10 @@ impl Project {
     pub fn check_dependencies(&self, task: &TaskDefinition) -> Result<Vec<String>> {
         let mut blocking = Vec::new();
         for dep in &task.depends {
-            match self.status.get(dep) {
-                Some(state) if state.status == crate::model::TaskStatus::Completed => {
-                    // Dependency satisfied
-                }
-                _ => {
-                    blocking.push(dep.clone());
-                }
+            let state = self.replay_task(dep)?;
+            match state {
+                Some(s) if s.status == TaskStatus::Completed => {}
+                _ => blocking.push(dep.clone()),
             }
         }
         Ok(blocking)
@@ -108,28 +96,30 @@ impl Project {
         self.wf_dir.join("tasks").join(format!("{}.md", task_name))
     }
 
-    /// Append a log entry to the task's JSONL log file
-    pub fn append_log(&self, task_name: &str, entry: &StepLog) -> Result<()> {
+    /// Append an event to the task's JSONL log file (with exclusive file lock)
+    pub fn append_event(&self, task_name: &str, event: &Event) -> Result<()> {
         let log_file = self.log_file(task_name);
         let log_dir = log_file.parent().unwrap();
 
-        // Create log directory if it doesn't exist
         fs::create_dir_all(log_dir)?;
 
-        // Append to file (create if doesn't exist)
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_file)?;
 
-        let json = serde_json::to_string(entry)?;
+        file.lock_exclusive()?;
+
+        let json = serde_json::to_string(event)?;
         writeln!(file, "{}", json)?;
+
+        file.unlock()?;
 
         Ok(())
     }
 
-    /// Read all log entries from the task's JSONL log file
-    pub fn read_logs(&self, task_name: &str) -> Result<Vec<StepLog>> {
+    /// Read all events from the task's JSONL log file
+    pub fn read_events(&self, task_name: &str) -> Result<Vec<Event>> {
         let log_file = self.log_file(task_name);
 
         if !log_file.exists() {
@@ -138,18 +128,25 @@ impl Project {
 
         let file = fs::File::open(&log_file)?;
         let reader = BufReader::new(file);
-        let mut logs = Vec::new();
+        let mut events = Vec::new();
 
         for line in reader.lines() {
             let line = line?;
             if line.trim().is_empty() {
                 continue;
             }
-            let entry: StepLog = serde_json::from_str(&line)?;
-            logs.push(entry);
+            let event: Event = serde_json::from_str(&line)?;
+            events.push(event);
         }
 
-        Ok(logs)
+        Ok(events)
+    }
+
+    /// Replay events to reconstruct current TaskState
+    pub fn replay_task(&self, task_name: &str) -> Result<Option<TaskState>> {
+        let events = self.read_events(task_name)?;
+        let workflow_len = self.config.workflow.len();
+        Ok(replay(&events, workflow_len))
     }
 
     /// Fire a hook (fire-and-forget)

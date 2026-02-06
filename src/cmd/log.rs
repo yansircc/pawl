@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 
-use crate::model::StepLog;
+use crate::model::Event;
 
 use super::common::Project;
 
@@ -13,9 +13,10 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     let _task = project.load_task(&task_name)?;
 
     // Check if task has been started
-    let Some(state) = project.status.get(&task_name) else {
+    let state = project.replay_task(&task_name)?;
+    if state.is_none() {
         bail!("Task '{}' has not been started yet.", task_name);
-    };
+    }
 
     let log_file = project.log_file(&task_name);
 
@@ -25,52 +26,43 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Read all logs
-    let logs = project.read_logs(&task_name)?;
+    let events = project.read_events(&task_name)?;
 
-    if logs.is_empty() {
+    if events.is_empty() {
         println!("No log entries found for task '{}'.", task_name);
         return Ok(());
     }
 
     if all {
-        // Show all step logs
-        for (i, log) in logs.iter().enumerate() {
+        for (i, event) in events.iter().enumerate() {
             if i > 0 {
-                println!("\n{}", "─".repeat(60));
+                println!("\n{}", "\u{2500}".repeat(60));
             }
-            print_log_entry(log, &project);
+            print_event(event, &project);
         }
     } else if let Some(step_num) = step {
-        // Show specific step log (1-based)
         let step_idx = step_num.saturating_sub(1);
 
-        // Find the log entry for this step
-        let entry = logs.iter().find(|log| get_step_index(log) == step_idx);
+        let matching: Vec<&Event> = events
+            .iter()
+            .filter(|e| get_event_step(e) == Some(step_idx))
+            .collect();
 
-        if let Some(entry) = entry {
-            print_log_entry(entry, &project);
-        } else {
+        if matching.is_empty() {
             println!("No log entry found for step {}.", step_num);
             println!("The step may not have been executed yet.");
+        } else {
+            for (i, event) in matching.iter().enumerate() {
+                if i > 0 {
+                    println!("\n{}", "\u{2500}".repeat(60));
+                }
+                print_event(event, &project);
+            }
         }
     } else {
-        // Show the most recent step log (current or last executed)
-        let target_step = if state.current_step > 0 {
-            state.current_step - 1
-        } else {
-            0
-        };
-
-        // Find the log entry for this step, or show the last one
-        let entry = logs
-            .iter()
-            .rev()
-            .find(|log| get_step_index(log) == target_step)
-            .or_else(|| logs.last());
-
-        if let Some(entry) = entry {
-            print_log_entry(entry, &project);
+        // Show the most recent event
+        if let Some(event) = events.last() {
+            print_event(event, &project);
         } else {
             println!("No log entries found.");
         }
@@ -79,19 +71,31 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     Ok(())
 }
 
-/// Get the step index from a log entry
-fn get_step_index(log: &StepLog) -> usize {
-    match log {
-        StepLog::Command { step, .. } => *step,
-        StepLog::InWindow { step, .. } => *step,
-        StepLog::Checkpoint { step } => *step,
+fn get_event_step(event: &Event) -> Option<usize> {
+    match event {
+        Event::TaskStarted { .. } => None,
+        Event::TaskReset { .. } => None,
+        Event::CommandExecuted { step, .. } => Some(*step),
+        Event::CheckpointReached { step, .. } => Some(*step),
+        Event::CheckpointPassed { step, .. } => Some(*step),
+        Event::WindowLaunched { step, .. } => Some(*step),
+        Event::AgentReported { step, .. } => Some(*step),
+        Event::StepSkipped { step, .. } => Some(*step),
+        Event::StepRetried { step, .. } => Some(*step),
+        Event::StepRolledBack { from_step, .. } => Some(*from_step),
+        Event::TaskStopped { step, .. } => Some(*step),
+        Event::OnExit { step, .. } => Some(*step),
     }
 }
 
-/// Print a formatted log entry
-fn print_log_entry(log: &StepLog, project: &Project) {
-    match log {
-        StepLog::Command {
+fn print_event(event: &Event, project: &Project) {
+    match event {
+        Event::TaskStarted { ts } => {
+            println!("=== Task Started ===");
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::CommandExecuted {
+            ts,
             step,
             exit_code,
             duration,
@@ -106,12 +110,12 @@ fn print_log_entry(log: &StepLog, project: &Project) {
                 .unwrap_or("Unknown");
 
             println!("=== Step {}: {} (command) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             println!("Exit code: {}", exit_code);
             println!("Duration: {:.1}s", duration);
 
             if !stdout.is_empty() {
                 println!("\n[stdout]");
-                // Limit output to avoid overwhelming the terminal
                 let lines: Vec<&str> = stdout.lines().collect();
                 if lines.len() > 50 {
                     for line in lines.iter().take(25) {
@@ -137,33 +141,7 @@ fn print_log_entry(log: &StepLog, project: &Project) {
                 }
             }
         }
-
-        StepLog::InWindow {
-            step,
-            session_id,
-            transcript,
-            status,
-        } => {
-            let step_name = project
-                .config
-                .workflow
-                .get(*step)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-
-            println!("=== Step {}: {} (in_window) ===", step + 1, step_name);
-            println!("Status: {}", status);
-
-            if let Some(sid) = session_id {
-                println!("Session ID: {}", sid);
-            }
-
-            if let Some(path) = transcript {
-                println!("Transcript: {}", path);
-            }
-        }
-
-        StepLog::Checkpoint { step } => {
+        Event::CheckpointReached { ts, step } => {
             let step_name = project
                 .config
                 .workflow
@@ -172,7 +150,121 @@ fn print_log_entry(log: &StepLog, project: &Project) {
                 .unwrap_or("Unknown");
 
             println!("=== Step {}: {} (checkpoint) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             println!("Checkpoint reached.");
+        }
+        Event::CheckpointPassed { ts, step } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (checkpoint passed) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::WindowLaunched { ts, step } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (window launched) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::AgentReported {
+            ts,
+            step,
+            result,
+            session_id,
+            transcript,
+            message,
+        } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (agent: {:?}) ===", step + 1, step_name, result);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+
+            if let Some(sid) = session_id {
+                println!("Session ID: {}", sid);
+            }
+            if let Some(path) = transcript {
+                println!("Transcript: {}", path);
+            }
+            if let Some(msg) = message {
+                println!("Message: {}", msg);
+            }
+        }
+        Event::OnExit {
+            ts,
+            step,
+            exit_code,
+            session_id,
+            transcript,
+        } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (on_exit) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+            println!("Exit code: {}", exit_code);
+
+            if let Some(sid) = session_id {
+                println!("Session ID: {}", sid);
+            }
+            if let Some(path) = transcript {
+                println!("Transcript: {}", path);
+            }
+        }
+        Event::StepSkipped { ts, step } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (skipped) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::StepRetried { ts, step } => {
+            let step_name = project
+                .config
+                .workflow
+                .get(*step)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+
+            println!("=== Step {}: {} (retried) ===", step + 1, step_name);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::StepRolledBack {
+            ts,
+            from_step,
+            to_step,
+        } => {
+            println!("=== Rolled back: step {} → step {} ===", from_step + 1, to_step + 1);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::TaskStopped { ts, step } => {
+            println!("=== Task stopped at step {} ===", step + 1);
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
+        }
+        Event::TaskReset { ts } => {
+            println!("=== Task Reset ===");
+            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
     }
 }
