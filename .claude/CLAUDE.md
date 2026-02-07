@@ -116,7 +116,7 @@ Per-task event log: `.wf/logs/{task}.jsonl`
 11 event types:
 - `task_started` — initializes Running, step=0
 - `step_completed` — exit_code==0 ? Success+advance : Failed (unified: sync, on_exit, done)
-- `step_waiting` — step paused, waiting for approval
+- `step_waiting` — step paused, waiting for approval (reason: "gate"/"verify_human"/"on_fail_human")
 - `step_approved` — approval granted, advance step
 - `window_launched` — Running (in_window step sent to tmux)
 - `step_skipped` — Skipped+advance
@@ -128,7 +128,7 @@ Per-task event log: `.wf/logs/{task}.jsonl`
 
 Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
 
-Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${duration}`, `${auto}`, `${feedback}`) are injected alongside standard context variables.
+Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${duration}`, `${auto}`, `${feedback}`, `${reason}`) are injected alongside standard context variables.
 
 ## CLI Commands
 
@@ -171,7 +171,8 @@ done(task)
   └─ Waiting: emit StepApproved → continue
 
 on_exit(task, exit_code)
-  └─ emit StepCompleted → handle_step_completion
+  ├─ if exit_code==0 && in_window && window gone → WindowLost (P12 fix)
+  └─ else → emit StepCompleted → handle_step_completion
 
 apply_on_fail(strategy):
   ├─ on_fail="retry" → StepReset{auto:true} → continue (up to max_retries)

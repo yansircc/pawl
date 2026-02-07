@@ -48,8 +48,8 @@ const DEFAULT_CONFIG: &str = r#"{
       "in_window": true
     },
 
-    // 人工确认开发完成
-    { "name": "Review development", "verify": "human" },
+    // 人工确认开发完成（gate 步骤，等待 wf done）
+    { "name": "Review development" },
 
     // 合并到主分支
     {

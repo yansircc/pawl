@@ -128,6 +128,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             project.append_event(task_name, &Event::StepWaiting {
                 ts: event_timestamp(),
                 step: step_idx,
+                reason: "gate".to_string(),
             })?;
             println!("  → Waiting for approval. Use 'wf done {}' to continue.", task_name);
             return Ok(());
@@ -256,10 +257,10 @@ fn apply_on_fail(
             println!("  Verify failed. Max retries ({}) reached.", step.effective_max_retries());
         }
     } else if step.on_fail_human() {
-        return emit_waiting(project, task_name, step_idx,
+        return emit_waiting(project, task_name, step_idx, "on_fail_human",
             &format!("  Verify failed. Waiting for human decision.\n  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name));
     } else if step.verify_is_human() {
-        return emit_waiting(project, task_name, step_idx,
+        return emit_waiting(project, task_name, step_idx, "verify_human",
             &format!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name));
     } else {
         // Default: just fail
@@ -275,10 +276,11 @@ fn apply_on_fail(
 }
 
 /// Emit a StepWaiting event and print a message. Returns Ok(false) to stop the execution loop.
-fn emit_waiting(project: &Project, task_name: &str, step_idx: usize, message: &str) -> Result<bool> {
+fn emit_waiting(project: &Project, task_name: &str, step_idx: usize, reason: &str, message: &str) -> Result<bool> {
     project.append_event(task_name, &Event::StepWaiting {
         ts: event_timestamp(),
         step: step_idx,
+        reason: reason.to_string(),
     })?;
     println!("{}", message);
     Ok(false)

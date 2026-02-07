@@ -209,11 +209,11 @@ fn print_event(event: &Event, project: &Project) {
                 }
             }
         }
-        Event::StepWaiting { ts, step } => {
+        Event::StepWaiting { ts, step, reason } => {
             let name = step_name(project, *step);
             println!("=== Step {}: {} (waiting) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-            println!("Waiting for approval.");
+            println!("Waiting for approval ({}).", reason);
         }
         Event::StepApproved { ts, step } => {
             let name = step_name(project, *step);

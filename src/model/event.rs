@@ -24,6 +24,7 @@ pub enum Event {
     StepWaiting {
         ts: DateTime<Utc>,
         step: usize,
+        reason: String,
     },
     StepApproved {
         ts: DateTime<Utc>,
@@ -108,6 +109,9 @@ impl Event {
                     vars.insert("duration".to_string(), format!("{:.1}", d));
                 }
             }
+            Event::StepWaiting { reason, .. } => {
+                vars.insert("reason".to_string(), reason.clone());
+            }
             Event::StepReset { auto, .. } => {
                 vars.insert("auto".to_string(), auto.to_string());
             }
@@ -159,11 +163,12 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                     s.message = Some(format!("Exit code: {}", exit_code));
                 }
             }
-            Event::StepWaiting { ts, step } => {
+            Event::StepWaiting { ts, step, reason } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.current_step = *step;
                 s.status = TaskStatus::Waiting;
+                s.message = Some(reason.clone());
             }
             Event::StepApproved { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
@@ -282,10 +287,11 @@ mod tests {
     fn test_step_waiting_approved() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepWaiting { ts: ts(), step: 0 },
+            Event::StepWaiting { ts: ts(), step: 0, reason: "gate".to_string() },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);
+        assert_eq!(state.message.as_deref(), Some("gate"));
 
         let mut events2 = events;
         events2.push(Event::StepApproved { ts: ts(), step: 0 });
@@ -308,7 +314,7 @@ mod tests {
                 stdout: None,
                 stderr: None,
             },
-            Event::StepWaiting { ts: ts(), step: 0 },
+            Event::StepWaiting { ts: ts(), step: 0, reason: "verify_human".to_string() },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);

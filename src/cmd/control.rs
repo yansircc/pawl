@@ -15,7 +15,7 @@ pub fn stop(task_name: &str) -> Result<()> {
 
     let state = project.replay_task(&task_name)?;
     let Some(state) = state else {
-        bail!("Task '{}' has not been started.", task_name);
+        bail!("Task '{}' has not been started. Use 'wf start {}' to begin.", task_name, task_name);
     };
 
     if state.status != TaskStatus::Running {
@@ -125,6 +125,19 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
 
     let step_idx = state.current_step;
     let step = &project.config.workflow[step_idx];
+
+    // P12 fix: if exit_code=0 but window is gone, it was killed by signal (SIGHUP from kill-window)
+    if exit_code == 0 && step.in_window {
+        let session = project.session_name();
+        if !tmux::window_exists(&session, task_name) {
+            project.append_event(task_name, &Event::WindowLost {
+                ts: event_timestamp(),
+                step: step_idx,
+            })?;
+            eprintln!("Task '{}' window lost at step {} (killed by signal).", task_name, step_idx + 1);
+            return Ok(());
+        }
+    }
 
     // Emit StepCompleted event
     project.append_event(task_name, &Event::StepCompleted {

@@ -128,7 +128,18 @@ impl Config {
             .read_to_string(&mut stripped)
             .context("Failed to strip comments from JSONC")?;
 
-        serde_json::from_str(&stripped).context("Failed to parse config JSON")
+        let config: Self = serde_json::from_str(&stripped).context("Failed to parse config JSON")?;
+
+        for step in &config.workflow {
+            if step.run.is_none() && (step.verify.is_some() || step.on_fail.is_some()) {
+                eprintln!(
+                    "Warning: step '{}' has verify/on_fail but no run command — it will be treated as a gate step.",
+                    step.name
+                );
+            }
+        }
+
+        Ok(config)
     }
 
     /// Get session name, defaulting to directory name

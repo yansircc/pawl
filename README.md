@@ -56,7 +56,7 @@ You define a workflow in `.wf/config.jsonc` — a list of steps that run for eve
       "run": "claude -p '@.wf/tasks/${task}.md'",
       "in_window": true
     },
-    { "name": "Review development", "verify": "human" },
+    { "name": "Review development" },
     { "name": "Type check", "run": "cd ${worktree} && npm run typecheck" },
     { "name": "Merge", "run": "cd ${repo_root} && git merge --squash ${branch}" },
     { "name": "Cleanup", "run": "git worktree remove ${worktree} --force; git branch -D ${branch}; true" }
@@ -125,8 +125,9 @@ wf status [task]         # Show status (--json for machine output)
 wf list                  # List all tasks
 wf log <task> --all      # View execution logs
 wf log <task> --step 3   # View specific step log
+wf events [task] [--follow]  # Unified event stream
 wf capture <task>        # Capture tmux window content
-wf wait <task> --until completed  # Wait for status
+wf wait <task> --until completed  # Wait for status (with window health check)
 wf enter <task>          # Attach to tmux window
 ```
 

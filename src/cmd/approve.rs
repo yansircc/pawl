@@ -15,7 +15,7 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
     let state = project.replay_task(&task_name)?;
     let Some(state) = state else {
-        bail!("Task '{}' not found.", task_name);
+        bail!("Task '{}' has not been started. Use 'wf start {}' to begin.", task_name, task_name);
     };
 
     let step_idx = state.current_step;

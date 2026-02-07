@@ -98,8 +98,23 @@ fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<Str
             }
             Event::VerifyFailed { step, feedback, .. } if *step == step_idx => {
                 if last_feedback.is_none() {
-                    // Reverse iteration: first match is the most recent
                     last_feedback = Some(feedback.clone());
+                }
+            }
+            Event::StepCompleted { step, exit_code, stdout, stderr, .. }
+                if *step == step_idx && *exit_code != 0 =>
+            {
+                if last_feedback.is_none() {
+                    let mut parts = Vec::new();
+                    if let Some(out) = stdout {
+                        if !out.is_empty() { parts.push(out.as_str()); }
+                    }
+                    if let Some(err) = stderr {
+                        if !err.is_empty() { parts.push(err.as_str()); }
+                    }
+                    if !parts.is_empty() {
+                        last_feedback = Some(parts.join("\n"));
+                    }
                 }
             }
             _ => {}

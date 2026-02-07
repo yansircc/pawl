@@ -1,11 +1,16 @@
 use anyhow::{bail, Result};
-use std::io::{BufRead, BufReader};
+use fs2::FileExt;
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::model::event::{replay, Event};
+use crate::model::config::Step;
+use crate::model::event::{event_timestamp, replay, Event};
+use crate::model::state::TaskState;
 use crate::model::TaskStatus;
+use crate::util::tmux;
 
 use super::common::Project;
 
@@ -22,6 +27,8 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
     let resolved_name = project.resolve_task_name(task_name)?;
     let wf_dir = project.wf_dir.clone();
     let workflow_len = project.config.workflow.len();
+    let workflow = project.config.workflow.clone();
+    let session_name = project.session_name();
 
     // Check initial status
     let current_status = project
@@ -51,7 +58,7 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
     drop(project);
 
     // Subsequent iterations: only read JSONL + replay (skip Config and git calls)
-    poll_status(&resolved_name, &targets, until, &wf_dir, workflow_len, timeout, interval, start)
+    poll_status(&resolved_name, &targets, until, &wf_dir, workflow_len, &workflow, &session_name, timeout, interval, start)
 }
 
 /// Poll status by reading JSONL and replaying
@@ -61,6 +68,8 @@ fn poll_status(
     until: &str,
     wf_dir: &PathBuf,
     workflow_len: usize,
+    workflow: &[Step],
+    session_name: &str,
     timeout: Duration,
     interval: Duration,
     start: Instant,
@@ -71,7 +80,9 @@ fn poll_status(
         thread::sleep(interval);
 
         if start.elapsed() >= timeout {
-            let current_status = replay_from_file(&log_file, workflow_len)?;
+            let current_status = replay_state_from_file(&log_file, workflow_len)?
+                .map(|s| s.status)
+                .unwrap_or(TaskStatus::Pending);
             bail!(
                 "Timeout waiting for task '{}' to reach status '{}' (current: {:?})",
                 task_name,
@@ -80,7 +91,23 @@ fn poll_status(
             );
         }
 
-        let current_status = replay_from_file(&log_file, workflow_len)?;
+        let state = replay_state_from_file(&log_file, workflow_len)?;
+
+        // Health check: if Running on in_window step but window is gone, emit WindowLost
+        if let Some(ref s) = state {
+            if s.status == TaskStatus::Running {
+                let step_idx = s.current_step;
+                if step_idx < workflow.len()
+                    && workflow[step_idx].in_window
+                    && !tmux::window_exists(session_name, task_name)
+                {
+                    append_window_lost(&log_file, step_idx)?;
+                    continue; // next iteration will replay to Failed
+                }
+            }
+        }
+
+        let current_status = state.map(|s| s.status).unwrap_or(TaskStatus::Pending);
 
         if targets.contains(&current_status) {
             println!(
@@ -103,10 +130,10 @@ fn poll_status(
     }
 }
 
-/// Read events from JSONL file and replay to get current status
-fn replay_from_file(log_file: &PathBuf, workflow_len: usize) -> Result<TaskStatus> {
+/// Read events from JSONL file and replay to get current TaskState
+fn replay_state_from_file(log_file: &PathBuf, workflow_len: usize) -> Result<Option<TaskState>> {
     if !log_file.exists() {
-        return Ok(TaskStatus::Pending);
+        return Ok(None);
     }
 
     let file = std::fs::File::open(log_file)?;
@@ -122,9 +149,27 @@ fn replay_from_file(log_file: &PathBuf, workflow_len: usize) -> Result<TaskStatu
         events.push(event);
     }
 
-    Ok(replay(&events, workflow_len)
-        .map(|s| s.status)
-        .unwrap_or(TaskStatus::Pending))
+    Ok(replay(&events, workflow_len))
+}
+
+/// Append a WindowLost event directly to the JSONL file (with file lock).
+fn append_window_lost(log_file: &PathBuf, step_idx: usize) -> Result<()> {
+    let event = Event::WindowLost {
+        ts: event_timestamp(),
+        step: step_idx,
+    };
+    let json = serde_json::to_string(&event)?;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)?;
+
+    file.lock_exclusive()?;
+    writeln!(file, "{}", json)?;
+    file.unlock()?;
+
+    Ok(())
 }
 
 fn parse_statuses(s: &str) -> Result<Vec<TaskStatus>> {
