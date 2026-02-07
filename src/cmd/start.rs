@@ -433,9 +433,16 @@ fn execute_in_window(
         &ctx.repo_root
     };
 
+    // Build export commands for all WF_* environment variables
+    let env = ctx.to_env_vars();
+    let exports: Vec<String> = env.iter()
+        .map(|(k, v)| format!("export {}='{}'", k, v.replace('\'', "'\\''")))
+        .collect();
+    let export_prefix = exports.join("; ");
+
     let wrapped = format!(
-        "trap 'cd \"{}\" && wf _on-exit {} $?' EXIT; cd '{}' && {}; exit $?",
-        ctx.repo_root, task_name, work_dir, command
+        "{}; trap 'cd \"{}\" && wf _on-exit {} $?' EXIT; cd '{}' && {}; exit $?",
+        export_prefix, ctx.repo_root, task_name, work_dir, command
     );
 
     println!("  → Sending to {}:{}", session, window);
