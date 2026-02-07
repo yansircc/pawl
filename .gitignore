@@ -11,3 +11,10 @@
 .wt/*
 !.wt/tasks/
 !.wt/config.yaml
+
+# pawl - Resumable Step Sequencer
+.pawl/*
+!.pawl/tasks/
+!.pawl/config.jsonc
+!.pawl/lib/
+.pawl/lib/node_modules/

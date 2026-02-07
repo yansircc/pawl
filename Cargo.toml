@@ -2,6 +2,14 @@
 name = "pawl"
 version = "0.1.0"
 edition = "2024"
+description = "A resumable step sequencer for multi-step workflows"
+license = "MIT"
+repository = "https://github.com/yansircc/pawl"
+homepage = "https://github.com/yansircc/pawl"
+readme = "README.md"
+keywords = ["workflow", "automation", "sequencer", "tmux", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [".claude/", ".pawl/", ".wf/"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
