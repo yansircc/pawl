@@ -244,15 +244,6 @@ fn print_event(event: &Event, project: &Project) {
             println!("=== Task Reset ===");
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
-        Event::VerifyFailed { ts, step, feedback } => {
-            let name = step_name(project, *step);
-            println!("=== Step {}: {} (verify failed) ===", step + 1, name);
-            println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-            if !feedback.is_empty() {
-                println!("\n[feedback]");
-                println!("{}", feedback);
-            }
-        }
         Event::WindowLost { ts, step } => {
             let name = step_name(project, *step);
             println!("=== Step {}: {} (window lost) ===", step + 1, name);

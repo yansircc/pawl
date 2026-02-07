@@ -84,11 +84,6 @@ impl Step {
         self.run.is_none()
     }
 
-    /// verify: "human" — human verifier (manual approval required)
-    pub fn verify_is_human(&self) -> bool {
-        self.verify.as_deref() == Some("human")
-    }
-
     /// on_fail: "retry" — auto-retry on failure
     pub fn on_fail_retry(&self) -> bool {
         self.on_fail.as_deref() == Some("retry")

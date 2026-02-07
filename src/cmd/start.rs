@@ -156,6 +156,12 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
     }
 }
 
+pub struct RunOutput {
+    pub duration: Option<f64>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+}
+
 /// Execute a normal (synchronous) step
 fn execute_step(
     project: &Project,
@@ -174,20 +180,14 @@ fn execute_step(
 
     let duration = start_time.elapsed().as_secs_f64();
 
-    // Emit StepCompleted event
-    project.append_event(task_name, &Event::StepCompleted {
-        ts: event_timestamp(),
-        step: step_idx,
-        exit_code: result.exit_code,
+    let run_output = RunOutput {
         duration: Some(duration),
         stdout: Some(result.stdout.clone()),
         stderr: Some(result.stderr.clone()),
-    })?;
+    };
 
     if result.success {
         println!("  ✓ Done");
-        // After successful run, go through unified pipeline
-        handle_step_completion(project, task_name, step_idx, 0, step)
     } else {
         println!("  ✗ Failed (exit code {})", result.exit_code);
         if !result.stderr.is_empty() {
@@ -195,22 +195,32 @@ fn execute_step(
                 println!("    {}", line);
             }
         }
-        // Failed step — go through unified pipeline for on_fail handling
-        handle_step_completion(project, task_name, step_idx, result.exit_code, step)
     }
+
+    handle_step_completion(project, task_name, step_idx, result.exit_code, step, run_output)
 }
 
 /// Unified pipeline: handles verify + on_fail after any step completion.
 /// Called from execute_step, on_exit, and done.
+/// StepCompleted is emitted INSIDE this function (after verify is resolved).
 pub fn handle_step_completion(
     project: &Project,
     task_name: &str,
     step_idx: usize,
     exit_code: i32,
     step: &Step,
+    run_output: RunOutput,
 ) -> Result<bool> {
     if exit_code != 0 {
-        // Step failed — apply on_fail strategy
+        // Step failed — emit StepCompleted with failure, then apply on_fail
+        project.append_event(task_name, &Event::StepCompleted {
+            ts: event_timestamp(),
+            step: step_idx,
+            exit_code,
+            duration: run_output.duration,
+            stdout: run_output.stdout,
+            stderr: run_output.stderr,
+        })?;
         let feedback = format!("Exit code: {}", exit_code);
         return apply_on_fail(project, task_name, step_idx, &feedback, step);
     }
@@ -218,6 +228,15 @@ pub fn handle_step_completion(
     // Step succeeded — run verify if configured
     match run_verify(project, task_name, step, step_idx)? {
         VerifyOutcome::Passed => {
+            // Verify passed (or no verify) — emit StepCompleted(0)
+            project.append_event(task_name, &Event::StepCompleted {
+                ts: event_timestamp(),
+                step: step_idx,
+                exit_code: 0,
+                duration: run_output.duration,
+                stdout: run_output.stdout,
+                stderr: run_output.stderr,
+            })?;
             // Check if all steps completed
             let new_state = project.replay_task(task_name)?.expect("Task state missing");
             if new_state.status == TaskStatus::Completed {
@@ -226,7 +245,29 @@ pub fn handle_step_completion(
             }
             Ok(true)
         }
+        VerifyOutcome::HumanRequired => {
+            // verify:human — emit StepCompleted(0) then StepWaiting
+            project.append_event(task_name, &Event::StepCompleted {
+                ts: event_timestamp(),
+                step: step_idx,
+                exit_code: 0,
+                duration: run_output.duration,
+                stdout: run_output.stdout,
+                stderr: run_output.stderr,
+            })?;
+            emit_waiting(project, task_name, step_idx, "verify_human",
+                &format!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name))
+        }
         VerifyOutcome::Failed { feedback } => {
+            // Verify command failed — emit StepCompleted(1, stderr=feedback)
+            project.append_event(task_name, &Event::StepCompleted {
+                ts: event_timestamp(),
+                step: step_idx,
+                exit_code: 1,
+                duration: run_output.duration,
+                stdout: None,
+                stderr: Some(feedback.clone()),
+            })?;
             apply_on_fail(project, task_name, step_idx, &feedback, step)
         }
     }
@@ -259,9 +300,6 @@ fn apply_on_fail(
     } else if step.on_fail_human() {
         return emit_waiting(project, task_name, step_idx, "on_fail_human",
             &format!("  Verify failed. Waiting for human decision.\n  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name));
-    } else if step.verify_is_human() {
-        return emit_waiting(project, task_name, step_idx, "verify_human",
-            &format!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name));
     } else {
         // Default: just fail
         println!("  ✗ Failed.");
@@ -329,18 +367,16 @@ fn execute_in_window(
 
 enum VerifyOutcome {
     Passed,
+    HumanRequired,
     Failed { feedback: String },
 }
 
 /// Run the verify command for a step, if any.
-/// verify:"human" is handled by the caller (apply_on_fail treats it as a special case).
+/// Pure function — no event emission (side-effect-free).
 fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
     match &step.verify {
         None => Ok(VerifyOutcome::Passed),
-        Some(v) if v == "human" => {
-            // Signal as "failed" so caller routes to apply_on_fail → human wait
-            Ok(VerifyOutcome::Failed { feedback: String::new() })
-        }
+        Some(v) if v == "human" => Ok(VerifyOutcome::HumanRequired),
         Some(cmd) => {
             let session = project.session_name();
             let log_file = project.log_file(task_name);
@@ -365,7 +401,6 @@ fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) 
             if result.success {
                 Ok(VerifyOutcome::Passed)
             } else {
-                // Emit VerifyFailed event
                 let mut feedback = String::new();
                 if !result.stdout.is_empty() {
                     feedback.push_str(&result.stdout);
@@ -376,11 +411,6 @@ fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) 
                     }
                     feedback.push_str(&result.stderr);
                 }
-                project.append_event(task_name, &Event::VerifyFailed {
-                    ts: event_timestamp(),
-                    step: step_idx,
-                    feedback: feedback.clone(),
-                })?;
                 Ok(VerifyOutcome::Failed { feedback })
             }
         }

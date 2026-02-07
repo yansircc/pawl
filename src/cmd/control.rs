@@ -6,7 +6,7 @@ use crate::util::tmux;
 
 use super::common::Project;
 use super::start;
-use super::start::continue_execution;
+use super::start::{continue_execution, RunOutput};
 
 /// Stop the current task
 pub fn stop(task_name: &str) -> Result<()> {
@@ -139,19 +139,14 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
         }
     }
 
-    // Emit StepCompleted event
-    project.append_event(task_name, &Event::StepCompleted {
-        ts: event_timestamp(),
-        step: step_idx,
-        exit_code,
+    // Use unified pipeline (StepCompleted emitted inside)
+    let run_output = RunOutput {
         duration: None,
         stdout: None,
         stderr: None,
-    })?;
-
-    // Use unified pipeline
+    };
     let step = step.clone();
-    match start::handle_step_completion(&project, task_name, step_idx, exit_code, &step)? {
+    match start::handle_step_completion(&project, task_name, step_idx, exit_code, &step, run_output)? {
         true => {
             // Pipeline says continue — run next steps
             continue_execution(&project, task_name)?;

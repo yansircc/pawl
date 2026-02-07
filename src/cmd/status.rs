@@ -96,11 +96,6 @@ fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<Str
             Event::StepReset { step, auto: true, .. } if *step == step_idx => {
                 retry_count += 1;
             }
-            Event::VerifyFailed { step, feedback, .. } if *step == step_idx => {
-                if last_feedback.is_none() {
-                    last_feedback = Some(feedback.clone());
-                }
-            }
             Event::StepCompleted { step, exit_code, stdout, stderr, .. }
                 if *step == step_idx && *exit_code != 0 =>
             {

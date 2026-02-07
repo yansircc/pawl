@@ -50,11 +50,6 @@ pub enum Event {
     TaskReset {
         ts: DateTime<Utc>,
     },
-    VerifyFailed {
-        ts: DateTime<Utc>,
-        step: usize,
-        feedback: String,
-    },
     WindowLost {
         ts: DateTime<Utc>,
         step: usize,
@@ -78,7 +73,6 @@ impl Event {
             Event::StepReset { .. } => "step_reset",
             Event::TaskStopped { .. } => "task_stopped",
             Event::TaskReset { .. } => "task_reset",
-            Event::VerifyFailed { .. } => "verify_failed",
             Event::WindowLost { .. } => "window_lost",
         }
     }
@@ -94,7 +88,6 @@ impl Event {
             | Event::StepSkipped { step, .. }
             | Event::StepReset { step, .. }
             | Event::TaskStopped { step, .. }
-            | Event::VerifyFailed { step, .. }
             | Event::WindowLost { step, .. } => Some(*step),
         }
     }
@@ -114,9 +107,6 @@ impl Event {
             }
             Event::StepReset { auto, .. } => {
                 vars.insert("auto".to_string(), auto.to_string());
-            }
-            Event::VerifyFailed { feedback, .. } => {
-                vars.insert("feedback".to_string(), feedback.clone());
             }
             _ => {}
         }
@@ -201,14 +191,6 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.status = TaskStatus::Stopped;
-            }
-            Event::VerifyFailed { ts, step, feedback } => {
-                let Some(s) = state.as_mut() else { continue };
-                s.updated_at = Some(*ts);
-                s.current_step = *step; // Roll back: verify failed after step_completed advanced
-                s.step_status.insert(*step, StepStatus::Failed);
-                s.status = TaskStatus::Failed;
-                s.message = Some(feedback.clone());
             }
             Event::WindowLost { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
@@ -322,46 +304,50 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_failed() {
-        let events = vec![
-            Event::TaskStarted { ts: ts() },
-            Event::VerifyFailed {
-                ts: ts(),
-                step: 0,
-                feedback: "tests failed".to_string(),
-            },
-        ];
-        let state = replay(&events, 3).unwrap();
-        assert_eq!(state.status, TaskStatus::Failed);
-        assert_eq!(state.current_step, 0);
-        assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
-        assert_eq!(state.message.as_deref(), Some("tests failed"));
-    }
-
-    #[test]
-    fn test_verify_failed_after_step_completed_rollback() {
-        // StepCompleted(exit=0) advances current_step, but VerifyFailed must roll it back
+    fn test_verify_failure_as_step_completed() {
+        // Verify failure is now represented as StepCompleted(exit_code!=0)
+        // — no separate VerifyFailed event needed
         let events = vec![
             Event::TaskStarted { ts: ts() },
             Event::StepCompleted {
                 ts: ts(),
                 step: 0,
-                exit_code: 0,
-                duration: Some(1.0),
+                exit_code: 1,
+                duration: Some(2.0),
                 stdout: None,
-                stderr: None,
-            },
-            Event::VerifyFailed {
-                ts: ts(),
-                step: 0,
-                feedback: "verify command failed".to_string(),
+                stderr: Some("verify: tests failed".to_string()),
             },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Failed);
-        // current_step must be rolled back to 0 (the failed step), not 1
-        assert_eq!(state.current_step, 0);
+        assert_eq!(state.current_step, 0); // does NOT advance
         assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
+        assert_eq!(state.message.as_deref(), Some("Exit code: 1"));
+    }
+
+    #[test]
+    fn test_verify_failure_then_retry() {
+        // StepCompleted(exit!=0) → StepReset(auto) → Running at same step
+        let events = vec![
+            Event::TaskStarted { ts: ts() },
+            Event::StepCompleted {
+                ts: ts(),
+                step: 0,
+                exit_code: 1,
+                duration: Some(2.0),
+                stdout: None,
+                stderr: Some("verify failed".to_string()),
+            },
+            Event::StepReset {
+                ts: ts(),
+                step: 0,
+                auto: true,
+            },
+        ];
+        let state = replay(&events, 3).unwrap();
+        assert_eq!(state.status, TaskStatus::Running);
+        assert_eq!(state.current_step, 0);
+        assert!(!state.step_status.contains_key(&0));
     }
 
     #[test]

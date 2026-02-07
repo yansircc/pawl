@@ -113,9 +113,9 @@ JSONL is the **single source of truth** — no `status.json`. State is reconstru
 
 Per-task event log: `.wf/logs/{task}.jsonl`
 
-11 event types:
+10 event types:
 - `task_started` — initializes Running, step=0
-- `step_completed` — exit_code==0 ? Success+advance : Failed (unified: sync, on_exit, done)
+- `step_completed` — exit_code==0 ? Success+advance : Failed (unified: sync, on_exit, done, verify failure)
 - `step_waiting` — step paused, waiting for approval (reason: "gate"/"verify_human"/"on_fail_human")
 - `step_approved` — approval granted, advance step
 - `window_launched` — Running (in_window step sent to tmux)
@@ -123,12 +123,11 @@ Per-task event log: `.wf/logs/{task}.jsonl`
 - `step_reset` — reset step to Running (auto=true for retry, auto=false for manual)
 - `task_stopped` — Stopped
 - `task_reset` — clears all state (replay restarts)
-- `verify_failed` — verify command failed (feedback stored)
 - `window_lost` — tmux window disappeared, auto-marked as Failed
 
 Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
 
-Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${duration}`, `${auto}`, `${feedback}`, `${reason}`) are injected alongside standard context variables.
+Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${exit_code}`, `${duration}`, `${auto}`, `${reason}`) are injected alongside standard context variables.
 
 ## CLI Commands
 
@@ -156,28 +155,27 @@ start(task)
   └─ execute loop:
      ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
      ├─ Gate step (no run) → StepWaiting, return (wait for wf done)
-     ├─ Normal step → run sync → StepCompleted → handle_step_completion:
-     │   ├─ exit_code != 0 → apply_on_fail(on_fail strategy)
-     │   ├─ no verify → advance
-     │   ├─ verify: "human" → StepWaiting (wait for wf done)
+     ├─ Normal step → run sync → handle_step_completion:
+     │   ├─ exit_code != 0 → StepCompleted(exit) → apply_on_fail
+     │   ├─ no verify → StepCompleted(0) → advance
+     │   ├─ verify: "human" → StepCompleted(0) + StepWaiting(verify_human)
      │   └─ verify: command → run it
-     │       ├─ pass → advance
-     │       └─ fail → apply_on_fail(on_fail strategy)
+     │       ├─ pass → StepCompleted(0) → advance
+     │       └─ fail → StepCompleted(1, stderr=feedback) → apply_on_fail
      └─ in_window step → send to tmux → return (wait for wf done)
 
 done(task)
-  ├─ Running: emit StepCompleted → handle_step_completion (unified pipeline)
+  ├─ Running: handle_step_completion (emits StepCompleted inside)
   │   └─ retry? keep tmux window : kill tmux window
   └─ Waiting: emit StepApproved → continue
 
 on_exit(task, exit_code)
   ├─ if exit_code==0 && in_window && window gone → WindowLost (P12 fix)
-  └─ else → emit StepCompleted → handle_step_completion
+  └─ else → handle_step_completion (emits StepCompleted inside)
 
 apply_on_fail(strategy):
   ├─ on_fail="retry" → StepReset{auto:true} → continue (up to max_retries)
   ├─ on_fail="human" → StepWaiting (wait for wf done)
-  ├─ verify="human" → StepWaiting (wait for wf done)
   └─ default → stay Failed
 ```
 

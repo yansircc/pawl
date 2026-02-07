@@ -6,7 +6,7 @@ use crate::util::tmux;
 
 use super::common::Project;
 use super::start;
-use super::start::continue_execution;
+use super::start::{continue_execution, RunOutput};
 
 /// Mark current step as done (approve waiting step, or complete in_window step)
 pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
@@ -26,21 +26,17 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             let step = &project.config.workflow[step_idx];
             let session = project.session_name();
 
-            // Emit StepCompleted with exit_code 0 (agent says done)
-            project.append_event(&task_name, &Event::StepCompleted {
-                ts: event_timestamp(),
-                step: step_idx,
-                exit_code: 0,
+            let run_output = RunOutput {
                 duration: None,
                 stdout: message.map(|s| s.to_string()),
                 stderr: None,
-            })?;
+            };
 
             println!("Step {} marked as done.", step_idx + 1);
 
-            // Unified pipeline: verify + apply_on_fail
+            // Unified pipeline: verify + emit StepCompleted + apply_on_fail
             let should_continue = start::handle_step_completion(
-                &project, &task_name, step_idx, 0, step
+                &project, &task_name, step_idx, 0, step, run_output
             )?;
 
             if should_continue {
