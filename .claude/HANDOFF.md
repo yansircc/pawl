@@ -1,67 +1,71 @@
 # Session Handoff
 
-## Current Session (S22): `wf _run` replaces runner script + `_on-exit`
+## Current Session (S23): SKILL.md identity fix + E2E test pipeline
 
 ### What changed
 
-Replaced the entire bash indirect chain (runner script → env export → EXIT trap → `wf _on-exit`) with a single Rust process `wf _run task step` that runs inside the tmux pane.
+1. **Redefined wf identity**: "AI Agent Orchestrator" → "Resumable Step Sequencer". SKILL.md and CLAUDE.md anchored all readers (AI and human) to one use case (AI coding with git worktrees), causing agents to miss wf's generic step sequencer capability.
 
-**Before**: `execute_in_window()` wrote a bash script with env exports + HUP trap + EXIT trap calling `wf _on-exit`, sent `bash 'script'` to tmux. S21 fixed 3 bugs in this chain (HUP trap, $? clobber, pty panic). Debate then found more issues (race conditions, cd short-circuit).
+2. **Built E2E test pipeline**: Rewrote `.wf/config.jsonc` as a generic pipeline (no worktrees) to test SKILL.md's information completeness. Each task = one test scenario with different prompt specificity levels.
 
-**After**: `execute_in_window()` sends `wf _run task step_idx` to tmux. `wf _run` is a Rust process that:
-1. Ignores SIGHUP (survives tmux kill-window)
-2. Forks child via `bash -c` with `pre_exec(SIG_DFL)` (child receives signals normally)
-3. `waitpid` for child exit
-4. Redirects stdout/stderr → /dev/null (pty may be gone)
-5. Re-checks state (step_idx guard against `wf done` race)
-6. Calls `handle_step_completion()` → unified pipeline
+### SKILL.md changes (6 edits)
+
+| Edit | What | Why |
+|------|------|-----|
+| Title | "AI Agent Orchestrator" → "Resumable Step Sequencer" | Break first-frame anchoring |
+| Opening | Remove "AI coding agents" / "git worktree" identity | Generalize identity |
+| Rule 3 | `cd ${worktree}` → `cd to the working directory` | Don't bind rules to worktree |
+| Exception clause | Added after rules: utility steps may omit verify | Resolve rules vs recipe contradiction |
+| Anti-pattern table | Generalized `cd` example | Consistency |
+| Recipe 6 | New: Generic Pipeline (No Git Worktrees) | Break 5/5 coding-only recipe anchoring |
+| AI Worker section title | Added "(Coding Workflow Pattern)" framing | 63 lines were unframed as one pattern |
+
+### E2E test pipeline
+
+Rewrote `.wf/config.jsonc` for testing (Recipe 6 pattern — no worktrees):
+
+```
+setup → init-wf → bootstrap (AI in tmux) → review (gate)
+```
+
+Each task's body = project PLAN + AI instructions, piped to `ccc -p`. 4 test tasks created:
+
+| Task | Prompt level | Result |
+|------|-------------|--------|
+| bm-explicit | Explicit: "read SKILL.md" | ✅ 3/3 rules, 2 tasks, verify=go build |
+| bm-wf-only | Moderate: "use wf to configure" | ✅ 3/3 rules, 3 tasks, verify=go build |
+| bm-vague | Extreme: "configure dev workflow" (no wf mention) | ✅ 3/3 rules, 4 tasks, verify=go build+vet |
+| todo-py | Different language: Python project | ✅ 3/3 rules, 1 task, verify=python todo.py ls |
+
+**Key finding**: All 4 tests pass 3 design rules. Claude Code's skill auto-discovery ensures AI reads SKILL.md even without explicit mention. Only `claude_command` needs explicit instruction.
+
+### Root cause analysis
+
+The session started with repeated miscommunication about "use wf to orchestrate testing." The foreman (me) kept interpreting "use wf" as "set up wf development workflow in target project" instead of "use wf as a generic pipeline for your own work." Root cause: **I conflated wf's instance (coding workflow template) with wf's type (generic step sequencer)** — the exact anchoring problem SKILL.md was creating for all readers.
 
 ### Files changed
 
 | File | Change |
 |------|--------|
-| `Cargo.toml` | +`libc = "0.2"` |
-| `src/cli.rs` | `_on-exit` → `_run` (replaced, not added alongside) |
-| `src/cmd/run.rs` | **New** — 142 lines, core `_run` implementation |
-| `src/cmd/mod.rs` | +`pub mod run;`, dispatch `Run` variant |
-| `src/cmd/start.rs` | `execute_in_window()` rewritten: deleted runner script generation (~46 lines), replaced with `wf _run` send (~25 lines). Added `WF_RUNNING_IN_WINDOW` exec optimization for consecutive in_window steps. |
-| `src/cmd/control.rs` | **Deleted** `on_exit()` function + cleaned imports |
-| `.claude/CLAUDE.md` | Updated architecture docs |
-
-### Issues resolved by this change
-
-- ~~on_exit + wf done dual-authority race~~: `_run` re-checks `status==Running && current_step==step_idx` after waitpid
-- ~~on_exit loses RunOutput~~: same as before (no stdout/stderr/duration for in_window), but now structurally equivalent — no bash intermediary to lose data
-- ~~in_window log system blind spot~~: `_run` is a Rust process, event emission is guaranteed (not best-effort bash trap)
-- ~~_on-exit trap 3 bugs (S21)~~: entire chain eliminated
-
-### E2E verification
-
-| Scenario | Result |
-|----------|--------|
-| Normal in_window completion | exit_code=0 → Advance → continue_execution → Completed |
-| in_window failure (exit 42) | exit_code=42 captured → Failed |
-| tmux kill-window | child killed by HUP, parent survives → exit_code=128 → Failed |
-| wf done race (done before _run finishes) | done advances step, _run re-checks and skips — no duplicate events |
+| `src/cmd/templates/wf-skill.md` | Identity fix: title, opening, rule 3, exception, anti-pattern, Recipe 6, AI Worker framing |
+| `.claude/CLAUDE.md` | Title + opening aligned with SKILL.md |
+| `.wf/config.jsonc` | Rewritten as E2E test pipeline (Recipe 6 pattern) |
+| `.wf/tasks/*.md` | 4 test task definitions (bm-explicit, bm-wf-only, bm-vague, todo-py) |
 
 ---
 
 ## Previous Sessions (compressed)
 
-### S21: _on-exit trap 3-bug fix
-- Root cause: bash SIG_DFL(HUP) skips EXIT trap. Fixed HUP trap + $? clobber + pty panic.
-- **Superseded by S22** — entire bash chain eliminated.
+### S22: wf _run replaces runner script + _on-exit
+- Eliminated entire bash indirect chain (runner script → env → trap → wf _on-exit)
+- Single Rust process `wf _run task step` in tmux: fork/waitpid, SIGHUP immunity, pty safety, race guard
 
-### S20: in_window fixes + E2E bootstrap testing
-- Runner script pattern, ai-helpers.sh grep safety, SKILL.md bootstrap testing (3 projects)
+### S20-21: in_window fixes + E2E bootstrap testing
+- S21: 3 trap bugs (superseded by S22). S20: ai-helpers.sh safety, SKILL.md bootstrap testing
 
-### S19: Unified SKILL.md + claude_command activation + i18n
+### S13-19: resolve/dispatch refactor + docs restructuring + Skill unification
 
-### S13-18: resolve/dispatch refactor + docs restructuring
-
-### S9-12: First principles + debate-driven improvements
-
-### S1-8: Architecture evolution + Foreman mode
+### S1-12: Architecture evolution + Foreman mode + first principles
 
 ---
 
@@ -70,6 +74,7 @@ Replaced the entire bash indirect chain (runner script → env export → EXIT t
 - **retry exhaustion has no audit event**: no event emitted when transitioning from retry to terminal state
 - `wf events` outputs full history (not filtered by current run), inconsistent with `wf log --all`
 - `claude_command` default: projects need `"claude_command": "ccc"` in config for ccc users
+- **config validator false positive**: in_window steps using `cd ~/path/${task}` (no worktree) trigger "doesn't reference worktree" warning — validator should check for `cd` not specifically `${worktree}`
 
 ## Key File Index
 
@@ -79,10 +84,10 @@ Replaced the entire bash indirect chain (runner script → env export → EXIT t
 | Config model + in_window validation warnings | `src/model/config.rs` |
 | Event model + replay + count_auto_retries | `src/model/event.rs` |
 | Execution engine + resolve/dispatch | `src/cmd/start.rs` |
-| **in_window parent process (`wf _run`)** | `src/cmd/run.rs` |
+| in_window parent process (`wf _run`) | `src/cmd/run.rs` |
 | Init (generates single SKILL.md) | `src/cmd/init.rs` |
 | Templates (config/skill/ai-helpers) | `src/cmd/templates/` |
 | Common utils (event R/W, hooks, check_window_health) | `src/cmd/common.rs` |
 | Variables (Context, expand, to_env_vars, claude_command) | `src/util/variable.rs` |
-| Unified Skill reference (409 lines) | `src/cmd/templates/wf-skill.md` |
+| **Unified Skill reference (~430 lines)** | `src/cmd/templates/wf-skill.md` |
 | Project overview | `.claude/CLAUDE.md` |

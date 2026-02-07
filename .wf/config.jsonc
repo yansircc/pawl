@@ -1,15 +1,13 @@
 {
-  // wf workflow config — full reference: .claude/skills/wf/SKILL.md
-  // "session": "my-project",
-  // "base_branch": "main",
+  // SKILL.md E2E test pipeline — each task = one test scenario
+  // task.md body = PLAN.md content + AI prompt (fed to ccc via pipe)
+  "session": "wf-test",
+  "claude_command": "ccc",
   "workflow": [
-    { "name": "Create branch", "run": "git branch ${branch} ${base_branch}" },
-    { "name": "Create worktree", "run": "git worktree add ${worktree} ${branch}" },
-    { "name": "Develop", "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && run_ai_worker", "in_window": true },
-    { "name": "Review", "run": "echo 'Changes in ${worktree}:' && cd ${worktree} && git diff --stat HEAD~1", "verify": "human" },
-    { "name": "Test", "run": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 2 },
-    { "name": "Merge", "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from wf'" },
-    { "name": "Cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
+    { "name": "setup", "run": "tmux new-session -d -s wf-test 2>/dev/null; rm -rf ~/code/tmp/${task} && mkdir -p ~/code/tmp/${task} && cd ~/code/tmp/${task} && git init && awk '/^---$/{n++;next}n>=2' ${task_file} > PLAN.md && git add -A && git commit -m 'init'" },
+    { "name": "init-wf", "run": "cd ~/code/tmp/${task} && wf init" },
+    { "name": "bootstrap", "run": "cd ~/code/tmp/${task} && awk '/^---$/{n++;next}n>=2' ${task_file} | ${claude_command} -p - --permission-mode bypassPermissions --max-turns 20",
+      "in_window": true, "verify": "human", "on_fail": "human" },
+    { "name": "review" }
   ]
-  // "on": { "step_completed": "echo '[${task}] ${step} exit=${exit_code}'" }
 }
