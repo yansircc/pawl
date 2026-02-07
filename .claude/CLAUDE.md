@@ -61,10 +61,8 @@ src/
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.jsonc           # Default workflow config
 │       ├── ai-helpers.sh          # AI worker helper functions
-│       ├── wf-skill.md            # SKILL.md reference card
-│       ├── foreman-guide.md       # Foreman operation manual
-│       ├── task-authoring-guide.md # Task.md writing guide
-│       └── ai-worker-guide.md     # AI worker integration guide
+│       ├── wf-skill.md            # SKILL.md reference card + rules + Claude CLI
+│       └── wf-reference.md        # JSON schema, troubleshooting, hook patterns
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
     ├── shell.rs         # run_command variants, CommandResult
@@ -239,10 +237,8 @@ check_window_health(task_name) → bool:
     └── ai-helpers.sh     # AI worker functions (extract_session_id, run_ai_worker)
 
 .claude/skills/wf/        # Claude Code skill (wf init generates)
-├── SKILL.md              # Reference card (~100 lines)
-├── foreman-guide.md      # Foreman operation manual (decision scenarios, JSON schema)
-├── task-authoring-guide.md  # Task.md writing guide (dual purpose, feedback iteration)
-└── ai-worker-guide.md    # AI worker integration guide (wrapper.sh, session resumption)
+├── SKILL.md              # Reference card + generative rules + Claude CLI patterns (~130 lines)
+└── reference.md          # JSON schema, ai-helpers.sh details, troubleshooting (~75 lines)
 ```
 
 ## Dev Commands

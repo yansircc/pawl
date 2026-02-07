@@ -25,11 +25,7 @@ const AI_HELPERS_TEMPLATE: &str = include_str!("templates/ai-helpers.sh");
 
 const WF_SKILL: &str = include_str!("templates/wf-skill.md");
 
-const FOREMAN_GUIDE: &str = include_str!("templates/foreman-guide.md");
-
-const TASK_AUTHORING_GUIDE: &str = include_str!("templates/task-authoring-guide.md");
-
-const AI_WORKER_GUIDE: &str = include_str!("templates/ai-worker-guide.md");
+const WF_REFERENCE: &str = include_str!("templates/wf-reference.md");
 
 pub fn run() -> Result<()> {
     // Get repo root
@@ -100,20 +96,10 @@ fn create_skill_files(repo_root: &str) -> Result<()> {
         .context("Failed to write SKILL.md")?;
     println!("  Created {}", skill_path.display());
 
-    let foreman_path = skill_dir.join("foreman-guide.md");
-    fs::write(&foreman_path, FOREMAN_GUIDE)
-        .context("Failed to write foreman-guide.md")?;
-    println!("  Created {}", foreman_path.display());
-
-    let task_guide_path = skill_dir.join("task-authoring-guide.md");
-    fs::write(&task_guide_path, TASK_AUTHORING_GUIDE)
-        .context("Failed to write task-authoring-guide.md")?;
-    println!("  Created {}", task_guide_path.display());
-
-    let worker_guide_path = skill_dir.join("ai-worker-guide.md");
-    fs::write(&worker_guide_path, AI_WORKER_GUIDE)
-        .context("Failed to write ai-worker-guide.md")?;
-    println!("  Created {}", worker_guide_path.display());
+    let reference_path = skill_dir.join("reference.md");
+    fs::write(&reference_path, WF_REFERENCE)
+        .context("Failed to write reference.md")?;
+    println!("  Created {}", reference_path.display());
 
     Ok(())
 }

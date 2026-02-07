@@ -2,48 +2,49 @@
 
 ## 本次 Session 完成的工作
 
-### Session 16: 文档重构为 Claude Code Skill
+### Session 17: Skill 精简 + Config 验证警告
 
-将 wf 操作文档从 `.wf/lib/` 重构为 `.claude/skills/wf/` Claude Code skill 体系。
+**核心洞察**: Skill 文档的受众是 Claude（通过 skill 生成 config），不是人类。Claude 能从状态机推断决策逻辑、从 prompt 经验推断 task 写法——只需要提供 wf 特有的不可推断信息。
 
-**新增**:
-- `src/cmd/templates/wf-skill.md` — SKILL.md 参考卡 (~100 行)，包含 CLI 命令表、Step 类型速查、状态机、Config 格式、变量表、Event Hooks
+**Skill 精简** (4 文件 949 行 → 2 文件 ~200 行):
+- `SKILL.md` 重写 ~130 行：+Config 设计规则(3条生成规则), +Claude CLI 集成模式(flag 组合), +ai-helpers.sh 函数表
+- `reference.md` 新建 ~75 行：JSON schema, ai-helpers.sh 行为详解, hook 模式, 故障排查
+- 删除 `foreman-guide.md` (决策逻辑可从状态机推断)
+- 删除 `task-authoring-guide.md` (prompt 写作 Claude 已知)
+- 删除 `ai-worker-guide.md` (不可推断部分已并入 SKILL.md)
 
-**精简**:
-- `config.jsonc` 模板: 144→15 行 (删除全部教程注释，纯配置)
-- `foreman-guide.md`: 369→291 行 (删除 SKILL.md 已覆盖的速查表、消除支撑文件间互引)
-- `ai-worker-guide.md`: 274→246 行 (Claude 非交互模式精简、环境变量表指向 SKILL.md)
+**Config 模板强化**:
+- develop 步骤加 verify + on_fail + `cd ${worktree}` (体现生成规则)
+- review 步骤改为纯 gate (去掉无意义的 echo)
+- event hook 默认写日志文件 (不再注释掉)
 
-**修改**:
-- `init.rs`: `create_lib_files()` 只保留 ai-helpers.sh，新增 `create_skill_files()` 写 4 文件到 `.claude/skills/wf/`
-- `create.rs`: 路径引用 `.wf/lib/` → `.claude/skills/wf/`
-- CLAUDE.md / HANDOFF.md / README.md: 目录结构和路径索引更新
+**Config 验证警告** (config.rs):
+- in_window 无 verify → "wf done will assume success unconditionally"
+- in_window run 不引用 worktree → "worker may execute in wrong directory"
+- in_window 有 verify 无 on_fail → "verify failure is terminal"
 
-**信息架构**: SKILL.md → 3 个独立叶子 guide（无互引），符合三条规则（只放关键参考、最多 2 层、支撑文件不互引）
+**三条生成规则** (编码到 SKILL.md + config.rs):
+1. 每个可失败的 in_window 步骤必须定义 on_fail
+2. 每个有可观测产出的步骤必须定义 verify
+3. in_window 步骤的 run 必须 cd ${worktree}
 
-**技术指标**: 36 tests, zero warnings, 净减 330 行
+**技术指标**: 36 tests, zero warnings, 净减 ~1700 行
 
 ---
 
 ## 历史 Session
 
-### Session 15: Foreman 文档全面完善
-- 新增 3 份指南文档 (task-authoring/ai-worker/foreman-guide)，改进 create 模板，init.rs include_str! 拆分
+### Session 15-16: 文档体系 → Claude Code Skill
+- 新增 3 份指南文档，重构为 `.claude/skills/wf/` skill 体系，config 模板精简
 
-### Session 14: E2E 包工头测试 + 痛点修复 + Foreman Guide
-- 8步 × 3task × 16场景 E2E、6个UX修复、初版 Foreman Guide + Config 模板
+### Session 13-14: 重构 + E2E
+- resolve/dispatch 分离、WindowLost 统一、wait.rs 走 Project API、E2E 包工头测试
 
-### Session 13: P0/P1/P2 重构 + Greenfield
-- resolve/dispatch 分离（7 单元测试）、WindowLost 统一、wait.rs 走 Project API
+### Session 9-12: 第一性原理 + 辩论驱动改进
+- 事件模型审计、Step 0-based 统一、start --reset、events --follow
 
-### Session 12: 第一性原理审视 + VerifyFailed 消除
-- 事件 11→10，StepCompleted 统一发射，三 agent 审计
-
-### Session 9-11: 辩论驱动改进 + E2E
-- Step 0-based 统一、start --reset、events --follow、log 当前轮
-
-### Session 5-8: Foreman 模式 + P1-P5
-- 非交互 Claude、wrapper.sh、事件 hook、并发 task
+### Session 5-8: Foreman 模式
+- 非交互 Claude、wrapper.sh、事件 hook、tmux 通知闭环
 
 ### Session 1-4: 架构演进
 - TUI 删除 → Event Sourcing → Step 模型 → Unified Pipeline → E2E 测试
@@ -52,10 +53,9 @@
 
 ## 已知监控项
 
-- **on_exit + wf done 双权威竞态**: in_window 步骤两个裁决者可同时触发 (V7 缓解但未完全消除)
+- **on_exit + wf done 双权威竞态**: in_window 步骤两个裁决者可同时触发
 - **on_exit 丢失 RunOutput**: in_window 进程退出无 stdout/stderr/duration
-- **retry 耗尽无审计事件**: 从 retry 转终态时无事件记录 (V10)
-- **verify:human 崩溃瞬态**: 两个 append 间崩溃窗口极小 (V5)
+- **retry 耗尽无审计事件**: 从 retry 转终态时无事件记录
 - `wf events` 输出全部历史（不按当前轮过滤），与 `wf log --all` 不一致
 
 ## 关键文件索引
@@ -63,26 +63,12 @@
 | 功能 | 文件 |
 |------|------|
 | CLI 定义（14 命令） | `src/cli.rs` |
-| 配置模型（Step 4 属性） | `src/model/config.rs` |
-| 事件模型 + replay + count_auto_retries（10 种） | `src/model/event.rs` |
-| 状态投影类型 | `src/model/state.rs` |
-| 任务定义（含 skip） | `src/model/task.rs` |
+| 配置模型 + **in_window 验证警告** | `src/model/config.rs` |
+| 事件模型 + replay + count_auto_retries | `src/model/event.rs` |
 | 执行引擎 + resolve/dispatch 管线 | `src/cmd/start.rs` |
-| 审批命令（done） | `src/cmd/approve.rs` |
-| 控制命令（stop/reset/on_exit） | `src/cmd/control.rs` |
-| 状态输出（retry_count/last_feedback/waiting reason） | `src/cmd/status.rs` |
-| 日志输出（当前轮/全历史/--jsonl） | `src/cmd/log.rs` |
-| 统一事件流（--follow） | `src/cmd/events.rs` |
-| 等待命令（Project API + check_window_health） | `src/cmd/wait.rs` |
-| 初始化（include_str! 加载模板 + skill 生成） | `src/cmd/init.rs` |
-| 模板文件（config/skill/guides/ai-helpers） | `src/cmd/templates/` |
-| 任务创建（含改进模板） | `src/cmd/create.rs` |
+| 初始化（生成 2 skill 文件） | `src/cmd/init.rs` |
+| 模板文件 (config/skill/reference/ai-helpers) | `src/cmd/templates/` |
 | 公共工具（事件读写、钩子、check_window_health） | `src/cmd/common.rs` |
-| tmux 工具（窗口后台创建） | `src/util/tmux.rs` |
-| git 工具（branch_exists） | `src/util/git.rs` |
-| 变量上下文 | `src/util/variable.rs` |
-| wf Skill 参考卡 | `.claude/skills/wf/SKILL.md` |
-| 包工头操作手册 | `.claude/skills/wf/foreman-guide.md` |
-| Task.md 编写指南 | `.claude/skills/wf/task-authoring-guide.md` |
-| AI Worker 集成指南 | `.claude/skills/wf/ai-worker-guide.md` |
+| wf Skill 参考卡 + 生成规则 + Claude CLI | `.claude/skills/wf/SKILL.md` |
+| 详细参考 (JSON schema/故障排查/hook) | `.claude/skills/wf/reference.md` |
 | 项目概述 | `.claude/CLAUDE.md` |

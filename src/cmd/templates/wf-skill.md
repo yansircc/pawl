@@ -44,15 +44,19 @@ Pending → Running → Waiting    (等 wf done)
                   → Stopped    (wf stop)
 ```
 
-- `wf reset` 可从任何非 Pending 状态回到初始
-- `wf reset --step` 重试当前步骤 (Waiting/Failed/Stopped)
+## Config 设计规则
+
+生成或修改 `.wf/config.jsonc` 时，必须遵守：
+
+1. **每个可失败的 in_window 步骤必须定义 `on_fail`**（"retry" 或 "human"），否则失败即终态
+2. **每个有可观测产出的步骤必须定义 `verify`**，否则 `wf done` 无条件信任
+3. **in_window 步骤的 `run` 必须 `cd ${worktree}`**，否则 worker 在错误目录执行
 
 ## Config (.wf/config.jsonc)
 
 ```jsonc
 {
   "session": "my-project",      // tmux session 名 (默认: 目录名)
-  "worktree_dir": ".wf/worktrees", // worktree 目录 (默认)
   "base_branch": "main",        // 基础分支 (默认)
   "workflow": [                  // 步骤序列 (必须)
     { "name": "step-name", "run": "cmd", "verify": "human|script", "on_fail": "retry|human", "in_window": true, "max_retries": 3 }
@@ -75,21 +79,17 @@ Markdown 描述 (同时作为 AI Worker 的 system prompt)
 
 ## 变量
 
-所有 `run`/`verify` 命令中可用 `${var}`，子进程中为 `WF_VAR` 环境变量：
+所有 `run`/`verify`/hook 命令中可用 `${var}`，子进程中为 `WF_VAR` 环境变量：
 
-| 变量 | 环境变量 | 值 |
-|------|---------|-----|
-| `${task}` | `WF_TASK` | 任务名 |
-| `${branch}` | `WF_BRANCH` | `wf/{task}` |
-| `${worktree}` | `WF_WORKTREE` | `{repo_root}/{worktree_dir}/{task}` |
-| `${window}` | `WF_WINDOW` | 同 task 名 |
-| `${session}` | `WF_SESSION` | tmux session 名 |
-| `${repo_root}` | `WF_REPO_ROOT` | 仓库根目录 |
-| `${step}` | `WF_STEP` | 当前步骤名 |
-| `${step_index}` | `WF_STEP_INDEX` | 步骤索引 (0-based) |
-| `${base_branch}` | `WF_BASE_BRANCH` | 基础分支 |
-| `${log_file}` | `WF_LOG_FILE` | `.wf/logs/{task}.jsonl` |
-| `${task_file}` | `WF_TASK_FILE` | `.wf/tasks/{task}.md` |
+| 变量 | 值 |
+|------|-----|
+| `${task}` / `${branch}` | 任务名 / `wf/{task}` |
+| `${worktree}` | `{repo_root}/{worktree_dir}/{task}` |
+| `${session}` / `${window}` | tmux session 名 / 同 task 名 |
+| `${repo_root}` | 仓库根目录 |
+| `${step}` / `${step_index}` | 当前步骤名 / 索引 (0-based) |
+| `${base_branch}` | 基础分支 |
+| `${log_file}` / `${task_file}` | `.wf/logs/{task}.jsonl` / `.wf/tasks/{task}.md` |
 
 ## Event Hooks
 
@@ -97,17 +97,33 @@ Markdown 描述 (同时作为 AI Worker 的 system prompt)
 
 可用事件: `task_started`, `step_completed`(+`${exit_code}`,`${duration}`), `step_waiting`(+`${reason}`), `step_approved`, `step_skipped`, `step_reset`(+`${auto}`), `window_launched`, `window_lost`, `task_stopped`, `task_reset`
 
-```jsonc
-"on": { "step_completed": "echo '[${task}] ${step} exit=${exit_code}'" }
+## Claude CLI 与 wf 集成
+
+Worker 通常通过 `claude -p`（非交互模式）运行在 in_window 步骤中：
+
+```bash
+# 基础: 管道注入 task.md 作为 prompt
+cat ${task_file} | claude -p - --tools "Bash,Read,Write"
+
+# 续接会话: -r 保留上下文 (避免重头理解代码)
+claude -p "Fix: $feedback" -r $session_id --tools "Bash,Read,Write"
+
+# 结构化输出: 机器可解析的结果
+claude -p "task" --output-format json --json-schema '{"type":"object",...}'
 ```
+
+关键 flag: `-p`(非交互), `-r session_id`(续接), `--tools`(可用工具集), `--output-format json`(JSON 信封含 session_id)
+
+`.wf/lib/ai-helpers.sh` 提供一站式封装：
+
+| 函数 | 用途 |
+|------|------|
+| `extract_session_id <jsonl>` | 从 JSONL 提取最近 session_id |
+| `extract_feedback <jsonl> [step]` | 提取失败反馈 (exit!=0 的 stderr) |
+| `run_ai_worker [--tools T] [--extra-args A]` | 自动判断新建/续接，注入 feedback |
+
+典型 in_window 步骤: `"run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker"`
 
 ## 深入参考
 
-当需要更详细的指南时，读取以下文件：
-
-| 文件 | 何时读取 |
-|------|---------|
-| `foreman-guide.md` | 作为 Foreman 管理多任务时 (决策场景、JSON schema、故障排查) |
-| `task-authoring-guide.md` | 创建/修改 Task.md 时 (五要素写作法、迭代反馈、完整示例) |
-| `ai-worker-guide.md` | 配置 AI Worker / in_window 步骤时 (ai-helpers.sh、wrapper.sh、会话续接) |
-| `.wf/lib/ai-helpers.sh` | Worker 辅助函数 (extract_session_id, run_ai_worker) |
+当需要 JSON schema、故障排查等详细信息时，读取 `reference.md`。

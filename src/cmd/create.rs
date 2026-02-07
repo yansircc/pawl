@@ -79,8 +79,7 @@ fn generate_task_content(name: &str, description: Option<&str>, depends: &[&str]
         content.push('\n');
     } else {
         content.push_str(&format!(
-            "<!-- 本文件同时作为 AI Worker 的 system prompt (cat task.md | claude -p) -->\n\
-             <!-- 详细指南: .claude/skills/wf/task-authoring-guide.md -->\n\n\
+            "<!-- 本文件同时作为 AI Worker 的 system prompt (cat task.md | claude -p) -->\n\n\
              ## Task: {}\n\n\
              ### 目标\n\n\
              <!-- 清晰描述要做什么 -->\n\n\

@@ -122,6 +122,28 @@ impl Config {
                     step.name
                 );
             }
+            if step.in_window {
+                if step.verify.is_none() {
+                    eprintln!(
+                        "Warning: step '{}' (in_window) has no verify — `wf done` will assume success unconditionally.",
+                        step.name
+                    );
+                }
+                if let Some(ref run) = step.run {
+                    if !run.contains("${worktree}") && !run.contains("$WF_WORKTREE") && !run.contains("worktree") {
+                        eprintln!(
+                            "Warning: step '{}' (in_window) run doesn't reference worktree — worker may execute in wrong directory.",
+                            step.name
+                        );
+                    }
+                }
+                if step.verify.is_some() && step.on_fail.is_none() {
+                    eprintln!(
+                        "Warning: step '{}' (in_window) has verify but no on_fail — verify failure is terminal.",
+                        step.name
+                    );
+                }
+            }
         }
 
         Ok(config)
