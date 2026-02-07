@@ -1,18 +1,7 @@
 /target
-
-# wf - Workflow Task Runner
-.wf/*
-!.wf/tasks/
-!.wf/config.jsonc
-!.wf/README.md
-
-# wt - Worktree Task Manager
-# https://github.com/anthropics/wt
-.wt/*
-!.wt/tasks/
-!.wt/config.yaml
-
-# pawl - Resumable Step Sequencer
+.claude/
+.wf/
+.wt/
 .pawl/*
 !.pawl/tasks/
 !.pawl/config.jsonc
