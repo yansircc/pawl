@@ -25,8 +25,6 @@ const AI_HELPERS_TEMPLATE: &str = include_str!("templates/ai-helpers.sh");
 
 const WF_SKILL: &str = include_str!("templates/wf-skill.md");
 
-const WF_REFERENCE: &str = include_str!("templates/wf-reference.md");
-
 pub fn run() -> Result<()> {
     // Get repo root
     let repo_root = get_repo_root()?;
@@ -95,11 +93,6 @@ fn create_skill_files(repo_root: &str) -> Result<()> {
     fs::write(&skill_path, WF_SKILL)
         .context("Failed to write SKILL.md")?;
     println!("  Created {}", skill_path.display());
-
-    let reference_path = skill_dir.join("reference.md");
-    fs::write(&reference_path, WF_REFERENCE)
-        .context("Failed to write reference.md")?;
-    println!("  Created {}", reference_path.display());
 
     Ok(())
 }

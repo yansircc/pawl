@@ -11,6 +11,8 @@ pub struct Context {
     pub repo_root: String,
     pub step: String,
     pub base_branch: String,
+    // Claude CLI command (default: "claude")
+    pub claude_command: String,
     // Log file path (single JSONL file per task)
     pub log_file: Option<String>,
     // Task file path
@@ -29,6 +31,7 @@ impl Context {
         worktree_dir: &str,
         step: &str,
         base_branch: &str,
+        claude_command: &str,
         step_index: Option<usize>,
         log_file: Option<&str>,
         task_file: Option<&str>,
@@ -43,6 +46,7 @@ impl Context {
             repo_root: repo_root.to_string(),
             step: step.to_string(),
             base_branch: base_branch.to_string(),
+            claude_command: claude_command.to_string(),
             log_file: log_file.map(|s| s.to_string()),
             task_file: task_file.map(|s| s.to_string()),
             step_index,
@@ -59,7 +63,8 @@ impl Context {
             .replace("${session}", &self.session)
             .replace("${repo_root}", &self.repo_root)
             .replace("${step}", &self.step)
-            .replace("${base_branch}", &self.base_branch);
+            .replace("${base_branch}", &self.base_branch)
+            .replace("${claude_command}", &self.claude_command);
 
         // Expand log-related variables if available
         if let Some(log_file) = &self.log_file {
@@ -86,6 +91,7 @@ impl Context {
         env.insert("WF_REPO_ROOT".to_string(), self.repo_root.clone());
         env.insert("WF_STEP".to_string(), self.step.clone());
         env.insert("WF_BASE_BRANCH".to_string(), self.base_branch.clone());
+        env.insert("WF_CLAUDE_COMMAND".to_string(), self.claude_command.clone());
 
         // Add log-related environment variables if available
         if let Some(log_file) = &self.log_file {
@@ -115,6 +121,7 @@ mod tests {
             ".wf/worktrees",
             "Type check",
             "main",
+            "claude",
             None,
             None,
             None,
@@ -146,6 +153,7 @@ mod tests {
             ".wf/worktrees",
             "Develop",
             "develop",
+            "claude",
             Some(1),
             Some("/home/user/project/.wf/logs/auth.jsonl"),
             Some("/home/user/project/.wf/tasks/auth.md"),
@@ -176,6 +184,7 @@ mod tests {
             ".wf/worktrees",
             "Develop",
             "main",
+            "ccc",
             Some(1),
             Some("/logs/auth.jsonl"),
             Some("/tasks/auth.md"),
@@ -186,6 +195,7 @@ mod tests {
         assert_eq!(env.get("WF_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
         assert_eq!(env.get("WF_STEP_INDEX"), Some(&"1".to_string()));
         assert_eq!(env.get("WF_BASE_BRANCH"), Some(&"main".to_string()));
+        assert_eq!(env.get("WF_CLAUDE_COMMAND"), Some(&"ccc".to_string()));
     }
 
     #[test]
@@ -197,6 +207,7 @@ mod tests {
             ".wf/worktrees",
             "Setup",
             "main",
+            "claude",
             None,
             None,
             None,

@@ -61,8 +61,7 @@ src/
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.jsonc           # Default workflow config
 │       ├── ai-helpers.sh          # AI worker helper functions
-│       ├── wf-skill.md            # SKILL.md reference card + rules + Claude CLI
-│       └── wf-reference.md        # JSON schema, troubleshooting, hook patterns
+│       └── wf-skill.md            # Unified SKILL.md: rules, recipes, foreman, troubleshooting
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
     ├── shell.rs         # run_command variants, CommandResult
@@ -131,6 +130,7 @@ All variables are available as `${var}` in config and as `WF_VAR` env vars in su
 | `${repo_root}` | `WF_REPO_ROOT` | Git repository root |
 | `${step}` | `WF_STEP` | Current step name |
 | `${base_branch}` | `WF_BASE_BRANCH` | Config base_branch value |
+| `${claude_command}` | `WF_CLAUDE_COMMAND` | Claude CLI command (default: "claude") |
 | `${log_file}` | `WF_LOG_FILE` | `.wf/logs/{task}.jsonl` |
 | `${task_file}` | `WF_TASK_FILE` | `.wf/tasks/{task}.md` |
 | `${step_index}` | `WF_STEP_INDEX` | Current step index (0-based) |
@@ -237,8 +237,7 @@ check_window_health(task_name) → bool:
     └── ai-helpers.sh     # AI worker functions (extract_session_id, run_ai_worker)
 
 .claude/skills/wf/        # Claude Code skill (wf init generates)
-├── SKILL.md              # Reference card + generative rules + Claude CLI patterns (~130 lines)
-└── reference.md          # JSON schema, ai-helpers.sh details, troubleshooting (~75 lines)
+└── SKILL.md              # Unified reference: rules, recipes, foreman guide, troubleshooting
 ```
 
 ## Dev Commands

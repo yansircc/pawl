@@ -1,74 +1,90 @@
 # Session Handoff
 
-## 本次 Session 完成的工作
+## Current Session (S19): Unified SKILL.md + claude_command activation + i18n
 
-### Session 17: Skill 精简 + Config 验证警告
+### Unified SKILL.md (2 files -> 1 file)
 
-**核心洞察**: Skill 文档的受众是 Claude（通过 skill 生成 config），不是人类。Claude 能从状态机推断决策逻辑、从 prompt 经验推断 task 写法——只需要提供 wf 特有的不可推断信息。
+Merged SKILL.md (130 lines) + reference.md (75 lines) into a single SKILL.md (409 lines). Restored critical non-inferrable information that S17 over-deleted:
 
-**Skill 精简** (4 文件 949 行 → 2 文件 ~200 行):
-- `SKILL.md` 重写 ~130 行：+Config 设计规则(3条生成规则), +Claude CLI 集成模式(flag 组合), +ai-helpers.sh 函数表
-- `reference.md` 新建 ~75 行：JSON schema, ai-helpers.sh 行为详解, hook 模式, 故障排查
-- 删除 `foreman-guide.md` (决策逻辑可从状态机推断)
-- 删除 `task-authoring-guide.md` (prompt 写作 Claude 已知)
-- 删除 `ai-worker-guide.md` (不可推断部分已并入 SKILL.md)
+- **Config Recipes**: 5 verified patterns (basic AI dev / full human review / auto verify+retry / multi-agent parallel+foreman / pure automation)
+- **Anti-pattern table**: 4 common misconfigurations with fixes
+- **Verify strategy table**: when to use script vs human
+- **Foreman coordination**: main loop pseudo-code, status decision table, 3 key constraints
+- **AI Worker integration**: run_ai_worker decision flow diagram, parameter table, custom wrapper example
+- **Event-variable mapping**: complete 10-event table with extra variables per event
+- **Hook concurrency pattern**: mkdir atomic mutex for tmux send-keys
 
-**Config 模板强化**:
-- develop 步骤加 verify + on_fail + `cd ${worktree}` (体现生成规则)
-- review 步骤改为纯 gate (去掉无意义的 echo)
-- event hook 默认写日志文件 (不再注释掉)
+Deleted `reference.md` template and its generation in `init.rs`.
 
-**Config 验证警告** (config.rs):
-- in_window 无 verify → "wf done will assume success unconditionally"
-- in_window run 不引用 worktree → "worker may execute in wrong directory"
-- in_window 有 verify 无 on_fail → "verify failure is terminal"
+### claude_command activation (was dead field)
 
-**三条生成规则** (编码到 SKILL.md + config.rs):
-1. 每个可失败的 in_window 步骤必须定义 on_fail
-2. 每个有可观测产出的步骤必须定义 verify
-3. in_window 步骤的 run 必须 cd ${worktree}
+`config.claude_command` existed in config.rs but was never wired to anything. Now fully activated:
 
-**技术指标**: 36 tests, zero warnings, 净减 ~1700 行
+```
+config.jsonc: claude_command → config.rs → Context → ${claude_command} / WF_CLAUDE_COMMAND → ai-helpers.sh
+```
 
----
+- `variable.rs`: Added `claude_command` field to Context, `${claude_command}` expansion, `WF_CLAUDE_COMMAND` env var
+- `ai-helpers.sh`: `run_ai_worker` defaults to `${WF_CLAUDE_COMMAND:-claude}` instead of hardcoded `"claude"`
+- All `Context::new` call sites updated (common.rs, start.rs x2)
 
-## 历史 Session
+### i18n: Chinese -> English
 
-### Session 15-16: 文档体系 → Claude Code Skill
-- 新增 3 份指南文档，重构为 `.claude/skills/wf/` skill 体系，config 模板精简
+All project documentation and CLI copy converted to English:
+- `src/cmd/templates/wf-skill.md` (full 409-line translation)
+- `src/cmd/templates/config.jsonc` (comment)
+- `src/cmd/create.rs` (7 template strings in task scaffolding)
+- `.wf/config.jsonc` (comment)
 
-### Session 13-14: 重构 + E2E
-- resolve/dispatch 分离、WindowLost 统一、wait.rs 走 Project API、E2E 包工头测试
+### README.md alignment
 
-### Session 9-12: 第一性原理 + 辩论驱动改进
-- 事件模型审计、Step 0-based 统一、start --reset、events --follow
+Config example updated to follow the 3 design rules (was violating all 3). File layout updated to reflect single SKILL.md.
 
-### Session 5-8: Foreman 模式
-- 非交互 Claude、wrapper.sh、事件 hook、tmux 通知闭环
+### Build status
 
-### Session 1-4: 架构演进
-- TUI 删除 → Event Sourcing → Step 模型 → Unified Pipeline → E2E 测试
+36 tests, zero warnings, installed.
 
 ---
 
-## 已知监控项
+## Historical Sessions
 
-- **on_exit + wf done 双权威竞态**: in_window 步骤两个裁决者可同时触发
-- **on_exit 丢失 RunOutput**: in_window 进程退出无 stdout/stderr/duration
-- **retry 耗尽无审计事件**: 从 retry 转终态时无事件记录
-- `wf events` 输出全部历史（不按当前轮过滤），与 `wf log --all` 不一致
+### S17-18: Skill docs restructuring
+- S15-16: docs restructured as `.claude/skills/wf/` skill system
+- S17: Skill compression (4 files 949 lines -> 2 files ~200 lines) + config validation warnings
+- S18: Identified S17 over-deletion, planned restoration (executed in S19)
 
-## 关键文件索引
+### S13-14: resolve/dispatch refactor + E2E
+- resolve/dispatch separation, unified WindowLost, wait.rs via Project API, E2E foreman tests
 
-| 功能 | 文件 |
+### S9-12: First principles + debate-driven improvements
+- Event model audit, step 0-based unification, start --reset, events --follow
+
+### S5-8: Foreman mode
+- Non-interactive Claude, wrapper.sh, event hooks, tmux notification loop
+
+### S1-4: Architecture evolution
+- TUI removal -> Event Sourcing -> Step model -> Unified Pipeline -> E2E testing
+
+---
+
+## Known Issues
+
+- **on_exit + wf done dual-authority race**: in_window steps have two verdict sources that can fire simultaneously
+- **on_exit loses RunOutput**: in_window process exit has no stdout/stderr/duration
+- **retry exhaustion has no audit event**: no event emitted when transitioning from retry to terminal state
+- `wf events` outputs full history (not filtered by current run), inconsistent with `wf log --all`
+
+## Key File Index
+
+| Area | File |
 |------|------|
-| CLI 定义（14 命令） | `src/cli.rs` |
-| 配置模型 + **in_window 验证警告** | `src/model/config.rs` |
-| 事件模型 + replay + count_auto_retries | `src/model/event.rs` |
-| 执行引擎 + resolve/dispatch 管线 | `src/cmd/start.rs` |
-| 初始化（生成 2 skill 文件） | `src/cmd/init.rs` |
-| 模板文件 (config/skill/reference/ai-helpers) | `src/cmd/templates/` |
-| 公共工具（事件读写、钩子、check_window_health） | `src/cmd/common.rs` |
-| wf Skill 参考卡 + 生成规则 + Claude CLI | `.claude/skills/wf/SKILL.md` |
-| 详细参考 (JSON schema/故障排查/hook) | `.claude/skills/wf/reference.md` |
-| 项目概述 | `.claude/CLAUDE.md` |
+| CLI definition (14 commands) | `src/cli.rs` |
+| Config model + **in_window validation warnings** | `src/model/config.rs` |
+| Event model + replay + count_auto_retries | `src/model/event.rs` |
+| Execution engine + resolve/dispatch pipeline | `src/cmd/start.rs` |
+| Init (generates single SKILL.md) | `src/cmd/init.rs` |
+| Templates (config/skill/ai-helpers) | `src/cmd/templates/` |
+| Common utils (event R/W, hooks, check_window_health) | `src/cmd/common.rs` |
+| Variables (Context, expand, to_env_vars, **claude_command**) | `src/util/variable.rs` |
+| Unified Skill reference (409 lines) | `src/cmd/templates/wf-skill.md` |
+| Project overview | `.claude/CLAUDE.md` |

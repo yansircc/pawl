@@ -1,5 +1,5 @@
 {
-  // wf 工作流配置 — 完整参考见 .claude/skills/wf/SKILL.md
+  // wf workflow config — full reference: .claude/skills/wf/SKILL.md
   // "session": "my-project",
   // "base_branch": "main",
   "workflow": [

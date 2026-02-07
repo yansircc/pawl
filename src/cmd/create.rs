@@ -68,7 +68,7 @@ fn generate_task_content(name: &str, description: Option<&str>, depends: &[&str]
         }
     }
 
-    content.push_str("# skip:          # 跳过不需要的 workflow 步骤\n");
+    content.push_str("# skip:          # skip workflow steps not needed\n");
     content.push_str("#   - cleanup\n");
     content.push_str("---\n\n");
 
@@ -79,13 +79,13 @@ fn generate_task_content(name: &str, description: Option<&str>, depends: &[&str]
         content.push('\n');
     } else {
         content.push_str(&format!(
-            "<!-- 本文件同时作为 AI Worker 的 system prompt (cat task.md | claude -p) -->\n\n\
+            "<!-- This file also serves as AI Worker system prompt (cat task.md | claude -p) -->\n\n\
              ## Task: {}\n\n\
-             ### 目标\n\n\
-             <!-- 清晰描述要做什么 -->\n\n\
-             ### 约束\n\n\
-             <!-- 技术约束、代码规范、不该做什么 -->\n\n\
-             ### 验收标准\n\n\
+             ### Goal\n\n\
+             <!-- Clearly describe what to do -->\n\n\
+             ### Constraints\n\n\
+             <!-- Technical constraints, code standards, what NOT to do -->\n\n\
+             ### Acceptance Criteria\n\n\
              - [ ] TODO\n",
             name
         ));

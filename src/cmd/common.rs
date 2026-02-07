@@ -206,6 +206,7 @@ impl Project {
             &self.config.worktree_dir,
             step_name,
             &self.config.base_branch,
+            &self.config.claude_command,
             step_idx,
             Some(&log_file.to_string_lossy()),
             Some(&task_file.to_string_lossy()),

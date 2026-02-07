@@ -46,7 +46,7 @@ run_ai_worker() {
     local log_file="${WF_LOG_FILE:-}"
     local task_file="${WF_TASK_FILE:-}"
     local tools="Bash,Read,Write"
-    local claude_cmd="claude"
+    local claude_cmd="${WF_CLAUDE_COMMAND:-claude}"
     local extra_args=""
 
     while [[ $# -gt 0 ]]; do
