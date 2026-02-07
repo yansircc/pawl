@@ -3,10 +3,10 @@ import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 
-const task = process.env.WF_TASK;
-const taskFile = process.env.WF_TASK_FILE;
-const repoRoot = process.env.WF_REPO_ROOT;
-const planDir = path.join(repoRoot, ".wf", "plans");
+const task = process.env.PAWL_TASK;
+const taskFile = process.env.PAWL_TASK_FILE;
+const repoRoot = process.env.PAWL_REPO_ROOT;
+const planDir = path.join(repoRoot, ".pawl", "plans");
 
 fs.mkdirSync(planDir, { recursive: true });
 
@@ -22,7 +22,7 @@ for await (const message of query({
       if (toolName === "ExitPlanMode") {
         fs.writeFileSync(path.join(planDir, `${task}.md`), input.plan || "");
         fs.writeFileSync(path.join(planDir, `${task}.session`), sessionId);
-        console.log(`[plan-worker] Plan saved to .wf/plans/${task}.md`);
+        console.log(`[plan-worker] Plan saved to .pawl/plans/${task}.md`);
         process.exit(0);
       }
       if (toolName === "AskUserQuestion") {

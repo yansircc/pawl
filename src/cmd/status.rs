@@ -249,7 +249,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
     let tasks = project.load_all_tasks()?;
 
     if tasks.is_empty() {
-        println!("No tasks found. Create one with: wf create <name>");
+        println!("No tasks found. Create one with: pawl create <name>");
         return Ok(());
     }
 

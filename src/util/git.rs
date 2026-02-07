@@ -37,7 +37,7 @@ pub fn validate_branch_name(name: &str) -> Result<()> {
     }
 
     // Validate with git check-ref-format
-    let test_ref = format!("refs/heads/wf/{}", name);
+    let test_ref = format!("refs/heads/pawl/{}", name);
     if !run_command_success(&format!("git check-ref-format '{}'", test_ref)) {
         bail!("'{}' is not a valid git branch name", name);
     }

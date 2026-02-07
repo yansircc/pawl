@@ -11,7 +11,7 @@ use super::common::Project;
 /// With --follow, watches for new events in real-time.
 pub fn run(task_filter: Option<&str>, follow: bool) -> Result<()> {
     let project = Project::load()?;
-    let logs_dir = project.wf_dir.join("logs");
+    let logs_dir = project.pawl_dir.join("logs");
 
     if !logs_dir.exists() {
         if follow {

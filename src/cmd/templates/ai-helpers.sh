@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# .wf/lib/ai-helpers.sh — AI worker helper functions
+# .pawl/lib/ai-helpers.sh — AI worker helper functions
 # Source this file in your worker/wrapper scripts:
 #   source "$(dirname "$0")/../lib/ai-helpers.sh"
 
@@ -37,16 +37,16 @@ extract_feedback() {
 
 # AI worker wrapper: handles fresh start vs resume, injects feedback.
 # Usage: run_ai_worker [options]
-#   --log-file <path>     JSONL log file (default: $WF_LOG_FILE)
-#   --task-file <path>    Task markdown file (default: $WF_TASK_FILE)
+#   --log-file <path>     JSONL log file (default: $PAWL_LOG_FILE)
+#   --task-file <path>    Task markdown file (default: $PAWL_TASK_FILE)
 #   --tools <tools>       Comma-separated tool list (default: Bash,Read,Write)
 #   --claude-cmd <cmd>    Claude command (default: claude)
 #   --extra-args <args>   Extra arguments to pass to claude
 run_ai_worker() {
-    local log_file="${WF_LOG_FILE:-}"
-    local task_file="${WF_TASK_FILE:-}"
+    local log_file="${PAWL_LOG_FILE:-}"
+    local task_file="${PAWL_TASK_FILE:-}"
     local tools="Bash,Read,Write"
-    local claude_cmd="${WF_CLAUDE_COMMAND:-claude}"
+    local claude_cmd="${PAWL_CLAUDE_COMMAND:-claude}"
     local extra_args=""
 
     while [[ $# -gt 0 ]]; do
@@ -60,8 +60,8 @@ run_ai_worker() {
         esac
     done
 
-    [ -z "$log_file" ] && { echo "Error: --log-file or WF_LOG_FILE required" >&2; return 1; }
-    [ -z "$task_file" ] && { echo "Error: --task-file or WF_TASK_FILE required" >&2; return 1; }
+    [ -z "$log_file" ] && { echo "Error: --log-file or PAWL_LOG_FILE required" >&2; return 1; }
+    [ -z "$task_file" ] && { echo "Error: --task-file or PAWL_TASK_FILE required" >&2; return 1; }
 
     local session_id
     session_id=$(extract_session_id "$log_file")
@@ -70,8 +70,8 @@ run_ai_worker() {
     feedback=$(extract_feedback "$log_file")
 
     # Plan-aware resume: if plan step created a session, resume it
-    local plan_dir="${WF_REPO_ROOT:-.}/.wf/plans"
-    local plan_session="${plan_dir}/${WF_TASK:-}.session"
+    local plan_dir="${PAWL_REPO_ROOT:-.}/.pawl/plans"
+    local plan_session="${plan_dir}/${PAWL_TASK:-}.session"
 
     if [ -f "$plan_session" ] && [ -z "$session_id" ]; then
         # First run after plan approval — resume plan session

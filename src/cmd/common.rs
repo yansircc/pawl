@@ -11,12 +11,12 @@ use crate::util::shell::spawn_background;
 use crate::util::tmux;
 use crate::util::variable::Context;
 
-const WF_DIR: &str = ".wf";
+const PAWL_DIR: &str = ".pawl";
 
 /// Project context with loaded config
 pub struct Project {
     pub repo_root: String,
-    pub wf_dir: PathBuf,
+    pub pawl_dir: PathBuf,
     pub config: Config,
 }
 
@@ -24,17 +24,17 @@ impl Project {
     /// Load project from current directory
     pub fn load() -> Result<Self> {
         let repo_root = get_repo_root()?;
-        let wf_dir = PathBuf::from(&repo_root).join(WF_DIR);
+        let pawl_dir = PathBuf::from(&repo_root).join(PAWL_DIR);
 
-        if !wf_dir.exists() {
-            bail!("Not a wf project. Run 'wf init' first.");
+        if !pawl_dir.exists() {
+            bail!("Not a pawl project. Run 'pawl init' first.");
         }
 
-        let config = Config::load(&wf_dir)?;
+        let config = Config::load(&pawl_dir)?;
 
         Ok(Self {
             repo_root,
-            wf_dir,
+            pawl_dir,
             config,
         })
     }
@@ -46,16 +46,16 @@ impl Project {
 
     /// Load a task definition by name
     pub fn load_task(&self, name: &str) -> Result<TaskDefinition> {
-        let task_path = self.wf_dir.join("tasks").join(format!("{}.md", name));
+        let task_path = self.pawl_dir.join("tasks").join(format!("{}.md", name));
         if !task_path.exists() {
-            bail!("Task '{}' not found. Create it with: wf create {}", name, name);
+            bail!("Task '{}' not found. Create it with: pawl create {}", name, name);
         }
         TaskDefinition::load(&task_path)
     }
 
     /// Load all task definitions
     pub fn load_all_tasks(&self) -> Result<Vec<TaskDefinition>> {
-        TaskDefinition::load_all(self.wf_dir.join("tasks"))
+        TaskDefinition::load_all(self.pawl_dir.join("tasks"))
     }
 
     /// Resolve task name from name or 1-based index
@@ -89,12 +89,12 @@ impl Project {
 
     /// Get the JSONL log file path for a task
     pub fn log_file(&self, task_name: &str) -> PathBuf {
-        self.wf_dir.join("logs").join(format!("{}.jsonl", task_name))
+        self.pawl_dir.join("logs").join(format!("{}.jsonl", task_name))
     }
 
     /// Get the task definition file path
     pub fn task_file(&self, task_name: &str) -> PathBuf {
-        self.wf_dir.join("tasks").join(format!("{}.md", task_name))
+        self.pawl_dir.join("tasks").join(format!("{}.md", task_name))
     }
 
     /// Append an event to the task's JSONL log file (with exclusive file lock),

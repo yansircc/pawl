@@ -19,7 +19,7 @@ pub struct Config {
     #[serde(default = "default_claude_command")]
     pub claude_command: String,
 
-    /// Worktree directory relative to repo root (default: ".wf/worktrees")
+    /// Worktree directory relative to repo root (default: ".pawl/worktrees")
     #[serde(default = "default_worktree_dir")]
     pub worktree_dir: String,
 
@@ -45,7 +45,7 @@ fn default_claude_command() -> String {
 }
 
 fn default_worktree_dir() -> String {
-    ".wf/worktrees".to_string()
+    ".pawl/worktrees".to_string()
 }
 
 fn default_base_branch() -> String {
@@ -91,9 +91,9 @@ impl Step {
 }
 
 impl Config {
-    /// Load config from .wf/config.jsonc
-    pub fn load<P: AsRef<Path>>(wf_dir: P) -> Result<Self> {
-        let config_path = wf_dir.as_ref().join("config.jsonc");
+    /// Load config from .pawl/config.jsonc
+    pub fn load<P: AsRef<Path>>(pawl_dir: P) -> Result<Self> {
+        let config_path = pawl_dir.as_ref().join("config.jsonc");
         Self::load_from(&config_path)
     }
 
@@ -125,12 +125,12 @@ impl Config {
             if step.in_window {
                 if step.verify.is_none() {
                     eprintln!(
-                        "Warning: step '{}' (in_window) has no verify — `wf done` will assume success unconditionally.",
+                        "Warning: step '{}' (in_window) has no verify — `pawl done` will assume success unconditionally.",
                         step.name
                     );
                 }
                 if let Some(ref run) = step.run {
-                    if !run.contains("${worktree}") && !run.contains("$WF_WORKTREE") && !run.contains("worktree") {
+                    if !run.contains("${worktree}") && !run.contains("$PAWL_WORKTREE") && !run.contains("worktree") {
                         eprintln!(
                             "Warning: step '{}' (in_window) run doesn't reference worktree — worker may execute in wrong directory.",
                             step.name
@@ -155,7 +155,7 @@ impl Config {
             Path::new(project_dir)
                 .file_name()
                 .and_then(|n| n.to_str())
-                .unwrap_or("wf")
+                .unwrap_or("pawl")
                 .to_string()
         })
     }

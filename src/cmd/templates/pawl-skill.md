@@ -1,25 +1,25 @@
-# wf — Resumable Step Sequencer
+# pawl — Resumable Step Sequencer
 
-wf is a **resumable coroutine**: advance along a fixed step sequence, yield at decision points, rebuild state from an append-only log. Any repeatable multi-step process can be a wf workflow — AI coding with git worktrees, testing pipelines, deployment automation, project bootstrapping. Steps support verify/retry/gate for human-in-the-loop control; tmux windows for long-running processes.
+pawl is a **resumable coroutine**: advance along a fixed step sequence, yield at decision points, rebuild state from an append-only log. Any repeatable multi-step process can be a pawl workflow — AI coding with git worktrees, testing pipelines, deployment automation, project bootstrapping. Steps support verify/retry/gate for human-in-the-loop control; tmux windows for long-running processes.
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `wf init` | Initialize project (creates .wf/ and .claude/skills/wf/) |
-| `wf create <name> [desc] [--depends a,b]` | Create a task |
-| `wf list` | List all tasks and their status |
-| `wf start <task> [--reset]` | Start task execution (--reset resets first) |
-| `wf status [task] [--json]` | Show status (--json uses 0-based index) |
-| `wf stop <task>` | Stop a task |
-| `wf reset <task>` | Fully reset a task |
-| `wf reset --step <task>` | Retry current step |
-| `wf done <task> [-m msg]` | Approve / mark done |
-| `wf enter <task>` | Attach to tmux window |
-| `wf capture <task> [-l N] [--json]` | Capture tmux window content |
-| `wf wait <task> --until <status> [-t sec]` | Wait for specified status |
-| `wf log <task> [--step N] [--all] [--all-runs]` | View logs |
-| `wf events [task] [--follow]` | Raw event stream |
+| `pawl init` | Initialize project (creates .pawl/ and .claude/skills/pawl/) |
+| `pawl create <name> [desc] [--depends a,b]` | Create a task |
+| `pawl list` | List all tasks and their status |
+| `pawl start <task> [--reset]` | Start task execution (--reset resets first) |
+| `pawl status [task] [--json]` | Show status (--json uses 0-based index) |
+| `pawl stop <task>` | Stop a task |
+| `pawl reset <task>` | Fully reset a task |
+| `pawl reset --step <task>` | Retry current step |
+| `pawl done <task> [-m msg]` | Approve / mark done |
+| `pawl enter <task>` | Attach to tmux window |
+| `pawl capture <task> [-l N] [--json]` | Capture tmux window content |
+| `pawl wait <task> --until <status> [-t sec]` | Wait for specified status |
+| `pawl log <task> [--step N] [--all] [--all-runs]` | View logs |
+| `pawl events [task] [--follow]` | Raw event stream |
 
 ## Step Model
 
@@ -28,19 +28,19 @@ Each step has 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_window`
 | Type | Config | Behavior |
 |------|--------|----------|
 | Normal step | `"run": "cmd"` | Runs synchronously, exit 0 advances, otherwise Failed |
-| Gate | no `run` | Pauses immediately, waits for `wf done` |
+| Gate | no `run` | Pauses immediately, waits for `pawl done` |
 | Human review | `"verify": "human"` | Runs, then pauses for human review |
 | Auto verify | `"verify": "test.sh"` | Runs, then executes verify script (exit 0 passes) |
 | Auto retry | `"on_fail": "retry"` | Auto-retries on failure (max_retries, default 3) |
 | Human decision | `"on_fail": "human"` | Pauses on failure for human decision |
-| Window task | `"in_window": true` | Runs in tmux window, waits for `wf done` |
+| Window task | `"in_window": true` | Runs in tmux window, waits for `pawl done` |
 
 ### Config Design Rules
 
-When generating or modifying `.wf/config.jsonc`, these rules are mandatory:
+When generating or modifying `.pawl/config.jsonc`, these rules are mandatory:
 
 1. **Every failable in_window step must define `on_fail`** ("retry" or "human"), otherwise failure is terminal
-2. **Every step with observable output must define `verify`**, otherwise `wf done` trusts unconditionally
+2. **Every step with observable output must define `verify`**, otherwise `pawl done` trusts unconditionally
 3. **in_window step's `run` must `cd` to the working directory** (e.g. `cd ${worktree}`, `cd ~/projects/${task}`), otherwise worker runs in wrong directory
 
 Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail when terminal failure is acceptable — the operator investigates and resets manually.
@@ -50,7 +50,7 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 | Config | Problem | Fix |
 |--------|---------|-----|
 | Gate + verify/on_fail | Gate has no run, verify/on_fail are ignored | Remove verify/on_fail, or add run |
-| in_window without verify | `wf done` trusts unconditionally, can't detect errors | Add `verify` |
+| in_window without verify | `pawl done` trusts unconditionally, can't detect errors | Add `verify` |
 | in_window with verify but no on_fail | Verify failure is terminal, can't retry | Add `on_fail` |
 | in_window run without cd | Worker runs in repo root | `cd ${worktree} &&` or `cd /path/${task} &&` |
 
@@ -63,7 +63,7 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 | Reliable tests but failure needs analysis | `"cd ${worktree} && cargo test"` | `"human"` | Auto-detect, human decision |
 | Simple step without tests | omit | omit | Failure is terminal, manual reset |
 
-## Config (.wf/config.jsonc)
+## Config (.pawl/config.jsonc)
 
 ```jsonc
 {
@@ -77,7 +77,7 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 }
 ```
 
-## Task Definition (.wf/tasks/{task}.md)
+## Task Definition (.pawl/tasks/{task}.md)
 
 Task.md has a **dual role**: human documentation + AI Worker system prompt (injected via `cat task.md | claude -p`).
 
@@ -107,29 +107,29 @@ Append instead of overwrite: preserves history to avoid repeating mistakes, Work
 
 ## Variables
 
-All `run`/`verify`/hook commands support `${var}` expansion, subprocesses get `WF_VAR` environment variables:
+All `run`/`verify`/hook commands support `${var}` expansion, subprocesses get `PAWL_VAR` environment variables:
 
 | Variable | Value |
 |----------|-------|
-| `${task}` / `${branch}` | Task name / `wf/{task}` |
+| `${task}` / `${branch}` | Task name / `pawl/{task}` |
 | `${worktree}` | `{repo_root}/{worktree_dir}/{task}` |
 | `${session}` / `${window}` | tmux session name / same as task name |
 | `${repo_root}` | Repository root directory |
 | `${step}` / `${step_index}` | Current step name / index (0-based) |
 | `${base_branch}` | Base branch |
 | `${claude_command}` | Claude CLI command (from config, default "claude") |
-| `${log_file}` / `${task_file}` | `.wf/logs/{task}.jsonl` / `.wf/tasks/{task}.md` |
+| `${log_file}` / `${task_file}` | `.pawl/logs/{task}.jsonl` / `.pawl/tasks/{task}.md` |
 
 ## State Machine
 
 ```
-Pending → Running → Waiting    (awaits wf done)
+Pending → Running → Waiting    (awaits pawl done)
                   → Completed  (all steps done)
                   → Failed     (step failed / window lost)
-                  → Stopped    (wf stop)
+                  → Stopped    (pawl stop)
 ```
 
-**Step indexing**: CLI human-readable output is 1-based (`[1/5] build`), all programmatic interfaces are 0-based (`--step 0`, `--json`, JSONL, `WF_STEP_INDEX`).
+**Step indexing**: CLI human-readable output is 1-based (`[1/5] build`), all programmatic interfaces are 0-based (`--step 0`, `--json`, JSONL, `PAWL_STEP_INDEX`).
 
 ## Event Hooks
 
@@ -142,13 +142,13 @@ Configured in config's `"on"` field. **Fire-and-forget async execution** (does n
 | `task_started` | — | Task started |
 | `step_completed` | `${exit_code}`, `${duration}` | Step completed (success or failure) |
 | `step_waiting` | `${reason}` (gate/verify_human/on_fail_human) | Step paused for human input |
-| `step_approved` | — | `wf done` approved |
+| `step_approved` | — | `pawl done` approved |
 | `window_launched` | — | in_window command sent to tmux |
 | `step_skipped` | — | Step skipped |
 | `step_reset` | `${auto}` (true=auto retry/false=manual) | Step reset |
 | `window_lost` | — | tmux window disappeared |
-| `task_stopped` | — | `wf stop` |
-| `task_reset` | — | `wf reset` |
+| `task_stopped` | — | `pawl stop` |
+| `task_reset` | — | `pawl reset` |
 
 All hooks also have access to standard variables (`${task}`, `${step}`, `${session}`, etc.).
 
@@ -156,10 +156,10 @@ All hooks also have access to standard variables (`${task}`, `${step}`, `${sessi
 
 ```jsonc
 // Write to log file (simplest)
-"on": { "step_completed": "echo '[${task}] ${step} exit=${exit_code}' >> ${repo_root}/.wf/hook.log" }
+"on": { "step_completed": "echo '[${task}] ${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 
 // Notify Foreman TUI (concurrency-safe)
-"on": { "step_completed": "mkdir /tmp/wf-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[wf] ${task}/${step} done (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/wf-notify.lock; true" }
+"on": { "step_completed": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} done (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true" }
 ```
 
 Foreman notification details: `mkdir` atomic mutex prevents concurrent interleaving; `-l` sends literal text; `C-Enter` submits to Claude Code TUI input; `sleep 0.3` ensures atomicity.
@@ -172,13 +172,13 @@ Foreman notification details: `mkdir` atomic mutex prevents concurrent interleav
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
       "in_window": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from wf'" },
+    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ],
-  "on": { "step_completed": "echo '[wf] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.wf/hook.log" }
+  "on": { "step_completed": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 }
 ```
 
@@ -190,7 +190,7 @@ Notes: develop has verify+on_fail+cd worktree (satisfies all 3 rules); review is
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
       "in_window": true, "verify": "human", "on_fail": "human" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -206,7 +206,7 @@ Notes: verify=human lets Foreman review output; on_fail=human lets Foreman decid
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
       "in_window": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
     { "name": "final-review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
@@ -215,7 +215,7 @@ Notes: verify=human lets Foreman review output; on_fail=human lets Foreman decid
 }
 ```
 
-Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Foreman checks `last_feedback` via `wf status --json`, fixes the issue, then `wf reset --step` to continue. final-review is a gate ensuring human confirmation before merge.
+Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Foreman checks `last_feedback` via `pawl status --json`, fixes the issue, then `pawl reset --step` to continue. final-review is a gate ensuring human confirmation before merge.
 
 ### Recipe 4: Multi-Agent Parallel + Foreman Notification
 
@@ -224,20 +224,20 @@ Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Forema
   "session": "my-project",
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
       "in_window": true, "verify": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ],
   "on": {
-    "step_completed": "mkdir /tmp/wf-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[wf] ${task}/${step} done (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/wf-notify.lock; true",
-    "step_waiting": "mkdir /tmp/wf-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[wf] ${task} waiting: ${reason}' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/wf-notify.lock; true"
+    "step_completed": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} done (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true",
+    "step_waiting": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task} waiting: ${reason}' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true"
   }
 }
 ```
 
-Start multiple tasks in parallel: `wf start task-a && wf start task-b && wf start task-c`. Each task has independent JSONL/worktree/tmux window and does not interfere with others. Event hooks notify the Foreman window via tmux send-keys.
+Start multiple tasks in parallel: `pawl start task-a && pawl start task-b && pawl start task-c`. Each task has independent JSONL/worktree/tmux window and does not interfere with others. Event hooks notify the Foreman window via tmux send-keys.
 
 ### Recipe 5: Pure Automation Flow (No AI)
 
@@ -254,11 +254,11 @@ Start multiple tasks in parallel: `wf start task-a && wf start task-b && wf star
 }
 ```
 
-Notes: no in_window or ai-helpers.sh, pure synchronous commands. review is a gate + verify=human combo: first gate waits for wf done, then verify_human waits for wf done again.
+Notes: no in_window or ai-helpers.sh, pure synchronous commands. review is a gate + verify=human combo: first gate waits for pawl done, then verify_human waits for pawl done again.
 
 ### Recipe 6: Generic Pipeline (No Git Worktrees)
 
-wf is a generic step sequencer — git worktrees are one pattern, not a requirement. Use `${task}` as any identifier (project name, test scenario, deployment target):
+pawl is a generic step sequencer — git worktrees are one pattern, not a requirement. Use `${task}` as any identifier (project name, test scenario, deployment target):
 
 ```jsonc
 {
@@ -276,17 +276,17 @@ No `${worktree}`, `${branch}`, or git operations. Examples: testing pipelines (t
 
 ### Recipe 7: Plan-First Development (Foreman Reviews Plan Before Execution)
 
-Adds explicit plan approval step. AI creates a plan in read-only mode, foreman reviews and approves before any code is written. Requires one-time setup: `cd .wf/lib && npm install`.
+Adds explicit plan approval step. AI creates a plan in read-only mode, foreman reviews and approves before any code is written. Requires one-time setup: `cd .pawl/lib && npm install`.
 
 ```jsonc
 {
   "workflow": [
     { "name": "setup", "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "plan",
-      "run": "cd ${worktree} && node ${repo_root}/.wf/lib/plan-worker.mjs",
+      "run": "cd ${worktree} && node ${repo_root}/.pawl/lib/plan-worker.mjs",
       "in_window": true, "verify": "human", "on_fail": "human" },
     { "name": "develop",
-      "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+      "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
       "in_window": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge", "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
@@ -295,26 +295,26 @@ Adds explicit plan approval step. AI creates a plan in read-only mode, foreman r
 }
 ```
 
-Notes: plan step runs AI in read-only plan mode via Claude Agent SDK. When AI calls `ExitPlanMode`, the plan is saved to `.wf/plans/${task}.md` and the session ID to `.wf/plans/${task}.session`. Foreman reviews the plan then `wf done` to approve. The develop step's `run_ai_worker` detects the plan session file and resumes it with `-r session_id`, executing the approved plan. Plan rejection: `wf reset --step` on the plan step re-plans from scratch.
+Notes: plan step runs AI in read-only plan mode via Claude Agent SDK. When AI calls `ExitPlanMode`, the plan is saved to `.pawl/plans/${task}.md` and the session ID to `.pawl/plans/${task}.session`. Foreman reviews the plan then `pawl done` to approve. The develop step's `run_ai_worker` detects the plan session file and resumes it with `-r session_id`, executing the approved plan. Plan rejection: `pawl reset --step` on the plan step re-plans from scratch.
 
 ## Foreman Coordination
 
-Foreman is an AI agent that manages multiple worker agents. wf **does not push notifications — Foreman must poll** (unless event hooks are configured).
+Foreman is an AI agent that manages multiple worker agents. pawl **does not push notifications — Foreman must poll** (unless event hooks are configured).
 
 ### Main Loop
 
 ```
 while tasks remain incomplete:
-    1. wf list                          # scan global status
+    1. pawl list                          # scan global status
     2. for each waiting task:
-       - gate → wf done (confirm preconditions met)
-       - verify_human → wf capture/wf log to review output → wf done or wf reset --step
-       - on_fail_human → wf status --json for last_feedback → fix then wf reset --step
+       - gate → pawl done (confirm preconditions met)
+       - verify_human → pawl capture/pawl log to review output → pawl done or pawl reset --step
+       - on_fail_human → pawl status --json for last_feedback → fix then pawl reset --step
     3. for each failed task:
-       - wf status --json for last_feedback + retry_count
-       - fixable → wf reset --step    unfixable → wf start --reset or wf stop
+       - pawl status --json for last_feedback + retry_count
+       - fixable → pawl reset --step    unfixable → pawl start --reset or pawl stop
     4. for each running + in_window task:
-       - wf capture to check progress   wf enter if direct interaction needed
+       - pawl capture to check progress   pawl enter if direct interaction needed
     5. sleep / wait for event hook notification
 ```
 
@@ -322,19 +322,19 @@ while tasks remain incomplete:
 
 | status | message | Action |
 |--------|---------|--------|
-| pending | — | `wf start <task>` (check blocked_by first) |
-| running | — | No action needed (`wf capture` to monitor in_window) |
-| waiting | gate | `wf done <task>` (confirm gate conditions) |
-| waiting | verify_human | Review output → `wf done` or `wf reset --step` |
-| waiting | on_fail_human | Analyze feedback → `wf done`(approve) / `reset --step`(retry) / `stop`(abandon) |
-| failed | exit code/msg | `wf status --json` for feedback → fix → `wf reset --step` |
-| stopped | — | `wf start --reset` (start over) |
+| pending | — | `pawl start <task>` (check blocked_by first) |
+| running | — | No action needed (`pawl capture` to monitor in_window) |
+| waiting | gate | `pawl done <task>` (confirm gate conditions) |
+| waiting | verify_human | Review output → `pawl done` or `pawl reset --step` |
+| waiting | on_fail_human | Analyze feedback → `pawl done`(approve) / `reset --step`(retry) / `stop`(abandon) |
+| failed | exit code/msg | `pawl status --json` for feedback → fix → `pawl reset --step` |
+| stopped | — | `pawl start --reset` (start over) |
 | completed | — | No action needed |
 
 ### Key Constraints
 
-- **window_lost is passive detection**: wf does not proactively notify when a tmux window disappears. Detection only happens when `wf status`/`wf list`/`wf wait` is called. Periodically `wf list` to check health of in_window steps.
-- **wf done dual semantics**: For Waiting status = approve (step advances); for Running+in_window = mark done (triggers verify flow).
+- **window_lost is passive detection**: wf does not proactively notify when a tmux window disappears. Detection only happens when `pawl status`/`pawl list`/`pawl wait` is called. Periodically `pawl list` to check health of in_window steps.
+- **pawl done dual semantics**: For Waiting status = approve (step advances); for Running+in_window = mark done (triggers verify flow).
 - **Retry exhaustion**: After reaching max_retries, status becomes Failed (does not auto-transition to Waiting). Manual intervention required.
 
 ## AI Worker Integration (Coding Workflow Pattern)
@@ -357,20 +357,20 @@ Value of resumption: avoids re-understanding the codebase from scratch on each r
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--log-file <path>` | `$WF_LOG_FILE` | JSONL log path |
-| `--task-file <path>` | `$WF_TASK_FILE` | Task markdown path |
+| `--log-file <path>` | `$PAWL_LOG_FILE` | JSONL log path |
+| `--task-file <path>` | `$PAWL_TASK_FILE` | Task markdown path |
 | `--tools <tools>` | `Bash,Read,Write` | Comma-separated tool list |
-| `--claude-cmd <cmd>` | `$WF_CLAUDE_COMMAND` or `claude` | Claude CLI command |
+| `--claude-cmd <cmd>` | `$PAWL_CLAUDE_COMMAND` or `claude` | Claude CLI command |
 | `--extra-args <args>` | (empty) | Extra arguments passed to claude |
 
 ### Typical in_window Step Config
 
 ```jsonc
 // Basic
-{ "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker", "in_window": true }
+{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker", "in_window": true }
 
 // Custom tools and model
-{ "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker --tools 'Bash,Read,Write,Edit' --extra-args '--model sonnet'", "in_window": true }
+{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker --tools 'Bash,Read,Write,Edit' --extra-args '--model sonnet'", "in_window": true }
 ```
 
 ### Custom Wrapper
@@ -379,18 +379,18 @@ When `run_ai_worker` doesn't meet your needs, bypass it and call claude directly
 
 ```bash
 #!/bin/bash
-source "$WF_REPO_ROOT/.wf/lib/ai-helpers.sh"
-cd "$WF_WORKTREE"
-sid=$(extract_session_id "$WF_LOG_FILE")
+source "$PAWL_REPO_ROOT/.pawl/lib/ai-helpers.sh"
+cd "$PAWL_WORKTREE"
+sid=$(extract_session_id "$PAWL_LOG_FILE")
 if [ -n "$sid" ]; then
-    feedback=$(extract_feedback "$WF_LOG_FILE")
+    feedback=$(extract_feedback "$PAWL_LOG_FILE")
     claude -p "Previous error: $feedback. Fix it." -r "$sid" --tools "Bash,Read,Write"
 else
-    cat "$WF_TASK_FILE" | claude -p - --tools "Bash,Read,Write,Edit"
+    cat "$PAWL_TASK_FILE" | claude -p - --tools "Bash,Read,Write,Edit"
 fi
 ```
 
-Reference in config: `"run": "bash ${repo_root}/.wf/lib/my-wrapper.sh"`
+Reference in config: `"run": "bash ${repo_root}/.pawl/lib/my-wrapper.sh"`
 
 ### Claude CLI Key Flags
 
@@ -402,9 +402,9 @@ Reference in config: `"run": "bash ${repo_root}/.wf/lib/my-wrapper.sh"`
 | `--output-format json` | JSON output (includes session_id) |
 | `--model <name>` | Specify model |
 
-Constraint: `-r session_id` must be in the same cwd (session data is stored per project directory). wf's worktree path is deterministic, satisfying this constraint.
+Constraint: `-r session_id` must be in the same cwd (session data is stored per project directory). pawl's worktree path is deterministic, satisfying this constraint.
 
-## wf status --json Output
+## pawl status --json Output
 
 ### List Mode (no task argument)
 
@@ -445,9 +445,9 @@ Field notes: `retry_count` only counts auto retries (auto=true); `last_feedback`
 | Symptom | Cause | Solution |
 |---------|-------|----------|
 | tmux session not found | Session doesn't exist | `tmux new-session -d -s <session>` |
-| "Task already running" | Another wf start is running | `wf stop <task> && wf start <task>` |
-| Worktree already exists | Leftover from previous run | `git worktree remove .wf/worktrees/<task> --force && git branch -D wf/<task>` then `wf reset` |
+| "Task already running" | Another pawl start is running | `pawl stop <task> && pawl start <task>` |
+| Worktree already exists | Leftover from previous run | `git worktree remove .pawl/worktrees/<task> --force && git branch -D pawl/<task>` then `pawl reset` |
 | window_lost but process alive | tmux window name conflict | `tmux list-windows -t <session>` to inspect |
-| Dependency blocked | Prerequisite task not completed | `wf list` to check blocking source |
+| Dependency blocked | Prerequisite task not completed | `pawl list` to check blocking source |
 | `-r session_id` fails | cwd mismatch | Must run in same worktree directory |
-| JSONL corrupted | Write interrupted | `tail -1 .wf/logs/<task>.jsonl` to check; `wf reset` to reset |
+| JSONL corrupted | Write interrupted | `tail -1 .pawl/logs/<task>.jsonl` to check; `pawl reset` to reset |

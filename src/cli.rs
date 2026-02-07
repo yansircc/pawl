@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "wf", about = "Workflow task manager", version)]
+#[command(name = "pawl", about = "Resumable step sequencer", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

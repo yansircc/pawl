@@ -1,19 +1,19 @@
-# wf
+# pawl
 
 An orchestrator for AI coding agents. Each agent gets its own git worktree, its own tmux window, and a configurable pipeline — from branch creation to merge. You define the pipeline once, then launch as many agents as you want.
 
 ```
                ┌─ setup ─── develop ─── verify ─── merge ─── cleanup
-  wf start A ──┤
-  wf start B ──┤  Each task runs in its own worktree,
-  wf start C ──┘  isolated from the others.
+  pawl start A ──┤
+  pawl start B ──┤  Each task runs in its own worktree,
+  pawl start C ──┘  isolated from the others.
 ```
 
 ## Why
 
 AI coding agents (Claude, Codex, etc.) are powerful but messy to run in parallel. They conflict on files, break each other's imports, and leave merge chaos behind. Manual worktree/branch/merge management doesn't scale past 2-3 agents.
 
-`wf` gives each agent an isolated workspace and a structured lifecycle: setup, develop, verify, merge, clean up. The agent communicates back via `wf done`. Everything in the pipeline is a shell command — no plugins, no SDKs.
+`pawl` gives each agent an isolated workspace and a structured lifecycle: setup, develop, verify, merge, clean up. The agent communicates back via `pawl done`. Everything in the pipeline is a shell command — no plugins, no SDKs.
 
 ## Install
 
@@ -28,33 +28,33 @@ Requires: Rust toolchain, tmux, git.
 ```bash
 # 1. Initialize in your project
 cd your-project
-wf init
+pawl init
 
 # 2. Create a task
-wf create auth-login
+pawl create auth-login
 
 # 3. Write the task spec
-vim .wf/tasks/auth-login.md
+vim .pawl/tasks/auth-login.md
 
 # 4. Start the task
-wf start auth-login
+pawl start auth-login
 ```
 
 ## How It Works
 
-You define a workflow in `.wf/config.jsonc` — a list of steps that run for every task:
+You define a workflow in `.pawl/config.jsonc` — a list of steps that run for every task:
 
 ```jsonc
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
       "in_window": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from wf'" },
+    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ],
-  "on": { "step_completed": "echo '[wf] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.wf/hook.log" }
+  "on": { "step_completed": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 }
 ```
 
@@ -63,8 +63,8 @@ You define a workflow in `.wf/config.jsonc` — a list of steps that run for eve
 | Type | Config | Behavior |
 |------|--------|----------|
 | **Command** | `{ "run": "..." }` | Runs synchronously. Fails on non-zero exit. |
-| **Gate** | `{ "name": "..." }` | No `run` — pauses until `wf done`. |
-| **Agent** | `{ "run": "...", "in_window": true }` | Runs in tmux. Waits for `wf done`. |
+| **Gate** | `{ "name": "..." }` | No `run` — pauses until `pawl done`. |
+| **Agent** | `{ "run": "...", "in_window": true }` | Runs in tmux. Waits for `pawl done`. |
 | **Verified** | `{ "run": "...", "verify": "human" }` | Runs, then waits for human approval. |
 
 ### Step Properties
@@ -84,50 +84,50 @@ All `${var}` references are expanded before execution:
 | Variable | Example |
 |----------|---------|
 | `${task}` | `auth-login` |
-| `${branch}` | `wf/auth-login` |
-| `${worktree}` | `/project/.wf/worktrees/auth-login` |
+| `${branch}` | `pawl/auth-login` |
+| `${worktree}` | `/project/.pawl/worktrees/auth-login` |
 | `${session}` | `my-project` |
 | `${repo_root}` | `/project` |
 | `${base_branch}` | `main` |
 | `${step}` | `Develop` |
-| `${task_file}` | `/project/.wf/tasks/auth-login.md` |
-| `${log_file}` | `/project/.wf/logs/auth-login.jsonl` |
+| `${task_file}` | `/project/.pawl/tasks/auth-login.md` |
+| `${log_file}` | `/project/.pawl/logs/auth-login.jsonl` |
 
 ## Commands
 
 ### Lifecycle
 
 ```bash
-wf init                  # Initialize .wf/ directory
-wf create <name>         # Create a task
-wf start <task>          # Start workflow execution
+pawl init                  # Initialize .pawl/ directory
+pawl create <name>         # Create a task
+pawl start <task>          # Start workflow execution
 ```
 
 ### Flow Control
 
 ```bash
-wf done <task>           # Approve waiting step / mark in_window step done
-wf stop <task>           # Stop running task
-wf reset <task>          # Reset to initial state
-wf reset --step <task>   # Retry current step
+pawl done <task>           # Approve waiting step / mark in_window step done
+pawl stop <task>           # Stop running task
+pawl reset <task>          # Reset to initial state
+pawl reset --step <task>   # Retry current step
 ```
 
 ### Monitoring
 
 ```bash
-wf status [task]         # Show status (--json for machine output)
-wf list                  # List all tasks
-wf log <task> --all      # View execution logs
-wf log <task> --step 3   # View specific step log
-wf events [task] [--follow]  # Unified event stream
-wf capture <task>        # Capture tmux window content
-wf wait <task> --until completed  # Wait for status (with window health check)
-wf enter <task>          # Attach to tmux window
+pawl status [task]         # Show status (--json for machine output)
+pawl list                  # List all tasks
+pawl log <task> --all      # View execution logs
+pawl log <task> --step 3   # View specific step log
+pawl events [task] [--follow]  # Unified event stream
+pawl capture <task>        # Capture tmux window content
+pawl wait <task> --until completed  # Wait for status (with window health check)
+pawl enter <task>          # Attach to tmux window
 ```
 
 ## Task Files
 
-Tasks are defined as markdown in `.wf/tasks/`:
+Tasks are defined as markdown in `.pawl/tasks/`:
 
 ```markdown
 ---
@@ -149,7 +149,7 @@ Implement the login API endpoint with email/password authentication.
 ## Project Layout
 
 ```
-.wf/
+.pawl/
 ├── config.jsonc          # Workflow configuration
 ├── tasks/                # Task definitions (*.md)
 ├── logs/                 # Event logs (*.jsonl) — single source of truth
@@ -158,9 +158,9 @@ Implement the login API endpoint with email/password authentication.
 └── lib/
     ├── ai-helpers.sh     # AI worker helper functions (plan-aware resume)
     ├── plan-worker.mjs   # SDK plan worker for plan-first workflow (Recipe 7)
-    └── package.json      # Node.js deps for plan-worker (`cd .wf/lib && npm install`)
+    └── package.json      # Node.js deps for plan-worker (`cd .pawl/lib && npm install`)
 
-.claude/skills/wf/        # Claude Code skill (generated by wf init)
+.claude/skills/pawl/      # Claude Code skill (generated by pawl init)
 └── SKILL.md              # Complete reference: config rules, recipes, foreman guide, troubleshooting
 ```
 

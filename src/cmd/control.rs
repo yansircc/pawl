@@ -14,7 +14,7 @@ pub fn stop(task_name: &str) -> Result<()> {
 
     let state = project.replay_task(&task_name)?;
     let Some(state) = state else {
-        bail!("Task '{}' has not been started. Use 'wf start {}' to begin.", task_name, task_name);
+        bail!("Task '{}' has not been started. Use 'pawl start {}' to begin.", task_name, task_name);
     };
 
     match state.status {
@@ -39,7 +39,7 @@ pub fn stop(task_name: &str) -> Result<()> {
     })?;
 
     println!("Task '{}' stopped.", task_name);
-    println!("Use 'wf reset --step {}' to retry or 'wf reset {}' to restart.", task_name, task_name);
+    println!("Use 'pawl reset --step {}' to retry or 'pawl reset {}' to restart.", task_name, task_name);
 
     Ok(())
 }
@@ -59,7 +59,7 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
 
         let step_idx = state.current_step;
         if step_idx >= project.config.workflow.len() {
-            bail!("Task '{}' is already completed. Use 'wf reset {}' for full reset.", task_name, task_name);
+            bail!("Task '{}' is already completed. Use 'pawl reset {}' for full reset.", task_name, task_name);
         }
 
         match state.status {
@@ -68,10 +68,10 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
                 bail!("Task '{}' is already running.", task_name);
             }
             TaskStatus::Completed => {
-                bail!("Task '{}' is completed. Use 'wf reset {}' for full reset.", task_name, task_name);
+                bail!("Task '{}' is completed. Use 'pawl reset {}' for full reset.", task_name, task_name);
             }
             TaskStatus::Pending => {
-                bail!("Task '{}' has not been started. Use 'wf start {}'", task_name, task_name);
+                bail!("Task '{}' has not been started. Use 'pawl start {}'", task_name, task_name);
             }
         }
 
@@ -105,7 +105,7 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
 
         // Only show git cleanup hints if resources actually exist
         let worktree_path = std::path::Path::new(&project.repo_root).join(&project.config.worktree_dir).join(&task_name);
-        let branch_name = format!("wf/{}", task_name);
+        let branch_name = format!("pawl/{}", task_name);
         let worktree_exists = worktree_path.exists();
         let branch_exists = crate::util::git::branch_exists(&branch_name);
         if worktree_exists || branch_exists {

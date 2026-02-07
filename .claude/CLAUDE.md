@@ -1,4 +1,4 @@
-# wf — Resumable Step Sequencer
+# pawl — Resumable Step Sequencer
 
 A resumable coroutine engine for any multi-step workflow. Primary use case: AI coding agent orchestration (setup → develop → verify → merge → cleanup) with git worktree isolation and tmux-based execution. Also applicable to testing pipelines, deployment automation, and any repeatable step sequence.
 
@@ -6,14 +6,14 @@ A resumable coroutine engine for any multi-step workflow. Primary use case: AI c
 
 ### System Essence
 
-wf is a **resumable coroutine**: advance along a fixed sequence, yield control when unable to self-decide, rebuild from log after crash.
+pawl is a **resumable coroutine**: advance along a fixed sequence, yield control when unable to self-decide, rebuild from log after crash.
 
 ### 5 Invariant Rules
 
 1. **Memory = append-only log**. `state = replay(log)`, no separate state storage.
 2. **Cursor moves forward monotonically**. `current_step` only increases, except on explicit Reset.
 3. **Verdict before advance**. Cursor advances only after success/failure of current position is determined.
-4. **Two authorities per decision point**. Each step's outcome is decided by either machine (exit code) or human (`wf done`), never both. Environment (WindowLost) is anomaly detection, not a verdict.
+4. **Two authorities per decision point**. Each step's outcome is decided by either machine (exit code) or human (`pawl done`), never both. Environment (WindowLost) is anomaly detection, not a verdict.
 5. **Failure is routable**. Failure → retry (Reset) | yield to human (Yield) | terminate.
 
 **The single invariant**: `state = replay(log)`
@@ -47,24 +47,24 @@ src/
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
 │   ├── common.rs        # Project context, event append/read/replay/check_window_health
-│   ├── init.rs          # wf init (scaffold, uses include_str! for templates)
-│   ├── create.rs        # wf create (improved task template)
-│   ├── start.rs         # wf start (execution engine, resolve/dispatch pipeline)
-│   ├── status.rs        # wf status / wf list
-│   ├── control.rs       # wf stop/reset
-│   ├── run.rs           # wf _run (in_window parent process, replaces runner script + trap)
-│   ├── approve.rs       # wf done (approve waiting step or complete in_window step)
-│   ├── capture.rs       # wf capture (tmux content)
-│   ├── wait.rs          # wf wait (poll via Project API)
-│   ├── enter.rs         # wf enter (attach to tmux window)
-│   ├── events.rs        # wf events (unified event stream, --follow)
-│   ├── log.rs           # wf log (--step/--all/--all-runs/--jsonl)
+│   ├── init.rs          # pawl init (scaffold, uses include_str! for templates)
+│   ├── create.rs        # pawl create (improved task template)
+│   ├── start.rs         # pawl start (execution engine, resolve/dispatch pipeline)
+│   ├── status.rs        # pawl status / pawl list
+│   ├── control.rs       # pawl stop/reset
+│   ├── run.rs           # pawl _run (in_window parent process, replaces runner script + trap)
+│   ├── approve.rs       # pawl done (approve waiting step or complete in_window step)
+│   ├── capture.rs       # pawl capture (tmux content)
+│   ├── wait.rs          # pawl wait (poll via Project API)
+│   ├── enter.rs         # pawl enter (attach to tmux window)
+│   ├── events.rs        # pawl events (unified event stream, --follow)
+│   ├── log.rs           # pawl log (--step/--all/--all-runs/--jsonl)
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.jsonc           # Default workflow config
 │       ├── ai-helpers.sh          # AI worker helper functions (plan-aware resume)
 │       ├── plan-worker.mjs        # SDK plan worker (canUseTool + ExitPlanMode interception)
 │       ├── plan-package.json      # Node.js package.json for plan-worker
-│       └── wf-skill.md            # Unified SKILL.md: rules, recipes, foreman, troubleshooting
+│       └── pawl-skill.md            # Unified SKILL.md: rules, recipes, foreman, troubleshooting
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
     ├── shell.rs         # run_command variants, CommandResult
@@ -75,20 +75,20 @@ src/
 ## Core Concepts
 
 - **Step**: 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_window`
-- **Gate step**: No `run` command — waits for `wf done`
-- **in_window**: Runs command in tmux window, waits for `wf done`
+- **Gate step**: No `run` command — waits for `pawl done`
+- **in_window**: Runs command in tmux window, waits for `pawl done`
 - **Verify**: `"human"` for manual approval, or a shell command (must exit 0)
 - **on_fail**: `"retry"` for auto-retry (up to max_retries), `"human"` to wait for decision
 - **skip** (per-task): Task frontmatter `skip: [step_name, ...]` auto-skips listed steps
 
-## Config (`.wf/config.jsonc`)
+## Config (`.pawl/config.jsonc`)
 
 ```typescript
 {
   session?: string,         // tmux session name (default: project dir name)
   multiplexer?: string,     // default: "tmux"
   claude_command?: string,  // default: "claude"
-  worktree_dir?: string,    // default: ".wf/worktrees"
+  worktree_dir?: string,    // default: ".pawl/worktrees"
   base_branch?: string,     // default: "main"
   workflow: Step[],         // required
   on?: Record<string, string>     // event hooks (key = Event serde tag)
@@ -105,7 +105,7 @@ src/
 }
 ```
 
-## Task Definition (`.wf/tasks/{task}.md`)
+## Task Definition (`.pawl/tasks/{task}.md`)
 
 ```yaml
 ---
@@ -121,22 +121,22 @@ Task description in markdown.
 
 ## Variables
 
-All variables are available as `${var}` in config and as `WF_VAR` env vars in subprocesses.
+All variables are available as `${var}` in config and as `PAWL_VAR` env vars in subprocesses.
 
 | Variable | Env Var | Value |
 |----------|---------|-------|
-| `${task}` | `WF_TASK` | Task name |
-| `${branch}` | `WF_BRANCH` | `wf/{task}` |
-| `${worktree}` | `WF_WORKTREE` | `{repo_root}/{worktree_dir}/{task}` |
-| `${window}` | `WF_WINDOW` | Same as task name |
-| `${session}` | `WF_SESSION` | Tmux session name |
-| `${repo_root}` | `WF_REPO_ROOT` | Git repository root |
-| `${step}` | `WF_STEP` | Current step name |
-| `${base_branch}` | `WF_BASE_BRANCH` | Config base_branch value |
-| `${claude_command}` | `WF_CLAUDE_COMMAND` | Claude CLI command (default: "claude") |
-| `${log_file}` | `WF_LOG_FILE` | `.wf/logs/{task}.jsonl` |
-| `${task_file}` | `WF_TASK_FILE` | `.wf/tasks/{task}.md` |
-| `${step_index}` | `WF_STEP_INDEX` | Current step index (0-based) |
+| `${task}` | `PAWL_TASK` | Task name |
+| `${branch}` | `PAWL_BRANCH` | `pawl/{task}` |
+| `${worktree}` | `PAWL_WORKTREE` | `{repo_root}/{worktree_dir}/{task}` |
+| `${window}` | `PAWL_WINDOW` | Same as task name |
+| `${session}` | `PAWL_SESSION` | Tmux session name |
+| `${repo_root}` | `PAWL_REPO_ROOT` | Git repository root |
+| `${step}` | `PAWL_STEP` | Current step name |
+| `${base_branch}` | `PAWL_BASE_BRANCH` | Config base_branch value |
+| `${claude_command}` | `PAWL_CLAUDE_COMMAND` | Claude CLI command (default: "claude") |
+| `${log_file}` | `PAWL_LOG_FILE` | `.pawl/logs/{task}.jsonl` |
+| `${task_file}` | `PAWL_TASK_FILE` | `.pawl/tasks/{task}.md` |
+| `${step_index}` | `PAWL_STEP_INDEX` | Current step index (0-based) |
 
 ## State Machine
 
@@ -150,7 +150,7 @@ All variables are available as `${var}` in config and as `WF_VAR` env vars in su
 
 JSONL is the **single source of truth** — no `status.json`. State is reconstructed via `replay()`.
 
-Per-task event log: `.wf/logs/{task}.jsonl`
+Per-task event log: `.pawl/logs/{task}.jsonl`
 
 10 event types:
 - `task_started` — initializes Running, step=0
@@ -172,20 +172,20 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 
 | Command | Description |
 |---------|-------------|
-| `wf init` | Initialize project |
-| `wf create <name> [desc] [--depends a,b]` | Create task |
-| `wf list` | List all tasks |
-| `wf start <task> [--reset]` | Start task execution (--reset auto-resets first) |
-| `wf status [task] [--json]` | Show status (--json uses 0-based step index) |
-| `wf stop <task>` | Stop task (Running or Waiting) |
-| `wf reset <task>` | Reset to initial state |
-| `wf reset --step <task>` | Retry current step |
-| `wf enter <task>` | Attach to tmux window |
-| `wf capture <task> [-l N] [--json]` | Capture tmux content |
-| `wf wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
-| `wf log <task> [--step N] [--all] [--all-runs] [--jsonl]` | View logs (--all=current run, --all-runs=full history) |
-| `wf events [task] [--follow]` | Unified event stream (--follow for real-time) |
-| `wf done <task> [-m msg]` | Mark step done / approve |
+| `pawl init` | Initialize project |
+| `pawl create <name> [desc] [--depends a,b]` | Create task |
+| `pawl list` | List all tasks |
+| `pawl start <task> [--reset]` | Start task execution (--reset auto-resets first) |
+| `pawl status [task] [--json]` | Show status (--json uses 0-based step index) |
+| `pawl stop <task>` | Stop task (Running or Waiting) |
+| `pawl reset <task>` | Reset to initial state |
+| `pawl reset --step <task>` | Retry current step |
+| `pawl enter <task>` | Attach to tmux window |
+| `pawl capture <task> [-l N] [--json]` | Capture tmux content |
+| `pawl wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
+| `pawl log <task> [--step N] [--all] [--all-runs] [--jsonl]` | View logs (--all=current run, --all-runs=full history) |
+| `pawl events [task] [--follow]` | Unified event stream (--follow for real-time) |
+| `pawl done <task> [-m msg]` | Mark step done / approve |
 
 ## Execution Flow
 
@@ -193,9 +193,9 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 start(task)
   └─ execute loop:
      ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
-     ├─ Gate step (no run) → StepWaiting, return (wait for wf done)
+     ├─ Gate step (no run) → StepWaiting, return (wait for pawl done)
      ├─ Normal step → run sync → handle_step_completion
-     └─ in_window step → send `wf _run task step` to tmux → return (wait for wf done/_run completion)
+     └─ in_window step → send `pawl _run task step` to tmux → return (wait for pawl done/_run completion)
 
 handle_step_completion(exit_code, step, run_output):
   1. run_verify (if exit_code == 0) → VerifyOutcome
@@ -220,7 +220,7 @@ done(task)
 _run(task, step_idx)  [runs inside tmux as parent process]
   ├─ ignore SIGHUP, fork child (bash -c command), waitpid
   ├─ redirect stdout/stderr → /dev/null (pty may be gone)
-  ├─ re-check state (wf done may have already handled)
+  ├─ re-check state (pawl done may have already handled)
   └─ if still Running at step_idx → handle_step_completion
 
 check_window_health(task_name) → bool:
@@ -230,7 +230,7 @@ check_window_health(task_name) → bool:
 ## File System Layout
 
 ```
-.wf/
+.pawl/
 ├── config.jsonc          # Workflow configuration
 ├── tasks/                # Task definitions (markdown + YAML frontmatter)
 │   └── {task}.md
@@ -246,7 +246,7 @@ check_window_health(task_name) → bool:
     ├── plan-worker.mjs   # SDK plan worker (Recipe 7)
     └── package.json      # Node.js deps for plan-worker
 
-.claude/skills/wf/        # Claude Code skill (wf init generates)
+.claude/skills/pawl/        # Claude Code skill (pawl init generates)
 └── SKILL.md              # Unified reference: rules, recipes, foreman guide, troubleshooting
 ```
 

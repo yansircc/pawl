@@ -39,7 +39,7 @@ impl Context {
         let worktree = format!("{}/{}/{}", repo_root, worktree_dir, task);
         Self {
             task: task.to_string(),
-            branch: format!("wf/{}", task),
+            branch: format!("pawl/{}", task),
             worktree,
             window: task.to_string(),
             session: session.to_string(),
@@ -83,25 +83,25 @@ impl Context {
     /// Convert to environment variables for subprocess
     pub fn to_env_vars(&self) -> HashMap<String, String> {
         let mut env = HashMap::new();
-        env.insert("WF_TASK".to_string(), self.task.clone());
-        env.insert("WF_BRANCH".to_string(), self.branch.clone());
-        env.insert("WF_WORKTREE".to_string(), self.worktree.clone());
-        env.insert("WF_WINDOW".to_string(), self.window.clone());
-        env.insert("WF_SESSION".to_string(), self.session.clone());
-        env.insert("WF_REPO_ROOT".to_string(), self.repo_root.clone());
-        env.insert("WF_STEP".to_string(), self.step.clone());
-        env.insert("WF_BASE_BRANCH".to_string(), self.base_branch.clone());
-        env.insert("WF_CLAUDE_COMMAND".to_string(), self.claude_command.clone());
+        env.insert("PAWL_TASK".to_string(), self.task.clone());
+        env.insert("PAWL_BRANCH".to_string(), self.branch.clone());
+        env.insert("PAWL_WORKTREE".to_string(), self.worktree.clone());
+        env.insert("PAWL_WINDOW".to_string(), self.window.clone());
+        env.insert("PAWL_SESSION".to_string(), self.session.clone());
+        env.insert("PAWL_REPO_ROOT".to_string(), self.repo_root.clone());
+        env.insert("PAWL_STEP".to_string(), self.step.clone());
+        env.insert("PAWL_BASE_BRANCH".to_string(), self.base_branch.clone());
+        env.insert("PAWL_CLAUDE_COMMAND".to_string(), self.claude_command.clone());
 
         // Add log-related environment variables if available
         if let Some(log_file) = &self.log_file {
-            env.insert("WF_LOG_FILE".to_string(), log_file.clone());
+            env.insert("PAWL_LOG_FILE".to_string(), log_file.clone());
         }
         if let Some(task_file) = &self.task_file {
-            env.insert("WF_TASK_FILE".to_string(), task_file.clone());
+            env.insert("PAWL_TASK_FILE".to_string(), task_file.clone());
         }
         if let Some(step_index) = self.step_index {
-            env.insert("WF_STEP_INDEX".to_string(), step_index.to_string());
+            env.insert("PAWL_STEP_INDEX".to_string(), step_index.to_string());
         }
 
         env
@@ -118,7 +118,7 @@ mod tests {
             "auth",
             "my-project",
             "/home/user/project",
-            ".wf/worktrees",
+            ".pawl/worktrees",
             "Type check",
             "main",
             "claude",
@@ -128,19 +128,19 @@ mod tests {
         );
 
         assert_eq!(ctx.expand("${task}"), "auth");
-        assert_eq!(ctx.expand("${branch}"), "wf/auth");
+        assert_eq!(ctx.expand("${branch}"), "pawl/auth");
         assert_eq!(ctx.expand("${base_branch}"), "main");
         assert_eq!(
             ctx.expand("${worktree}"),
-            "/home/user/project/.wf/worktrees/auth"
+            "/home/user/project/.pawl/worktrees/auth"
         );
         assert_eq!(
             ctx.expand("git checkout ${branch}"),
-            "git checkout wf/auth"
+            "git checkout pawl/auth"
         );
         assert_eq!(
             ctx.expand("git branch ${branch} ${base_branch}"),
-            "git branch wf/auth main"
+            "git branch pawl/auth main"
         );
     }
 
@@ -150,28 +150,28 @@ mod tests {
             "auth",
             "my-project",
             "/home/user/project",
-            ".wf/worktrees",
+            ".pawl/worktrees",
             "Develop",
             "develop",
             "claude",
             Some(1),
-            Some("/home/user/project/.wf/logs/auth.jsonl"),
-            Some("/home/user/project/.wf/tasks/auth.md"),
+            Some("/home/user/project/.pawl/logs/auth.jsonl"),
+            Some("/home/user/project/.pawl/tasks/auth.md"),
         );
 
         assert_eq!(
             ctx.expand("${log_file}"),
-            "/home/user/project/.wf/logs/auth.jsonl"
+            "/home/user/project/.pawl/logs/auth.jsonl"
         );
         assert_eq!(
             ctx.expand("${task_file}"),
-            "/home/user/project/.wf/tasks/auth.md"
+            "/home/user/project/.pawl/tasks/auth.md"
         );
         assert_eq!(ctx.expand("${step_index}"), "1");
         assert_eq!(ctx.expand("${base_branch}"), "develop");
         assert_eq!(
             ctx.expand("cat ${log_file}"),
-            "cat /home/user/project/.wf/logs/auth.jsonl"
+            "cat /home/user/project/.pawl/logs/auth.jsonl"
         );
     }
 
@@ -181,7 +181,7 @@ mod tests {
             "auth",
             "my-project",
             "/home/user/project",
-            ".wf/worktrees",
+            ".pawl/worktrees",
             "Develop",
             "main",
             "ccc",
@@ -191,11 +191,11 @@ mod tests {
         );
 
         let env = ctx.to_env_vars();
-        assert_eq!(env.get("WF_LOG_FILE"), Some(&"/logs/auth.jsonl".to_string()));
-        assert_eq!(env.get("WF_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
-        assert_eq!(env.get("WF_STEP_INDEX"), Some(&"1".to_string()));
-        assert_eq!(env.get("WF_BASE_BRANCH"), Some(&"main".to_string()));
-        assert_eq!(env.get("WF_CLAUDE_COMMAND"), Some(&"ccc".to_string()));
+        assert_eq!(env.get("PAWL_LOG_FILE"), Some(&"/logs/auth.jsonl".to_string()));
+        assert_eq!(env.get("PAWL_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
+        assert_eq!(env.get("PAWL_STEP_INDEX"), Some(&"1".to_string()));
+        assert_eq!(env.get("PAWL_BASE_BRANCH"), Some(&"main".to_string()));
+        assert_eq!(env.get("PAWL_CLAUDE_COMMAND"), Some(&"ccc".to_string()));
     }
 
     #[test]
@@ -204,7 +204,7 @@ mod tests {
             "auth",
             "my-project",
             "/home/user/project",
-            ".wf/worktrees",
+            ".pawl/worktrees",
             "Setup",
             "main",
             "claude",
@@ -214,10 +214,10 @@ mod tests {
         );
 
         let env = ctx.to_env_vars();
-        assert_eq!(env.get("WF_TASK"), Some(&"auth".to_string()));
-        assert_eq!(env.get("WF_BRANCH"), Some(&"wf/auth".to_string()));
-        assert_eq!(env.get("WF_BASE_BRANCH"), Some(&"main".to_string()));
-        assert!(env.get("WF_LOG_FILE").is_none());
-        assert!(env.get("WF_TASK_FILE").is_none());
+        assert_eq!(env.get("PAWL_TASK"), Some(&"auth".to_string()));
+        assert_eq!(env.get("PAWL_BRANCH"), Some(&"pawl/auth".to_string()));
+        assert_eq!(env.get("PAWL_BASE_BRANCH"), Some(&"main".to_string()));
+        assert!(env.get("PAWL_LOG_FILE").is_none());
+        assert!(env.get("PAWL_TASK_FILE").is_none());
     }
 }

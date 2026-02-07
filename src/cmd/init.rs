@@ -5,58 +5,58 @@ use std::path::Path;
 
 use crate::util::git::get_repo_root;
 
-const WF_DIR: &str = ".wf";
+const PAWL_DIR: &str = ".pawl";
 const CONFIG_FILE: &str = "config.jsonc";
 const TASKS_DIR: &str = "tasks";
 const LIB_DIR: &str = "lib";
-const SKILL_DIR: &str = ".claude/skills/wf";
+const SKILL_DIR: &str = ".claude/skills/pawl";
 
 const DEFAULT_CONFIG: &str = include_str!("templates/config.jsonc");
 
 const GITIGNORE_ENTRIES: &str = r#"
-# wf - Workflow Task Runner
-.wf/*
-!.wf/tasks/
-!.wf/config.jsonc
-!.wf/lib/
-.wf/lib/node_modules/
+# pawl - Resumable Step Sequencer
+.pawl/*
+!.pawl/tasks/
+!.pawl/config.jsonc
+!.pawl/lib/
+.pawl/lib/node_modules/
 "#;
 
 const AI_HELPERS_TEMPLATE: &str = include_str!("templates/ai-helpers.sh");
 const PLAN_WORKER_TEMPLATE: &str = include_str!("templates/plan-worker.mjs");
 const PLAN_PACKAGE_TEMPLATE: &str = include_str!("templates/plan-package.json");
 
-const WF_SKILL: &str = include_str!("templates/wf-skill.md");
+const PAWL_SKILL: &str = include_str!("templates/pawl-skill.md");
 
 pub fn run() -> Result<()> {
     // Get repo root
     let repo_root = get_repo_root()?;
-    let wf_dir = Path::new(&repo_root).join(WF_DIR);
+    let pawl_dir = Path::new(&repo_root).join(PAWL_DIR);
 
     // Check if already initialized
-    if wf_dir.exists() {
-        bail!(".wf/ directory already exists. Use 'wf reset' to reinitialize.");
+    if pawl_dir.exists() {
+        bail!(".pawl/ directory already exists. Use 'pawl reset' to reinitialize.");
     }
 
-    println!("Initializing wf in {}...", repo_root);
+    println!("Initializing pawl in {}...", repo_root);
 
     // Create directory structure
-    fs::create_dir_all(wf_dir.join(TASKS_DIR))
-        .context("Failed to create .wf/tasks/ directory")?;
+    fs::create_dir_all(pawl_dir.join(TASKS_DIR))
+        .context("Failed to create .pawl/tasks/ directory")?;
 
-    fs::create_dir_all(wf_dir.join(LIB_DIR))
-        .context("Failed to create .wf/lib/ directory")?;
+    fs::create_dir_all(pawl_dir.join(LIB_DIR))
+        .context("Failed to create .pawl/lib/ directory")?;
 
     // Write default config
-    let config_path = wf_dir.join(CONFIG_FILE);
+    let config_path = pawl_dir.join(CONFIG_FILE);
     fs::write(&config_path, DEFAULT_CONFIG)
         .context("Failed to write config.jsonc")?;
     println!("  Created {}", config_path.display());
 
     // Write lib files
-    create_lib_files(&wf_dir)?;
+    create_lib_files(&pawl_dir)?;
 
-    // Write skill files (.claude/skills/wf/)
+    // Write skill files (.claude/skills/pawl/)
     create_skill_files(&repo_root)?;
 
     // Update .gitignore
@@ -64,15 +64,15 @@ pub fn run() -> Result<()> {
 
     println!("\nInitialization complete!");
     println!("\nNext steps:");
-    println!("  1. Edit .wf/config.jsonc to customize your workflow");
-    println!("  2. Create a task: wf create <name> [description]");
-    println!("  3. Start the task: wf start <name>");
+    println!("  1. Edit .pawl/config.jsonc to customize your workflow");
+    println!("  2. Create a task: pawl create <name> [description]");
+    println!("  3. Start the task: pawl start <name>");
 
     Ok(())
 }
 
-fn create_lib_files(wf_dir: &Path) -> Result<()> {
-    let lib_dir = wf_dir.join(LIB_DIR);
+fn create_lib_files(pawl_dir: &Path) -> Result<()> {
+    let lib_dir = pawl_dir.join(LIB_DIR);
 
     let helpers_path = lib_dir.join("ai-helpers.sh");
     fs::write(&helpers_path, AI_HELPERS_TEMPLATE)
@@ -100,10 +100,10 @@ fn create_lib_files(wf_dir: &Path) -> Result<()> {
 fn create_skill_files(repo_root: &str) -> Result<()> {
     let skill_dir = Path::new(repo_root).join(SKILL_DIR);
     fs::create_dir_all(&skill_dir)
-        .context("Failed to create .claude/skills/wf/ directory")?;
+        .context("Failed to create .claude/skills/pawl/ directory")?;
 
     let skill_path = skill_dir.join("SKILL.md");
-    fs::write(&skill_path, WF_SKILL)
+    fs::write(&skill_path, PAWL_SKILL)
         .context("Failed to write SKILL.md")?;
     println!("  Created {}", skill_path.display());
 
@@ -119,13 +119,13 @@ fn update_gitignore(repo_root: &str) -> Result<()> {
         String::new()
     };
 
-    // Check if already has wf entries
-    if current_content.contains(".wf/") {
-        println!("  .gitignore already contains wf entries");
+    // Check if already has pawl entries
+    if current_content.contains(".pawl/") {
+        println!("  .gitignore already contains pawl entries");
         return Ok(());
     }
 
-    // Append wf entries
+    // Append pawl entries
     let new_content = if current_content.is_empty() {
         GITIGNORE_ENTRIES.trim_start().to_string()
     } else if current_content.ends_with('\n') {

@@ -27,7 +27,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
                     bail!("Task '{}' is already running at step {}", task_name, state.current_step + 1);
                 }
                 TaskStatus::Completed => {
-                    bail!("Task '{}' is already completed. Use 'wf reset {}' to restart or 'wf start --reset {}'.", task_name, task_name, task_name);
+                    bail!("Task '{}' is already completed. Use 'pawl reset {}' to restart or 'pawl start --reset {}'.", task_name, task_name, task_name);
                 }
                 TaskStatus::Waiting => {
                     let step_name = if state.current_step < project.config.workflow.len() {
@@ -37,7 +37,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
                     };
                     let reason = state.message.as_deref().unwrap_or("approval");
                     bail!(
-                        "Task '{}' is waiting at step {} ({}) for {}. Use 'wf done {}' to continue.",
+                        "Task '{}' is waiting at step {} ({}) for {}. Use 'pawl done {}' to continue.",
                         task_name, state.current_step + 1, step_name, reason, task_name
                     );
                 }
@@ -67,7 +67,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
     Ok(())
 }
 
-/// Continue execution from current step (called by wf done, wf reset --step, etc.)
+/// Continue execution from current step (called by pawl done, pawl reset --step, etc.)
 pub fn continue_execution(project: &Project, task_name: &str) -> Result<()> {
     execute(project, task_name)
 }
@@ -141,7 +141,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
                 step: step_idx,
                 reason: "gate".to_string(),
             })?;
-            println!("  → Waiting for approval. Use 'wf done {}' to continue.", task_name);
+            println!("  → Waiting for approval. Use 'pawl done {}' to continue.", task_name);
             return Ok(());
         }
 
@@ -298,7 +298,7 @@ fn dispatch(
                 stderr: run_output.stderr,
             })?;
             emit_waiting(project, task_name, step_idx, "verify_human",
-                &format!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name))
+                &format!("  → Waiting for human verification. Use 'pawl done {}' to approve.", task_name))
         }
         Action::Retry { exit_code, feedback } => {
             emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
@@ -317,7 +317,7 @@ fn dispatch(
         Action::YieldOnFailHuman { exit_code, feedback } => {
             emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
             emit_waiting(project, task_name, step_idx, "on_fail_human",
-                &format!("  Verify failed. Waiting for human decision.\n  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name))
+                &format!("  Verify failed. Waiting for human decision.\n  Use 'pawl done {}' to approve or 'pawl reset --step {}' to retry.", task_name, task_name))
         }
         Action::Fail { exit_code, feedback } => {
             emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
@@ -420,7 +420,7 @@ fn execute_in_window(
 
     // If already running inside a tmux window (consecutive in_window steps),
     // exec directly instead of send_keys
-    if std::env::var("WF_RUNNING_IN_WINDOW").ok().as_deref() == Some(task_name) {
+    if std::env::var("PAWL_RUNNING_IN_WINDOW").ok().as_deref() == Some(task_name) {
         println!("  → exec into next in_window step");
         let err = std::process::Command::new(&wf_bin)
             .args(["_run", task_name, &step_idx.to_string()])
@@ -442,7 +442,7 @@ fn execute_in_window(
     }
 
     println!("  → Sending to {}:{}", session, window);
-    println!("  → Waiting for 'wf done {}'", task_name);
+    println!("  → Waiting for 'pawl done {}'", task_name);
 
     tmux::send_keys(session, window, &run_cmd)?;
 

@@ -10,7 +10,7 @@ use super::common::Project;
 use super::start::{continue_execution, handle_step_completion, RunOutput};
 
 /// Internal: run a command in tmux window as the parent process.
-/// Replaces the old runner-script + EXIT-trap + `wf _on-exit` chain.
+/// Replaces the old runner-script + EXIT-trap + `pawl _on-exit` chain.
 pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
     // 1. Ignore SIGHUP so we survive tmux kill-window
     unsafe {
@@ -19,7 +19,7 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
 
     // 2. Mark that we're running inside a tmux window (for consecutive in_window steps)
     unsafe {
-        std::env::set_var("WF_RUNNING_IN_WINDOW", task_name);
+        std::env::set_var("PAWL_RUNNING_IN_WINDOW", task_name);
     }
 
     // 3. Load project, verify state
@@ -95,7 +95,7 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
     // 7. Redirect stdout/stderr to /dev/null (pty may be closed after kill-window)
     redirect_to_devnull();
 
-    // 8. Re-check state (wf done may have already handled this step)
+    // 8. Re-check state (pawl done may have already handled this step)
     let project = Project::load()?;
     let state = project.replay_task(task_name)?;
 
@@ -118,7 +118,7 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
     match handle_step_completion(&project, task_name, step_idx, exit_code, &step, run_output)? {
         true => {
             // Pipeline says continue — check if next step is also in_window
-            // If so, execute() will detect WF_RUNNING_IN_WINDOW and exec into next wf _run
+            // If so, execute() will detect PAWL_RUNNING_IN_WINDOW and exec into next pawl _run
             continue_execution(&project, task_name)?;
         }
         false => {}

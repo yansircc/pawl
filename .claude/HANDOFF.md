@@ -1,54 +1,52 @@
 # Session Handoff
 
-## Current Session (S24): Explicit Plan Step — plan-worker.mjs + ai-helpers.sh extension
+## Current Session (S25): Rename wf → pawl
 
-### Problem
+### What changed
 
-S24 E2E testing revealed: AI worker spontaneously enters plan mode, `ccc -p` can't approve `ExitPlanMode`, causing zero output. Root cause: plan approval should be an explicit wf workflow step with `verify: "human"` + `wf done`, not an SDK side channel.
+Full product rename from `wf` to `pawl`. Binary, directories, environment variables, branch prefixes, all user-facing strings, templates, and documentation.
 
-### What changed (6 files)
+### Scope (19 source files + 4 templates + 3 docs)
 
-| File | Change |
-|------|--------|
-| `src/cmd/templates/plan-worker.mjs` | **New**. SDK plan worker using `canUseTool` to intercept `ExitPlanMode` (saves plan to `.wf/plans/${task}.md` + session ID to `.wf/plans/${task}.session`) and auto-answer `AskUserQuestion` |
-| `src/cmd/templates/plan-package.json` | **New**. Node.js package.json with `@anthropic-ai/claude-agent-sdk` ^0.2.37 |
-| `src/cmd/templates/ai-helpers.sh` | **Modified**. `run_ai_worker()` gains plan-aware branch: detects `.wf/plans/${task}.session` → resumes plan session with `-r` instead of fresh start |
-| `src/cmd/init.rs` | **Modified**. Embeds plan-worker.mjs + plan-package.json via `include_str!`, writes them in `create_lib_files()`, adds `node_modules/` to GITIGNORE_ENTRIES |
-| `src/cmd/templates/wf-skill.md` | **Modified**. Added Recipe 7: Plan-First Development (plan step → foreman reviews → develop resumes plan session) |
-| `.claude/CLAUDE.md` + `README.md` | **Modified**. Updated directory structure to reflect new files |
+| Category | Change |
+|----------|--------|
+| **Binary name** | `Cargo.toml` name = "pawl", `cli.rs` command name = "pawl" |
+| **Data directory** | `.wf/` → `.pawl/` (constants in init.rs, common.rs, create.rs) |
+| **Environment variables** | `WF_*` → `PAWL_*` (13 variables in variable.rs, run.rs, start.rs) |
+| **Branch prefix** | `wf/{task}` → `pawl/{task}` (variable.rs, control.rs, git.rs) |
+| **CLI messages** | All `'wf start'` → `'pawl start'` etc. across 7 cmd files |
+| **Templates** | config.jsonc, ai-helpers.sh, plan-worker.mjs fully updated |
+| **Skill file** | `wf-skill.md` → `pawl-skill.md` (renamed + ~80 internal replacements) |
+| **Skill directory** | `.claude/skills/wf/` → `.claude/skills/pawl/` |
+| **Documentation** | README.md, CLAUDE.md, HANDOFF.md fully updated |
 
-### SDK verification findings
+### Verification
 
-| Tool | `ccc -p` behavior | SDK `canUseTool` behavior |
-|------|-------------------|--------------------------|
-| `ExitPlanMode` | **Blocks** (hangs waiting for approval) | Interceptable, get full plan content |
-| `AskUserQuestion` | **permission_denied** → AI degrades to text question → exits (no block) | Interceptable, can auto-answer |
+- **Build**: zero warnings
+- **Tests**: 36/36 passed
+- **Install**: `~/.cargo/bin/pawl` installed, `pawl --version` returns `pawl 0.1.0`
 
-Key: `AskUserQuestion` in `ccc -p` returns `is_error: true` with content `"Answer questions?"`. AI sees the error, degrades to text, then exits. No hang, but wasted turn + no actual work done.
+### Migration notes for existing projects
 
-### Recipe 7 flow
-
-```
-setup → plan (SDK plan mode, verify: human) → develop (resume plan session) → review → merge → cleanup
-```
-
-- plan step: `node plan-worker.mjs` → AI explores in read-only plan mode → `ExitPlanMode` intercepted → plan saved → exit 0 → `verify: "human"` → foreman reviews `.wf/plans/${task}.md` → `wf done`
-- develop step: `run_ai_worker` detects `.wf/plans/${task}.session` → resumes with `-r session_id` → executes approved plan
-- Plan rejection: `wf reset --step` on plan step → re-plans from scratch
-
-### Zero Rust core changes
-
-No changes to: start.rs, run.rs, event.rs, common.rs, config.rs, or any event model. Plan approval uses existing StepCompleted + StepWaiting + StepApproved events.
+- `mv .wf .pawl` to migrate data directory
+- Update `.gitignore` entries from `.wf/` to `.pawl/`
+- Clean up orphaned `wf/*` git branches: `git branch -l 'wf/*' | xargs git branch -D`
+- Skill directory: `mv .claude/skills/wf .claude/skills/pawl`
 
 ---
 
 ## Previous Sessions (compressed)
 
-### S23: SKILL.md identity fix + E2E test pipeline
-- Redefined "AI Agent Orchestrator" → "Resumable Step Sequencer" (6 SKILL.md edits)
-- Built E2E test pipeline (Recipe 6 pattern), 4 tests passed 3 design rules
+### S24: Explicit Plan Step — plan-worker.mjs
+- SDK plan worker with `canUseTool` interception for `ExitPlanMode`
+- ai-helpers.sh plan-aware resume branch
+- Recipe 7: Plan-First Development flow
 
-### S22: wf _run replaces runner script + _on-exit
+### S23: SKILL.md identity fix + E2E test pipeline
+- Redefined "AI Agent Orchestrator" → "Resumable Step Sequencer"
+- Built E2E test pipeline (Recipe 6 pattern)
+
+### S22: pawl _run replaces runner script + _on-exit
 - Single Rust process in tmux: fork/waitpid, SIGHUP immunity, pty safety, race guard
 
 ### S20-21: in_window fixes + E2E bootstrap testing
@@ -62,10 +60,10 @@ No changes to: start.rs, run.rs, event.rs, common.rs, config.rs, or any event mo
 ## Known Issues
 
 - **retry exhaustion has no audit event**: no event emitted when transitioning from retry to terminal state
-- `wf events` outputs full history (not filtered by current run), inconsistent with `wf log --all`
+- `pawl events` outputs full history (not filtered by current run), inconsistent with `pawl log --all`
 - `claude_command` default: projects need `"claude_command": "ccc"` in config for ccc users
 - **config validator false positive**: in_window steps using `cd ~/path/${task}` (no worktree) trigger "doesn't reference worktree" warning — validator should check for `cd` not specifically `${worktree}`
-- **AskUserQuestion in `ccc -p`**: tool call returns `is_error: true`, AI degrades to text question, wf can't distinguish "AI asked question" from "AI did work but verify failed" — mitigated by plan-first workflow (Recipe 7)
+- **AskUserQuestion in `ccc -p`**: tool call returns `is_error: true`, AI degrades to text question, pawl can't distinguish "AI asked question" from "AI did work but verify failed" — mitigated by plan-first workflow (Recipe 7)
 
 ## Key File Index
 
@@ -75,10 +73,10 @@ No changes to: start.rs, run.rs, event.rs, common.rs, config.rs, or any event mo
 | Config model + in_window validation warnings | `src/model/config.rs` |
 | Event model + replay + count_auto_retries | `src/model/event.rs` |
 | Execution engine + resolve/dispatch | `src/cmd/start.rs` |
-| in_window parent process (`wf _run`) | `src/cmd/run.rs` |
+| in_window parent process (`pawl _run`) | `src/cmd/run.rs` |
 | Init (generates SKILL.md + plan-worker + ai-helpers) | `src/cmd/init.rs` |
 | Templates (config/skill/ai-helpers/plan-worker) | `src/cmd/templates/` |
 | Common utils (event R/W, hooks, check_window_health) | `src/cmd/common.rs` |
 | Variables (Context, expand, to_env_vars, claude_command) | `src/util/variable.rs` |
-| **Unified Skill reference (~450 lines)** | `src/cmd/templates/wf-skill.md` |
+| **Unified Skill reference (~450 lines)** | `src/cmd/templates/pawl-skill.md` |
 | Project overview | `.claude/CLAUDE.md` |

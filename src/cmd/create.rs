@@ -4,23 +4,23 @@ use std::path::Path;
 
 use crate::util::git::{get_repo_root, validate_branch_name};
 
-const WF_DIR: &str = ".wf";
+const PAWL_DIR: &str = ".pawl";
 const TASKS_DIR: &str = "tasks";
 
 pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Result<()> {
     // Validate task name
     validate_branch_name(name)?;
 
-    // Get repo root and check .wf exists
+    // Get repo root and check .pawl exists
     let repo_root = get_repo_root()?;
-    let wf_dir = Path::new(&repo_root).join(WF_DIR);
+    let pawl_dir = Path::new(&repo_root).join(PAWL_DIR);
 
-    if !wf_dir.exists() {
-        bail!("Not a wf project. Run 'wf init' first.");
+    if !pawl_dir.exists() {
+        bail!("Not a pawl project. Run 'pawl init' first.");
     }
 
     // Check if task already exists
-    let task_path = wf_dir.join(TASKS_DIR).join(format!("{}.md", name));
+    let task_path = pawl_dir.join(TASKS_DIR).join(format!("{}.md", name));
     if task_path.exists() {
         bail!("Task '{}' already exists at {}", name, task_path.display());
     }
@@ -49,7 +49,7 @@ pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Resu
         println!("  Dependencies: {}", depends_list.join(", "));
     }
 
-    println!("\nNext: wf start {}", name);
+    println!("\nNext: pawl start {}", name);
 
     Ok(())
 }
