@@ -31,7 +31,8 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let window = &task_name;
 
     // Get task status via replay (auto-repairs window-lost)
-    let state = project.replay_task_with_health_check(&task_name)?;
+    project.check_window_health(&task_name)?;
+    let state = project.replay_task(&task_name)?;
     let (status, current_step, step_name) = if let Some(state) = &state {
         let step_name = if state.current_step < project.config.workflow.len() {
             project.config.workflow[state.current_step].name.clone()

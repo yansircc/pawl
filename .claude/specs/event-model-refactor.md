@@ -111,55 +111,11 @@ exit_code == 0, verify:cmd failed
 
 **结论：10 事件就是终态。**
 
-## 6. 下一步重构：resolve/dispatch 分离
+## 6. resolve/dispatch 分离 — ✅ 已完成 (Session 13)
 
-### 问题
-
-当前 `handle_step_completion` 混合**决策**（exit_code + verify → Action）和**执行**（发射事件、执行命令）。
-
-### 方案
-
-```rust
-// 纯函数：可穷举测试
-pub fn resolve(
-    exit_code: i32,
-    verify_outcome: VerifyOutcome,
-    on_fail: Option<&str>,
-    retry_count: usize,
-    max_retries: usize,
-) -> Action
-
-pub enum Action {
-    Advance,                          // 步骤成功，前进
-    YieldVerifyHuman,                 // 成功但需人工验证
-    Retry { feedback: String },       // 失败，自动重试
-    YieldOnFailHuman { feedback: String }, // 失败，等待人工
-    Fail { feedback: String },        // 失败，不可恢复
-}
-
-// IO 层：只做副作用
-fn dispatch(action, project, task_name, step_idx, run_output) -> Result<bool>
-```
-
-### 调用链
-
-```
-调用点 → pre_resolve(运行 verify, 统计 retry) → resolve(纯函数) → dispatch(IO)
-```
-
-3 个调用点（execute_step, done, on_exit）改动对称。
-
-### 收益
-
-- resolve() 的 7 条决策路径可被纯函数单元测试覆盖
-- 决策逻辑与 IO 彻底分离
-- 净代码量变化约 +10 行
-
-### 陷阱
-
-- StepCompleted 的 exit_code 映射：verify 失败时 exit_code=1（verify 的），非 run 的原始 exit_code
-- verify 执行（run_verify）有 IO 副作用，必须在 resolve() 之前调用
-- VerifyOutcome 和 run_verify 需从模块私有提升为 pub(crate)
+Action 枚举 + resolve() 纯函数 + dispatch() IO 函数。7 个单元测试覆盖所有路径。
+apply_on_fail() 删除，逻辑收归 resolve/dispatch。
+VerifyOutcome/run_verify 提升为 pub(crate)。count_auto_retries 统一到 event.rs。
 
 ## 7. 规则审计发现
 
@@ -204,11 +160,11 @@ fn dispatch(action, project, task_name, step_idx, run_output) -> Result<bool>
 
 ## 8. 重构优先级
 
-| 优先级 | 改动 | 来源 | 收益 |
+| 优先级 | 改动 | 来源 | 状态 |
 |--------|------|------|------|
-| **P0** | resolve/dispatch 分离 | 视角 A | 可测试性飞跃，7 条纯函数测试 |
-| **P1** | WindowLost 裁决统一 | V1/V3/V7/V8 | 消除 4 项规则违反，解决竞态 |
-| **P2** | wf wait 写入走 Project API | V2 | 修复 event hook 失效 |
+| **P0** | resolve/dispatch 分离 | 视角 A | ✅ Session 13 |
+| **P1** | WindowLost 裁决统一 | V1/V3/V7/V8 | ✅ Session 13 |
+| **P2** | wf wait 写入走 Project API | V2 | ✅ Session 13 |
 | 观察 | verify:human 崩溃瞬态 | V5 | 窗口极小，暂不处理 |
 | 观察 | retry 耗尽审计事件 | V10 | 低频场景 |
 | 未来 | timeout 维度 | 对偶发现 | 新功能，非重构 |

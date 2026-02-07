@@ -154,9 +154,9 @@ impl Project {
         Ok(replay(&events, workflow_len))
     }
 
-    /// Replay with health check: if Running on an in_window step but tmux window is gone,
-    /// auto-append WindowLost event and return corrected state.
-    pub fn replay_task_with_health_check(&self, task_name: &str) -> Result<Option<TaskState>> {
+    /// Check window health. If a Running in_window step's tmux window is gone, emit WindowLost.
+    /// Returns true = healthy (or not applicable), false = WindowLost emitted.
+    pub fn check_window_health(&self, task_name: &str) -> Result<bool> {
         let state = self.replay_task(task_name)?;
 
         if let Some(ref s) = state {
@@ -173,12 +173,12 @@ impl Project {
                             step: step_idx,
                         },
                     )?;
-                    return self.replay_task(task_name);
+                    return Ok(false);
                 }
             }
         }
 
-        Ok(state)
+        Ok(true)
     }
 
     /// Fire a hook for an event (fire-and-forget).

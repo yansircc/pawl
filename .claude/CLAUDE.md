@@ -2,6 +2,37 @@
 
 An orchestrator for AI coding agents. Manages agent lifecycle (setup → develop → verify → merge → cleanup) with git worktree isolation and tmux-based execution.
 
+## Design Philosophy
+
+### System Essence
+
+wf is a **resumable coroutine**: advance along a fixed sequence, yield control when unable to self-decide, rebuild from log after crash.
+
+### 5 Invariant Rules
+
+1. **Memory = append-only log**. `state = replay(log)`, no separate state storage.
+2. **Cursor moves forward monotonically**. `current_step` only increases, except on explicit Reset.
+3. **Verdict before advance**. Cursor advances only after success/failure of current position is determined.
+4. **Two authorities per decision point**. Each step's outcome is decided by either machine (exit code) or human (`wf done`), never both. Environment (WindowLost) is anomaly detection, not a verdict.
+5. **Failure is routable**. Failure → retry (Reset) | yield to human (Yield) | terminate.
+
+**The single invariant**: `state = replay(log)`
+
+### Architecture Principles
+
+- **Decision/IO separation**: `resolve()` is a pure function (no side effects), `dispatch()` handles all IO. Never mix decision logic with event emission.
+- **Single emission point**: Each event type should have exactly one code path that emits it. WindowLost → `check_window_health()`. StepCompleted → `dispatch()`.
+- **All state from replay**: Never cache or store state separately. Always call `replay_task()` to get current state.
+- **Immutable Project**: All cmd functions take `&Project` (not `&mut`). State changes happen through `append_event()` → re-`replay()`.
+- **Event minimalism**: 10 events = 4 primitives (Advance/Yield/Fail/Reset) + 2 lifecycle + 1 observation. Do not add events without proving the existing set cannot represent the semantics.
+
+### Coding Conventions
+
+- **Step indexing**: 0-based in all programmatic interfaces (JSONL, `--json`, env vars). 1-based only in human-facing CLI output.
+- **`cargo build` must produce zero warnings**. Dead code should be deleted, not suppressed.
+- **`cargo install --path .` after build**. PATH uses the installed binary, not the build artifact.
+- **Tests cover decision logic**: Pure functions (like `resolve()`) get unit tests. IO functions are verified via E2E.
+
 ## Architecture
 
 ```
@@ -10,20 +41,20 @@ src/
 ├── cli.rs               # clap CLI (14 subcommands)
 ├── model/
 │   ├── config.rs        # Config + Step structs, JSONC loader
-│   ├── event.rs         # Event enum (11 variants), replay()
+│   ├── event.rs         # Event enum (10 variants), replay(), count_auto_retries()
 │   ├── state.rs         # TaskState, TaskStatus, StepStatus (projection types)
 │   └── task.rs          # TaskDefinition + YAML frontmatter parser (with skip)
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
-│   ├── common.rs        # Project context, event append/read/replay helpers
+│   ├── common.rs        # Project context, event append/read/replay/check_window_health
 │   ├── init.rs          # wf init (scaffold + lib template)
 │   ├── create.rs        # wf create
-│   ├── start.rs         # wf start (execution engine, unified pipeline, verify helpers)
+│   ├── start.rs         # wf start (execution engine, resolve/dispatch pipeline)
 │   ├── status.rs        # wf status / wf list
 │   ├── control.rs       # wf stop/reset + _on-exit
 │   ├── approve.rs       # wf done (approve waiting step or complete in_window step)
 │   ├── capture.rs       # wf capture (tmux content)
-│   ├── wait.rs          # wf wait (poll until status)
+│   ├── wait.rs          # wf wait (poll via Project API)
 │   ├── enter.rs         # wf enter (attach to tmux window)
 │   ├── events.rs        # wf events (unified event stream, --follow)
 │   └── log.rs           # wf log (--step/--all/--all-runs/--jsonl)
@@ -155,14 +186,23 @@ start(task)
   └─ execute loop:
      ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
      ├─ Gate step (no run) → StepWaiting, return (wait for wf done)
-     ├─ Normal step → run sync → handle_step_completion:
-     │   ├─ exit_code != 0 → StepCompleted(exit) → apply_on_fail
-     │   ├─ no verify → StepCompleted(0) → advance
-     │   ├─ verify: "human" → StepCompleted(0) + StepWaiting(verify_human)
-     │   └─ verify: command → run it
-     │       ├─ pass → StepCompleted(0) → advance
-     │       └─ fail → StepCompleted(1, stderr=feedback) → apply_on_fail
+     ├─ Normal step → run sync → handle_step_completion
      └─ in_window step → send to tmux → return (wait for wf done)
+
+handle_step_completion(exit_code, step, run_output):
+  1. run_verify (if exit_code == 0) → VerifyOutcome
+  2. count_auto_retries → retry_count
+  3. resolve(exit_code, verify_outcome, on_fail, retry_count, max_retries) → Action
+  4. dispatch(action) → emit events + IO
+
+resolve() → Action (pure function, 7 paths):
+  ├─ exit_code=0, verify Passed → Advance
+  ├─ exit_code=0, verify HumanRequired → YieldVerifyHuman
+  ├─ exit_code=0, verify Failed, no on_fail → Fail
+  ├─ exit_code=0, verify Failed, retry under limit → Retry
+  ├─ exit_code=0, verify Failed, retry at limit → Fail
+  ├─ exit_code=0, verify Failed, human → YieldOnFailHuman
+  └─ exit_code!=0, no on_fail → Fail (+ retry/human variants)
 
 done(task)
   ├─ Running: handle_step_completion (emits StepCompleted inside)
@@ -170,13 +210,11 @@ done(task)
   └─ Waiting: emit StepApproved → continue
 
 on_exit(task, exit_code)
-  ├─ if exit_code==0 && in_window && window gone → WindowLost (P12 fix)
+  ├─ if exit_code==0 && in_window → check_window_health (may emit WindowLost)
   └─ else → handle_step_completion (emits StepCompleted inside)
 
-apply_on_fail(strategy):
-  ├─ on_fail="retry" → StepReset{auto:true} → continue (up to max_retries)
-  ├─ on_fail="human" → StepWaiting (wait for wf done)
-  └─ default → stay Failed
+check_window_health(task_name) → bool:
+  └─ Running + in_window + window gone → emit WindowLost, return false
 ```
 
 ## File System Layout

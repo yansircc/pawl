@@ -86,16 +86,13 @@ pub fn list(json: bool) -> Result<()> {
 
 /// Extract retry_count and last_feedback for the current step from events.
 fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<String>) {
-    let mut retry_count = 0usize;
+    let retry_count = crate::model::event::count_auto_retries(events, step_idx);
     let mut last_feedback: Option<String> = None;
 
     for event in events.iter().rev() {
         match event {
             Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
             Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
-            Event::StepReset { step, auto: true, .. } if *step == step_idx => {
-                retry_count += 1;
-            }
             Event::StepCompleted { step, exit_code, stdout, stderr, .. }
                 if *step == step_idx && *exit_code != 0 =>
             {
@@ -129,7 +126,8 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
         let name = &task_def.name;
         let blocking = project.check_dependencies(task_def)?;
 
-        let summary = if let Some(state) = project.replay_task_with_health_check(name)? {
+        project.check_window_health(name)?;
+        let summary = if let Some(state) = project.replay_task(name)? {
             let step_name = if state.current_step < workflow_len {
                 project.config.workflow[state.current_step].name.clone()
             } else {
@@ -180,7 +178,8 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
 
-    let state = project.replay_task_with_health_check(task_name)?;
+    project.check_window_health(task_name)?;
+    let state = project.replay_task(task_name)?;
     let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
 
     let mut steps: Vec<StepInfo> = Vec::new();
@@ -266,7 +265,8 @@ fn show_all_tasks(project: &Project) -> Result<()> {
     for task_def in &tasks {
         let name = &task_def.name;
 
-        let (step_str, status_str, info) = if let Some(state) = project.replay_task_with_health_check(name)? {
+        project.check_window_health(name)?;
+        let (step_str, status_str, info) = if let Some(state) = project.replay_task(name)? {
             let step_name = if state.current_step < workflow_len {
                 project.config.workflow[state.current_step].name.clone()
             } else {
@@ -331,7 +331,8 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
         println!("Dependencies: {}", task_def.depends.join(", "));
     }
 
-    let state = project.replay_task_with_health_check(task_name)?;
+    project.check_window_health(task_name)?;
+    let state = project.replay_task(task_name)?;
 
     if let Some(state) = &state {
         println!("Status: {}", format_status(state.status));

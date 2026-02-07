@@ -200,35 +200,68 @@ fn execute_step(
     handle_step_completion(project, task_name, step_idx, result.exit_code, step, run_output)
 }
 
-/// Unified pipeline: handles verify + on_fail after any step completion.
-/// Called from execute_step, on_exit, and done.
-/// StepCompleted is emitted INSIDE this function (after verify is resolved).
-pub fn handle_step_completion(
+// --- resolve/dispatch pipeline ---
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Action {
+    Advance,
+    YieldVerifyHuman,
+    Retry { exit_code: i32, feedback: String },
+    YieldOnFailHuman { exit_code: i32, feedback: String },
+    Fail { exit_code: i32, feedback: String },
+}
+
+/// Pure decision function: given step outcome, determine the next action.
+pub(crate) fn resolve(
+    exit_code: i32,
+    verify_outcome: VerifyOutcome,
+    on_fail: Option<&str>,
+    retry_count: usize,
+    max_retries: usize,
+) -> Action {
+    if exit_code == 0 {
+        match verify_outcome {
+            VerifyOutcome::Passed => Action::Advance,
+            VerifyOutcome::HumanRequired => Action::YieldVerifyHuman,
+            VerifyOutcome::Failed { feedback } => {
+                resolve_failure(1, feedback, on_fail, retry_count, max_retries)
+            }
+        }
+    } else {
+        let feedback = format!("Exit code: {}", exit_code);
+        resolve_failure(exit_code, feedback, on_fail, retry_count, max_retries)
+    }
+}
+
+fn resolve_failure(
+    exit_code: i32,
+    feedback: String,
+    on_fail: Option<&str>,
+    retry_count: usize,
+    max_retries: usize,
+) -> Action {
+    match on_fail {
+        Some("retry") if retry_count < max_retries => {
+            Action::Retry { exit_code, feedback }
+        }
+        Some("human") => {
+            Action::YieldOnFailHuman { exit_code, feedback }
+        }
+        _ => Action::Fail { exit_code, feedback },
+    }
+}
+
+/// IO function: execute the decided action (emit events, print messages).
+fn dispatch(
     project: &Project,
     task_name: &str,
     step_idx: usize,
-    exit_code: i32,
     step: &Step,
     run_output: RunOutput,
+    action: Action,
 ) -> Result<bool> {
-    if exit_code != 0 {
-        // Step failed — emit StepCompleted with failure, then apply on_fail
-        project.append_event(task_name, &Event::StepCompleted {
-            ts: event_timestamp(),
-            step: step_idx,
-            exit_code,
-            duration: run_output.duration,
-            stdout: run_output.stdout,
-            stderr: run_output.stderr,
-        })?;
-        let feedback = format!("Exit code: {}", exit_code);
-        return apply_on_fail(project, task_name, step_idx, &feedback, step);
-    }
-
-    // Step succeeded — run verify if configured
-    match run_verify(project, task_name, step, step_idx)? {
-        VerifyOutcome::Passed => {
-            // Verify passed (or no verify) — emit StepCompleted(0)
+    match action {
+        Action::Advance => {
             project.append_event(task_name, &Event::StepCompleted {
                 ts: event_timestamp(),
                 step: step_idx,
@@ -237,7 +270,6 @@ pub fn handle_step_completion(
                 stdout: run_output.stdout,
                 stderr: run_output.stderr,
             })?;
-            // Check if all steps completed
             let new_state = project.replay_task(task_name)?.expect("Task state missing");
             if new_state.status == TaskStatus::Completed {
                 println!("Task '{}' completed!", task_name);
@@ -245,8 +277,7 @@ pub fn handle_step_completion(
             }
             Ok(true)
         }
-        VerifyOutcome::HumanRequired => {
-            // verify:human — emit StepCompleted(0) then StepWaiting
+        Action::YieldVerifyHuman => {
             project.append_event(task_name, &Event::StepCompleted {
                 ts: event_timestamp(),
                 step: step_idx,
@@ -258,33 +289,10 @@ pub fn handle_step_completion(
             emit_waiting(project, task_name, step_idx, "verify_human",
                 &format!("  → Waiting for human verification. Use 'wf done {}' to approve.", task_name))
         }
-        VerifyOutcome::Failed { feedback } => {
-            // Verify command failed — emit StepCompleted(1, stderr=feedback)
-            project.append_event(task_name, &Event::StepCompleted {
-                ts: event_timestamp(),
-                step: step_idx,
-                exit_code: 1,
-                duration: run_output.duration,
-                stdout: None,
-                stderr: Some(feedback.clone()),
-            })?;
-            apply_on_fail(project, task_name, step_idx, &feedback, step)
-        }
-    }
-}
-
-/// Apply on_fail strategy after a failure (verify failure or step failure).
-/// Returns Ok(false) to stop the execution loop.
-fn apply_on_fail(
-    project: &Project,
-    task_name: &str,
-    step_idx: usize,
-    feedback: &str,
-    step: &Step,
-) -> Result<bool> {
-    if step.on_fail_retry() {
-        let retry_count = count_auto_retries(project, task_name, step_idx)?;
-        if retry_count < step.effective_max_retries() {
+        Action::Retry { exit_code, feedback } => {
+            emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
+            let events = project.read_events(task_name)?;
+            let retry_count = crate::model::event::count_auto_retries(&events, step_idx);
             println!("  Verify failed (attempt {}/{}). Auto-retrying...",
                      retry_count + 1, step.effective_max_retries());
             project.append_event(task_name, &Event::StepReset {
@@ -293,24 +301,89 @@ fn apply_on_fail(
                 auto: true,
             })?;
             continue_execution(project, task_name)?;
-            return Ok(false);
-        } else {
-            println!("  Verify failed. Max retries ({}) reached.", step.effective_max_retries());
+            Ok(false)
         }
-    } else if step.on_fail_human() {
-        return emit_waiting(project, task_name, step_idx, "on_fail_human",
-            &format!("  Verify failed. Waiting for human decision.\n  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name));
-    } else {
-        // Default: just fail
-        println!("  ✗ Failed.");
-        if !feedback.is_empty() {
-            for line in feedback.lines().take(5) {
-                println!("    {}", line);
+        Action::YieldOnFailHuman { exit_code, feedback } => {
+            emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
+            emit_waiting(project, task_name, step_idx, "on_fail_human",
+                &format!("  Verify failed. Waiting for human decision.\n  Use 'wf done {}' to approve or 'wf reset --step {}' to retry.", task_name, task_name))
+        }
+        Action::Fail { exit_code, feedback } => {
+            emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
+            println!("  ✗ Failed.");
+            if !feedback.is_empty() {
+                for line in feedback.lines().take(5) {
+                    println!("    {}", line);
+                }
             }
+            Ok(false)
         }
     }
+}
 
-    Ok(false)
+/// Emit StepCompleted for failure cases.
+/// For run failures (exit_code from the run command), use original run_output.
+/// For verify failures (exit_code == 1, synthetic), use stdout=None, stderr=Some(feedback).
+fn emit_step_completed_for_failure(
+    project: &Project,
+    task_name: &str,
+    step_idx: usize,
+    exit_code: i32,
+    feedback: &str,
+    run_output: &RunOutput,
+) -> Result<()> {
+    let is_verify_failure = feedback != format!("Exit code: {}", exit_code).as_str();
+    if is_verify_failure {
+        project.append_event(task_name, &Event::StepCompleted {
+            ts: event_timestamp(),
+            step: step_idx,
+            exit_code,
+            duration: run_output.duration,
+            stdout: None,
+            stderr: Some(feedback.to_string()),
+        })?;
+    } else {
+        project.append_event(task_name, &Event::StepCompleted {
+            ts: event_timestamp(),
+            step: step_idx,
+            exit_code,
+            duration: run_output.duration,
+            stdout: run_output.stdout.clone(),
+            stderr: run_output.stderr.clone(),
+        })?;
+    }
+    Ok(())
+}
+
+/// Unified pipeline: handles verify + on_fail after any step completion.
+/// Called from execute_step, on_exit, and done.
+/// StepCompleted is emitted INSIDE this function (after verify is resolved).
+pub fn handle_step_completion(
+    project: &Project,
+    task_name: &str,
+    step_idx: usize,
+    exit_code: i32,
+    step: &Step,
+    run_output: RunOutput,
+) -> Result<bool> {
+    let verify_outcome = if exit_code == 0 {
+        run_verify(project, task_name, step, step_idx)?
+    } else {
+        VerifyOutcome::Passed
+    };
+
+    let events = project.read_events(task_name)?;
+    let retry_count = crate::model::event::count_auto_retries(&events, step_idx);
+
+    let action = resolve(
+        exit_code,
+        verify_outcome,
+        step.on_fail.as_deref(),
+        retry_count,
+        step.effective_max_retries(),
+    );
+
+    dispatch(project, task_name, step_idx, step, run_output, action)
 }
 
 /// Emit a StepWaiting event and print a message. Returns Ok(false) to stop the execution loop.
@@ -365,7 +438,8 @@ fn execute_in_window(
 
 // --- Verify helpers ---
 
-enum VerifyOutcome {
+#[derive(Debug, PartialEq)]
+pub(crate) enum VerifyOutcome {
     Passed,
     HumanRequired,
     Failed { feedback: String },
@@ -373,7 +447,7 @@ enum VerifyOutcome {
 
 /// Run the verify command for a step, if any.
 /// Pure function — no event emission (side-effect-free).
-fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
+pub(crate) fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
     match &step.verify {
         None => Ok(VerifyOutcome::Passed),
         Some(v) if v == "human" => Ok(VerifyOutcome::HumanRequired),
@@ -417,23 +491,58 @@ fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) 
     }
 }
 
-/// Count auto-retries for a specific step since last TaskStarted/TaskReset(manual).
-fn count_auto_retries(project: &Project, task_name: &str, step_idx: usize) -> Result<usize> {
-    let events = project.read_events(task_name)?;
-    let mut count = 0;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for event in events.iter().rev() {
-        match event {
-            Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
-            // Manual reset (wf reset --step) resets the counter
-            Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
-            // Auto retry counts toward the limit
-            Event::StepReset { step, auto: true, .. } if *step == step_idx => {
-                count += 1;
-            }
-            _ => {}
-        }
+    #[test]
+    fn test_resolve_advance() {
+        assert_eq!(resolve(0, VerifyOutcome::Passed, None, 0, 3), Action::Advance);
     }
 
-    Ok(count)
+    #[test]
+    fn test_resolve_yield_verify_human() {
+        assert_eq!(resolve(0, VerifyOutcome::HumanRequired, None, 0, 3), Action::YieldVerifyHuman);
+    }
+
+    #[test]
+    fn test_resolve_verify_failed_no_on_fail() {
+        assert_eq!(
+            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, None, 0, 3),
+            Action::Fail { exit_code: 1, feedback: "bad".into() }
+        );
+    }
+
+    #[test]
+    fn test_resolve_verify_failed_retry_under_limit() {
+        assert_eq!(
+            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, Some("retry"), 1, 3),
+            Action::Retry { exit_code: 1, feedback: "bad".into() }
+        );
+    }
+
+    #[test]
+    fn test_resolve_verify_failed_retry_at_limit() {
+        assert_eq!(
+            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, Some("retry"), 3, 3),
+            Action::Fail { exit_code: 1, feedback: "bad".into() }
+        );
+    }
+
+    #[test]
+    fn test_resolve_verify_failed_human() {
+        assert_eq!(
+            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, Some("human"), 0, 3),
+            Action::YieldOnFailHuman { exit_code: 1, feedback: "bad".into() }
+        );
+    }
+
+    #[test]
+    fn test_resolve_run_failed_no_on_fail() {
+        assert_eq!(
+            resolve(42, VerifyOutcome::Passed, None, 0, 3),
+            Action::Fail { exit_code: 42, feedback: "Exit code: 42".into() }
+        );
+    }
 }
+

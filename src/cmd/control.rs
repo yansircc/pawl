@@ -128,12 +128,7 @@ pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
 
     // P12 fix: if exit_code=0 but window is gone, it was killed by signal (SIGHUP from kill-window)
     if exit_code == 0 && step.in_window {
-        let session = project.session_name();
-        if !tmux::window_exists(&session, task_name) {
-            project.append_event(task_name, &Event::WindowLost {
-                ts: event_timestamp(),
-                step: step_idx,
-            })?;
+        if !project.check_window_health(task_name)? {
             eprintln!("Task '{}' window lost at step {} (killed by signal).", task_name, step_idx + 1);
             return Ok(());
         }

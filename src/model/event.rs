@@ -212,6 +212,22 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
     state
 }
 
+/// Count auto-retries for a specific step since last TaskStarted/TaskReset(manual).
+pub fn count_auto_retries(events: &[Event], step_idx: usize) -> usize {
+    let mut count = 0;
+    for event in events.iter().rev() {
+        match event {
+            Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
+            Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
+            Event::StepReset { step, auto: true, .. } if *step == step_idx => {
+                count += 1;
+            }
+            _ => {}
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

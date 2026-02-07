@@ -84,16 +84,6 @@ impl Step {
         self.run.is_none()
     }
 
-    /// on_fail: "retry" — auto-retry on failure
-    pub fn on_fail_retry(&self) -> bool {
-        self.on_fail.as_deref() == Some("retry")
-    }
-
-    /// on_fail: "human" — wait for human decision on failure
-    pub fn on_fail_human(&self) -> bool {
-        self.on_fail.as_deref() == Some("human")
-    }
-
     /// Effective max retries (default: 3)
     pub fn effective_max_retries(&self) -> usize {
         self.max_retries.unwrap_or(3)
