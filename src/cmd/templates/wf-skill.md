@@ -1,6 +1,6 @@
-# wf — AI Agent Orchestrator
+# wf — Resumable Step Sequencer
 
-wf is a **resumable coroutine orchestrator**: it advances AI coding agents along a fixed step sequence, yields at points requiring external decision, and rebuilds state from an append-only log after crashes. Each task runs in an isolated git worktree, managed via tmux windows for long-running AI workers.
+wf is a **resumable coroutine**: advance along a fixed step sequence, yield at decision points, rebuild state from an append-only log. Any repeatable multi-step process can be a wf workflow — AI coding with git worktrees, testing pipelines, deployment automation, project bootstrapping. Steps support verify/retry/gate for human-in-the-loop control; tmux windows for long-running processes.
 
 ## CLI Commands
 
@@ -41,7 +41,9 @@ When generating or modifying `.wf/config.jsonc`, these rules are mandatory:
 
 1. **Every failable in_window step must define `on_fail`** ("retry" or "human"), otherwise failure is terminal
 2. **Every step with observable output must define `verify`**, otherwise `wf done` trusts unconditionally
-3. **in_window step's `run` must `cd ${worktree}`**, otherwise worker runs in wrong directory
+3. **in_window step's `run` must `cd` to the working directory** (e.g. `cd ${worktree}`, `cd ~/projects/${task}`), otherwise worker runs in wrong directory
+
+Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail when terminal failure is acceptable — the operator investigates and resets manually.
 
 ### Anti-patterns
 
@@ -50,7 +52,7 @@ When generating or modifying `.wf/config.jsonc`, these rules are mandatory:
 | Gate + verify/on_fail | Gate has no run, verify/on_fail are ignored | Remove verify/on_fail, or add run |
 | in_window without verify | `wf done` trusts unconditionally, can't detect errors | Add `verify` |
 | in_window with verify but no on_fail | Verify failure is terminal, can't retry | Add `on_fail` |
-| in_window run without worktree | Worker runs in repo root | `cd ${worktree} &&` |
+| in_window run without cd | Worker runs in repo root | `cd ${worktree} &&` or `cd /path/${task} &&` |
 
 ### Verify Strategy
 
@@ -254,6 +256,24 @@ Start multiple tasks in parallel: `wf start task-a && wf start task-b && wf star
 
 Notes: no in_window or ai-helpers.sh, pure synchronous commands. review is a gate + verify=human combo: first gate waits for wf done, then verify_human waits for wf done again.
 
+### Recipe 6: Generic Pipeline (No Git Worktrees)
+
+wf is a generic step sequencer — git worktrees are one pattern, not a requirement. Use `${task}` as any identifier (project name, test scenario, deployment target):
+
+```jsonc
+{
+  "workflow": [
+    { "name": "prepare", "run": "mkdir -p ~/workspace/${task} && cd ~/workspace/${task} && ./init.sh" },
+    { "name": "execute", "run": "cd ~/workspace/${task} && ./run.sh",
+      "in_window": true, "verify": "human", "on_fail": "human" },
+    { "name": "validate" },
+    { "name": "teardown", "run": "rm -rf ~/workspace/${task}" }
+  ]
+}
+```
+
+No `${worktree}`, `${branch}`, or git operations. Examples: testing pipelines (task = test case), deployment (task = service), data processing (task = dataset), project bootstrapping (task = project name).
+
 ## Foreman Coordination
 
 Foreman is an AI agent that manages multiple worker agents. wf **does not push notifications — Foreman must poll** (unless event hooks are configured).
@@ -294,7 +314,9 @@ while tasks remain incomplete:
 - **wf done dual semantics**: For Waiting status = approve (step advances); for Running+in_window = mark done (triggers verify flow).
 - **Retry exhaustion**: After reaching max_retries, status becomes Failed (does not auto-transition to Waiting). Manual intervention required.
 
-## AI Worker Integration
+## AI Worker Integration (Coding Workflow Pattern)
+
+This section covers the AI coding workflow pattern specifically. For non-AI or non-coding use cases, see Recipe 5 (pure automation) or Recipe 6 (generic pipeline).
 
 ### run_ai_worker Decision Flow
 

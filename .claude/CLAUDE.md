@@ -1,6 +1,6 @@
-# wf — AI Agent Orchestrator
+# wf — Resumable Step Sequencer
 
-An orchestrator for AI coding agents. Manages agent lifecycle (setup → develop → verify → merge → cleanup) with git worktree isolation and tmux-based execution.
+A resumable coroutine engine for any multi-step workflow. Primary use case: AI coding agent orchestration (setup → develop → verify → merge → cleanup) with git worktree isolation and tmux-based execution. Also applicable to testing pipelines, deployment automation, and any repeatable step sequence.
 
 ## Design Philosophy
 
