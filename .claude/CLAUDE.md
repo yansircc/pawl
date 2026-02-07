@@ -47,8 +47,8 @@ src/
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
 │   ├── common.rs        # Project context, event append/read/replay/check_window_health
-│   ├── init.rs          # wf init (scaffold + lib template + foreman guide)
-│   ├── create.rs        # wf create
+│   ├── init.rs          # wf init (scaffold, uses include_str! for templates)
+│   ├── create.rs        # wf create (improved task template)
 │   ├── start.rs         # wf start (execution engine, resolve/dispatch pipeline)
 │   ├── status.rs        # wf status / wf list
 │   ├── control.rs       # wf stop/reset + _on-exit
@@ -57,7 +57,13 @@ src/
 │   ├── wait.rs          # wf wait (poll via Project API)
 │   ├── enter.rs         # wf enter (attach to tmux window)
 │   ├── events.rs        # wf events (unified event stream, --follow)
-│   └── log.rs           # wf log (--step/--all/--all-runs/--jsonl)
+│   ├── log.rs           # wf log (--step/--all/--all-runs/--jsonl)
+│   └── templates/       # Template files embedded via include_str!
+│       ├── config.jsonc           # Default workflow config
+│       ├── ai-helpers.sh          # AI worker helper functions
+│       ├── foreman-guide.md       # Foreman operation manual
+│       ├── task-authoring-guide.md # Task.md writing guide
+│       └── ai-worker-guide.md     # AI worker integration guide
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
     ├── shell.rs         # run_command variants, CommandResult
@@ -231,7 +237,9 @@ check_window_health(task_name) → bool:
 ├── hooks/                # Generated hook files (e.g. settings.json)
 └── lib/                  # Helper library
     ├── ai-helpers.sh     # AI worker functions (extract_session_id, run_ai_worker)
-    └── foreman-guide.md  # Foreman agent operation manual
+    ├── foreman-guide.md  # Foreman agent operation manual (with JSON schema, decision table)
+    ├── task-authoring-guide.md  # Task.md writing guide (dual purpose, feedback iteration)
+    └── ai-worker-guide.md      # AI worker integration guide (wrapper.sh, session resumption)
 ```
 
 ## Dev Commands

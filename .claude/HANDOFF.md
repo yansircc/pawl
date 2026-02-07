@@ -2,40 +2,34 @@
 
 ## 本次 Session 完成的工作
 
-### Session 14: E2E 包工头测试 + 痛点修复 + Foreman Guide
+### Session 15: Foreman 文档全面完善
 
-**E2E 测试**（8 步工作流 × 3 task × 16 场景）：
-- A 组: Happy path（全流程、skip、start --reset）
-- B 组: 失败与恢复（verify retry、retry 耗尽、on_fail:human、reset --step）
-- C 组: in_window + tmux（正常完成、window_lost、wf enter、wf capture）
-- D 组: 并发与边界（多 task 并发、wf wait 多状态、wf stop、边界条件）
-- E 组: CLI 输出格式（status --json、log、events、list）
-- F 组: Event Hook（触发验证、变量展开）
+**新增 3 份文档**（嵌入 init.rs，`wf init` 自动生成到 `.wf/lib/`）：
 
-**痛点修复**（6 个文件，36 tests 全过）：
+| 产物 | 位置 | 行数 | 覆盖内容 |
+|------|------|------|---------|
+| Task.md 编写指南 | `.wf/lib/task-authoring-guide.md` | 314 | 双重身份（人类文档+AI prompt）、frontmatter 完整字段、五要素写作法、迭代反馈模式、skip 用法、3 个完整示例 |
+| AI Worker 集成指南 | `.wf/lib/ai-worker-guide.md` | 275 | ai-helpers.sh 函数参考、wrapper.sh 模式、Claude 非交互模式、会话续接流程、Event Hook 通知闭环、环境变量表、实战配置示例 |
+| Foreman Guide 增强版 | `.wf/lib/foreman-guide.md` | 468 | 原有内容全保留 + 创建任务章节 + JSON 输出格式完整 schema + 状态决策速查表 + 故障排查 + 相关文档索引 |
 
-| 修复 | 文件 | 说明 |
-|------|------|------|
-| `wf stop` 支持 Waiting 状态 | `control.rs` | 接受 Running\|Waiting，符合规则 5 "failure is routable" |
-| `wf list` 显示等待原因 | `status.rs` | INFO 列: gate / needs review / needs decision |
-| Completed 显示 Step 8/8 | `status.rs` | 不再泄露内部 9/8，detail 和 list 视图统一修复 |
-| `wf reset` 条件输出 git 提示 | `control.rs` | 检测 worktree/branch 存在才提示清理 |
-| `wf start` Waiting 错误加上下文 | `start.rs` | 报 "waiting at step N (name) for reason" |
-| in_window 窗口不抢焦点 | `tmux.rs` | `new-window -d` 后台创建 |
-| `branch_exists()` 辅助函数 | `git.rs` | 支持 reset 条件检测 |
+**改进 `wf create` 模板** (create.rs)：
+- 新增 `skip` 字段注释示例（frontmatter）
+- 新增 AI Worker prompt 使用提示
+- 默认模板结构改为：目标 / 约束 / 验收标准
 
-**Foreman Guide + Config 模板**：
+**init.rs 重构** — `include_str!` 拆分：
+- 模板文件独立到 `src/cmd/templates/`（config.jsonc, ai-helpers.sh, 3 份 guide）
+- init.rs 从 ~640 行降至 205 行
+- Hook 模板（verify-stop.sh, settings.json, gitignore）保持内联，下轮处理
 
-| 产物 | 位置 | 说明 |
-|------|------|------|
-| 包工头操作手册 (222 行) | `init.rs` → `.wf/lib/foreman-guide.md` | 心智模型、主循环、5 种决策场景、注意事项 |
-| Config 详细注释 (145 行) | `init.rs` → `.wf/config.jsonc` | Step 4 属性、6 种类型速查、变量表、设计建议、Hook 参考 |
-
-两份文件在 `wf init` 时自动生成。
+**技术指标**: 36 tests, zero warnings, `cargo install --path .` 完成
 
 ---
 
 ## 历史 Session
+
+### Session 14: E2E 包工头测试 + 痛点修复 + Foreman Guide
+- 8步 × 3task × 16场景 E2E、6个UX修复、初版 Foreman Guide + Config 模板
 
 ### Session 13: P0/P1/P2 重构 + Greenfield
 - resolve/dispatch 分离（7 单元测试）、WindowLost 统一、wait.rs 走 Project API
@@ -78,10 +72,14 @@
 | 日志输出（当前轮/全历史/--jsonl） | `src/cmd/log.rs` |
 | 统一事件流（--follow） | `src/cmd/events.rs` |
 | 等待命令（Project API + check_window_health） | `src/cmd/wait.rs` |
-| 初始化（含 config 模板 + foreman guide + lib） | `src/cmd/init.rs` |
+| 初始化（include_str! 加载模板） | `src/cmd/init.rs` |
+| 模板文件（config/guides/ai-helpers） | `src/cmd/templates/` |
+| 任务创建（含改进模板） | `src/cmd/create.rs` |
 | 公共工具（事件读写、钩子、check_window_health） | `src/cmd/common.rs` |
 | tmux 工具（窗口后台创建） | `src/util/tmux.rs` |
 | git 工具（branch_exists） | `src/util/git.rs` |
 | 变量上下文 | `src/util/variable.rs` |
-| 包工头操作手册 | `.wf/lib/foreman-guide.md` |
+| 包工头操作手册 (增强版) | `.wf/lib/foreman-guide.md` |
+| Task.md 编写指南 | `.wf/lib/task-authoring-guide.md` |
+| AI Worker 集成指南 | `.wf/lib/ai-worker-guide.md` |
 | 项目概述 | `.claude/CLAUDE.md` |

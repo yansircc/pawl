@@ -68,6 +68,8 @@ fn generate_task_content(name: &str, description: Option<&str>, depends: &[&str]
         }
     }
 
+    content.push_str("# skip:          # 跳过不需要的 workflow 步骤\n");
+    content.push_str("#   - cleanup\n");
     content.push_str("---\n\n");
 
     // Body
@@ -76,12 +78,18 @@ fn generate_task_content(name: &str, description: Option<&str>, depends: &[&str]
         content.push_str(desc);
         content.push('\n');
     } else {
-        content.push_str(&format!("## Task: {}\n\n", name));
-        content.push_str("<!-- Describe the task here -->\n\n");
-        content.push_str("## Requirements\n\n");
-        content.push_str("- [ ] TODO\n\n");
-        content.push_str("## Acceptance Criteria\n\n");
-        content.push_str("- [ ] TODO\n");
+        content.push_str(&format!(
+            "<!-- 本文件同时作为 AI Worker 的 system prompt (cat task.md | claude -p) -->\n\
+             <!-- 详细指南: .wf/lib/task-authoring-guide.md -->\n\n\
+             ## Task: {}\n\n\
+             ### 目标\n\n\
+             <!-- 清晰描述要做什么 -->\n\n\
+             ### 约束\n\n\
+             <!-- 技术约束、代码规范、不该做什么 -->\n\n\
+             ### 验收标准\n\n\
+             - [ ] TODO\n",
+            name
+        ));
     }
 
     content
