@@ -22,24 +22,8 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
     match state.status {
         TaskStatus::Running => {
-            // Agent in tmux window reporting done — run verify first
+            // Agent in tmux window reporting done — go through unified pipeline
             let step = &project.config.workflow[step_idx];
-
-            match start::run_verify(&project, &task_name, step, step_idx)? {
-                start::VerifyOutcome::Passed => {
-                    println!("Verify passed.");
-                }
-                start::VerifyOutcome::Failed { feedback } => {
-                    if !feedback.is_empty() {
-                        eprintln!("Verify failed: {}", feedback);
-                    }
-                    bail!(
-                        "Verification failed. Fix the issues and try 'wf done {}' again.",
-                        task_name
-                    );
-                }
-            }
-
             let session = project.session_name();
 
             // Emit StepCompleted with exit_code 0 (agent says done)
@@ -54,11 +38,23 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
             println!("Step {} marked as done.", step_idx + 1);
 
-            // Continue execution
-            continue_execution(&project, &task_name)?;
+            // Unified pipeline: verify + apply_on_fail
+            let should_continue = start::handle_step_completion(
+                &project, &task_name, step_idx, 0, step
+            )?;
 
-            // Cleanup tmux window
-            let _ = tmux::kill_window(&session, &task_name);
+            if should_continue {
+                continue_execution(&project, &task_name)?;
+            }
+
+            // Cleanup tmux window — but not if retrying (apply_on_fail re-sent command)
+            let new_state = project.replay_task(&task_name)?;
+            let retrying = matches!(&new_state,
+                Some(s) if s.status == TaskStatus::Running && s.current_step == step_idx
+            );
+            if !retrying {
+                let _ = tmux::kill_window(&session, &task_name);
+            }
         }
         TaskStatus::Waiting => {
             // Human approval: emit StepApproved and continue

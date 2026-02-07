@@ -9,9 +9,9 @@ use crate::model::TaskStatus;
 
 use super::common::Project;
 
-/// Wait for task to reach a specific status
+/// Wait for task to reach a specific status (supports comma-separated multi-status)
 pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) -> Result<()> {
-    let target_status = parse_status(until)?;
+    let targets = parse_statuses(until)?;
 
     let timeout = Duration::from_secs(timeout_secs);
     let interval = Duration::from_millis(interval_ms);
@@ -29,19 +29,19 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
         .map(|s| s.status)
         .unwrap_or(TaskStatus::Pending);
 
-    if current_status == target_status {
+    if targets.contains(&current_status) {
         println!(
-            "Task '{}' reached status '{}' after {:.1}s",
+            "Task '{}' reached status '{:?}' after {:.1}s",
             resolved_name,
-            until,
+            current_status,
             start.elapsed().as_secs_f64()
         );
         return Ok(());
     }
 
-    if is_terminal_mismatch(current_status, target_status) {
+    if is_terminal_mismatch_multi(current_status, &targets) {
         bail!(
-            "Task '{}' is in terminal state '{:?}', will not reach '{}'",
+            "Task '{}' is in terminal state '{:?}', will not reach any of '{}'",
             resolved_name,
             current_status,
             until
@@ -51,13 +51,13 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
     drop(project);
 
     // Subsequent iterations: only read JSONL + replay (skip Config and git calls)
-    poll_status(&resolved_name, target_status, until, &wf_dir, workflow_len, timeout, interval, start)
+    poll_status(&resolved_name, &targets, until, &wf_dir, workflow_len, timeout, interval, start)
 }
 
 /// Poll status by reading JSONL and replaying
 fn poll_status(
     task_name: &str,
-    target_status: TaskStatus,
+    targets: &[TaskStatus],
     until: &str,
     wf_dir: &PathBuf,
     workflow_len: usize,
@@ -82,19 +82,19 @@ fn poll_status(
 
         let current_status = replay_from_file(&log_file, workflow_len)?;
 
-        if current_status == target_status {
+        if targets.contains(&current_status) {
             println!(
-                "Task '{}' reached status '{}' after {:.1}s",
+                "Task '{}' reached status '{:?}' after {:.1}s",
                 task_name,
-                until,
+                current_status,
                 start.elapsed().as_secs_f64()
             );
             return Ok(());
         }
 
-        if is_terminal_mismatch(current_status, target_status) {
+        if is_terminal_mismatch_multi(current_status, targets) {
             bail!(
-                "Task '{}' is in terminal state '{:?}', will not reach '{}'",
+                "Task '{}' is in terminal state '{:?}', will not reach any of '{}'",
                 task_name,
                 current_status,
                 until
@@ -127,21 +127,26 @@ fn replay_from_file(log_file: &PathBuf, workflow_len: usize) -> Result<TaskStatu
         .unwrap_or(TaskStatus::Pending))
 }
 
-fn parse_status(s: &str) -> Result<TaskStatus> {
-    match s.to_lowercase().as_str() {
-        "pending" => Ok(TaskStatus::Pending),
-        "running" => Ok(TaskStatus::Running),
-        "waiting" => Ok(TaskStatus::Waiting),
-        "completed" => Ok(TaskStatus::Completed),
-        "failed" => Ok(TaskStatus::Failed),
-        "stopped" => Ok(TaskStatus::Stopped),
-        _ => bail!(
-            "Invalid status '{}'. Valid values: pending, running, waiting, completed, failed, stopped",
-            s
-        ),
-    }
+fn parse_statuses(s: &str) -> Result<Vec<TaskStatus>> {
+    s.split(',')
+        .map(|part| {
+            match part.trim().to_lowercase().as_str() {
+                "pending" => Ok(TaskStatus::Pending),
+                "running" => Ok(TaskStatus::Running),
+                "waiting" => Ok(TaskStatus::Waiting),
+                "completed" => Ok(TaskStatus::Completed),
+                "failed" => Ok(TaskStatus::Failed),
+                "stopped" => Ok(TaskStatus::Stopped),
+                _ => bail!(
+                    "Invalid status '{}'. Valid values: pending, running, waiting, completed, failed, stopped",
+                    part.trim()
+                ),
+            }
+        })
+        .collect()
 }
 
-fn is_terminal_mismatch(current: TaskStatus, target: TaskStatus) -> bool {
-    current != target && !current.can_reach(target)
+/// Terminal mismatch: current status cannot reach ANY of the targets
+fn is_terminal_mismatch_multi(current: TaskStatus, targets: &[TaskStatus]) -> bool {
+    targets.iter().all(|t| current != *t && !current.can_reach(*t))
 }

@@ -41,11 +41,6 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
-    /// Whether this status is terminal (no further transitions possible without a reset).
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Stopped)
-    }
-
     /// Whether `target` is reachable from `self` without a reset.
     pub fn can_reach(self, target: Self) -> bool {
         if self == target {

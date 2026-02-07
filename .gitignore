@@ -5,3 +5,9 @@
 !.wf/tasks/
 !.wf/config.jsonc
 !.wf/README.md
+
+# wt - Worktree Task Manager
+# https://github.com/anthropics/wt
+.wt/*
+!.wt/tasks/
+!.wt/config.yaml

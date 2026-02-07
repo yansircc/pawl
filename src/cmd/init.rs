@@ -9,6 +9,7 @@ const WF_DIR: &str = ".wf";
 const CONFIG_FILE: &str = "config.jsonc";
 const TASKS_DIR: &str = "tasks";
 const HOOKS_DIR: &str = "hooks";
+const LIB_DIR: &str = "lib";
 
 const DEFAULT_CONFIG: &str = r#"{
   // ============================================
@@ -120,6 +121,91 @@ const GITIGNORE_ENTRIES: &str = r#"
 !.wf/tasks/
 !.wf/config.jsonc
 !.wf/hooks/
+!.wf/lib/
+"#;
+
+const AI_HELPERS_TEMPLATE: &str = r#"#!/usr/bin/env bash
+# .wf/lib/ai-helpers.sh — AI worker helper functions
+# Source this file in your worker/wrapper scripts:
+#   source "$(dirname "$0")/../lib/ai-helpers.sh"
+
+set -euo pipefail
+
+# Extract the most recent session_id from a task's JSONL log.
+# Usage: extract_session_id <jsonl_file>
+# Returns empty string if no session_id found.
+extract_session_id() {
+    local log_file="${1:?Usage: extract_session_id <jsonl_file>}"
+    [ -f "$log_file" ] || { echo ""; return 0; }
+    grep -o '"session_id":"[^"]*"' "$log_file" | tail -1 | cut -d'"' -f4
+}
+
+# Extract the most recent verify feedback from a task's JSONL log.
+# Usage: extract_feedback <jsonl_file> [step_index]
+# Returns empty string if no feedback found.
+extract_feedback() {
+    local log_file="${1:?Usage: extract_feedback <jsonl_file> [step_index]}"
+    local step_idx="${2:-}"
+    [ -f "$log_file" ] || { echo ""; return 0; }
+
+    if [ -n "$step_idx" ]; then
+        grep '"type":"verify_failed"' "$log_file" \
+            | grep "\"step\":${step_idx}" \
+            | tail -1 \
+            | jq -r '.feedback // empty' 2>/dev/null
+    else
+        grep '"type":"verify_failed"' "$log_file" \
+            | tail -1 \
+            | jq -r '.feedback // empty' 2>/dev/null
+    fi
+}
+
+# AI worker wrapper: handles fresh start vs resume, injects feedback.
+# Usage: run_ai_worker [options]
+#   --log-file <path>     JSONL log file (default: $WF_LOG_FILE)
+#   --task-file <path>    Task markdown file (default: $WF_TASK_FILE)
+#   --tools <tools>       Comma-separated tool list (default: Bash,Read,Write)
+#   --claude-cmd <cmd>    Claude command (default: claude)
+#   --extra-args <args>   Extra arguments to pass to claude
+run_ai_worker() {
+    local log_file="${WF_LOG_FILE:-}"
+    local task_file="${WF_TASK_FILE:-}"
+    local tools="Bash,Read,Write"
+    local claude_cmd="claude"
+    local extra_args=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --log-file)   log_file="$2"; shift 2 ;;
+            --task-file)  task_file="$2"; shift 2 ;;
+            --tools)      tools="$2"; shift 2 ;;
+            --claude-cmd) claude_cmd="$2"; shift 2 ;;
+            --extra-args) extra_args="$2"; shift 2 ;;
+            *) echo "Unknown option: $1" >&2; return 1 ;;
+        esac
+    done
+
+    [ -z "$log_file" ] && { echo "Error: --log-file or WF_LOG_FILE required" >&2; return 1; }
+    [ -z "$task_file" ] && { echo "Error: --task-file or WF_TASK_FILE required" >&2; return 1; }
+
+    local session_id
+    session_id=$(extract_session_id "$log_file")
+
+    local feedback
+    feedback=$(extract_feedback "$log_file")
+
+    if [ -n "$session_id" ]; then
+        # Resume existing session with feedback
+        local prompt="Continue working on this task."
+        [ -n "$feedback" ] && prompt="Previous attempt failed verification. Feedback: ${feedback}. Please fix and try again."
+        echo "[ai-helpers] Resuming session ${session_id}" >&2
+        $claude_cmd -p "$prompt" -r "$session_id" --tools "$tools" $extra_args
+    else
+        # Fresh start: pipe task file as prompt
+        echo "[ai-helpers] Starting fresh session" >&2
+        cat "$task_file" | $claude_cmd -p - --tools "$tools" $extra_args
+    fi
+}
 "#;
 
 pub fn run() -> Result<()> {
@@ -147,8 +233,14 @@ pub fn run() -> Result<()> {
         .context("Failed to write config.jsonc")?;
     println!("  Created {}", config_path.display());
 
+    fs::create_dir_all(wf_dir.join(LIB_DIR))
+        .context("Failed to create .wf/lib/ directory")?;
+
     // Write hooks files
     create_hooks_files(&wf_dir, &repo_root)?;
+
+    // Write lib files
+    create_lib_files(&wf_dir)?;
 
     // Update .gitignore
     update_gitignore(&repo_root)?;
@@ -183,6 +275,22 @@ fn create_hooks_files(wf_dir: &Path, repo_root: &str) -> Result<()> {
     fs::write(&settings_path, settings_content)
         .context("Failed to write settings.json")?;
     println!("  Created {}", settings_path.display());
+
+    Ok(())
+}
+
+fn create_lib_files(wf_dir: &Path) -> Result<()> {
+    let lib_dir = wf_dir.join(LIB_DIR);
+
+    let helpers_path = lib_dir.join("ai-helpers.sh");
+    fs::write(&helpers_path, AI_HELPERS_TEMPLATE)
+        .context("Failed to write ai-helpers.sh")?;
+
+    let mut perms = fs::metadata(&helpers_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&helpers_path, perms)
+        .context("Failed to set ai-helpers.sh permissions")?;
+    println!("  Created {}", helpers_path.display());
 
     Ok(())
 }

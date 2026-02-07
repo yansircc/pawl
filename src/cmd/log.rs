@@ -1,11 +1,12 @@
 use anyhow::{bail, Result};
+use std::io::{BufRead, BufReader};
 
 use crate::model::Event;
 
 use super::common::Project;
 
 /// Show task logs
-pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
+pub fn run(task_name: &str, step: Option<usize>, all: bool, jsonl: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
@@ -21,9 +22,15 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     let log_file = project.log_file(&task_name);
 
     if !log_file.exists() {
-        println!("No logs available for task '{}'.", task_name);
-        println!("Logs are created when steps are executed.");
+        if !jsonl {
+            println!("No logs available for task '{}'.", task_name);
+            println!("Logs are created when steps are executed.");
+        }
         return Ok(());
+    }
+
+    if jsonl {
+        return run_jsonl(&log_file, step, all);
     }
 
     let events = project.read_events(&task_name)?;
@@ -65,6 +72,39 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
             print_event(event, &project);
         } else {
             println!("No log entries found.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Output raw JSONL lines, optionally filtered by step
+fn run_jsonl(log_file: &std::path::Path, step: Option<usize>, all: bool) -> Result<()> {
+    let file = std::fs::File::open(log_file)?;
+    let reader = BufReader::new(file);
+    let step_idx = step.map(|s| s.saturating_sub(1));
+
+    // Collect lines (needed for "last only" default mode)
+    let lines: Vec<String> = reader
+        .lines()
+        .filter_map(|l| l.ok())
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+
+    if all || step_idx.is_some() {
+        for line in &lines {
+            if let Some(idx) = step_idx {
+                let event: Event = serde_json::from_str(line)?;
+                if event.step_index() != Some(idx) {
+                    continue;
+                }
+            }
+            println!("{}", line);
+        }
+    } else {
+        // Default: last event only
+        if let Some(line) = lines.last() {
+            println!("{}", line);
         }
     }
 

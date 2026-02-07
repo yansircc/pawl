@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use serde::Serialize;
 
-use crate::model::{StepStatus, TaskStatus};
+use crate::model::{Event, StepStatus, TaskStatus};
 
 use super::common::Project;
 
@@ -22,6 +22,9 @@ struct TaskSummary {
     updated_at: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     blocked_by: Vec<String>,
+    retry_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_feedback: Option<String>,
 }
 
 /// JSON output structure for task detail
@@ -39,6 +42,9 @@ struct TaskDetail {
     started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<String>,
+    retry_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_feedback: Option<String>,
     workflow: Vec<StepInfo>,
 }
 
@@ -78,6 +84,31 @@ pub fn list(json: bool) -> Result<()> {
     run(None, json)
 }
 
+/// Extract retry_count and last_feedback for the current step from events.
+fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<String>) {
+    let mut retry_count = 0usize;
+    let mut last_feedback: Option<String> = None;
+
+    for event in events.iter().rev() {
+        match event {
+            Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
+            Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
+            Event::StepReset { step, auto: true, .. } if *step == step_idx => {
+                retry_count += 1;
+            }
+            Event::VerifyFailed { step, feedback, .. } if *step == step_idx => {
+                if last_feedback.is_none() {
+                    // Reverse iteration: first match is the most recent
+                    last_feedback = Some(feedback.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (retry_count, last_feedback)
+}
+
 fn show_all_tasks_json(project: &Project) -> Result<()> {
     let tasks = project.load_all_tasks()?;
     let workflow_len = project.config.workflow.len();
@@ -95,6 +126,9 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
                 "Done".to_string()
             };
 
+            let events = project.read_events(name)?;
+            let (retry_count, last_feedback) = extract_step_context(&events, state.current_step);
+
             TaskSummary {
                 name: name.clone(),
                 status: format_status(state.status),
@@ -105,6 +139,8 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
                 started_at: state.started_at.map(|t| t.to_rfc3339()),
                 updated_at: state.updated_at.map(|t| t.to_rfc3339()),
                 blocked_by: blocking,
+                retry_count,
+                last_feedback,
             }
         } else {
             TaskSummary {
@@ -117,6 +153,8 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
                 started_at: None,
                 updated_at: None,
                 blocked_by: blocking,
+                retry_count: 0,
+                last_feedback: None,
             }
         };
 
@@ -169,6 +207,9 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
         });
     }
 
+    let events = project.read_events(task_name)?;
+    let (retry_count, last_feedback) = extract_step_context(&events, current_step);
+
     let detail = TaskDetail {
         name: task_name.to_string(),
         description: if task_def.description.is_empty() {
@@ -186,6 +227,8 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
         message: state.as_ref().and_then(|s| s.message.clone()),
         started_at: state.as_ref().and_then(|s| s.started_at.map(|t| t.to_rfc3339())),
         updated_at: state.as_ref().and_then(|s| s.updated_at.map(|t| t.to_rfc3339())),
+        retry_count,
+        last_feedback,
         workflow: steps,
     };
 

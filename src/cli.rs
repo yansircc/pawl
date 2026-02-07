@@ -99,6 +99,9 @@ pub enum Command {
         /// Show all step logs
         #[arg(short, long)]
         all: bool,
+        /// Output raw JSONL (pipe to jq for queries)
+        #[arg(long)]
+        jsonl: bool,
     },
 
     /// Mark current step as done / approve waiting step

@@ -16,7 +16,7 @@ src/
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
 │   ├── common.rs        # Project context, event append/read/replay helpers
-│   ├── init.rs          # wf init (guided TUI)
+│   ├── init.rs          # wf init (scaffold + lib template)
 │   ├── create.rs        # wf create
 │   ├── start.rs         # wf start (execution engine, unified pipeline, verify helpers)
 │   ├── status.rs        # wf status / wf list
@@ -25,7 +25,7 @@ src/
 │   ├── capture.rs       # wf capture (tmux content)
 │   ├── wait.rs          # wf wait (poll until status)
 │   ├── enter.rs         # wf enter (attach to tmux window)
-│   └── log.rs           # wf log (--step/--all)
+│   └── log.rs           # wf log (--step/--all/--jsonl)
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name
     ├── shell.rs         # run_command variants, CommandResult
@@ -141,8 +141,8 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `wf reset --step <task>` | Retry current step |
 | `wf enter <task>` | Attach to tmux window |
 | `wf capture <task> [-l N] [--json]` | Capture tmux content |
-| `wf wait <task> --until <status> [-t sec]` | Wait for status |
-| `wf log <task> [--step N] [--all]` | View logs |
+| `wf wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
+| `wf log <task> [--step N] [--all] [--jsonl]` | View logs |
 | `wf done <task> [-m msg]` | Mark step done / approve |
 
 ## Execution Flow
@@ -162,7 +162,8 @@ start(task)
      └─ in_window step → send to tmux → return (wait for wf done)
 
 done(task)
-  ├─ Running: run verify → pass? emit StepCompleted → continue
+  ├─ Running: emit StepCompleted → handle_step_completion (unified pipeline)
+  │   └─ retry? keep tmux window : kill tmux window
   └─ Waiting: emit StepApproved → continue
 
 on_exit(task, exit_code)
@@ -186,7 +187,8 @@ apply_on_fail(strategy):
 │   └── {task}.jsonl
 ├── worktrees/            # Git worktrees (one per task)
 │   └── {task}/
-└── hooks/                # Generated hook files (e.g. settings.json)
+├── hooks/                # Generated hook files (e.g. settings.json)
+└── lib/                  # Shell helper library (ai-helpers.sh)
 ```
 
 ## Dev Commands

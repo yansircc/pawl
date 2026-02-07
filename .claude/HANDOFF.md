@@ -2,52 +2,50 @@
 
 ## 本次 Session 完成的工作
 
-### 零基审查报告验证 + 代码质量修复（5 项）
+### P1-P5 改进路线图实施 + Greenfield 清理
 
-对零基审查报告中 11 项发现逐条验证，裁定 5 项同意、6 项不同意（误报），并实施了同意的 5 项修复。
+实施了 Session 7 辩论裁决确定的 5 级改进路线图，并通过 greenfield 审查修复了 4 个代码质量问题。
 
-**修复内容**：
+**P1-P5 改动**：
 
-| # | 修改 | 文件 |
+| # | 改动 | 文件 |
 |---|------|------|
-| 1 | 合并 `Context::new()` / `new_full()` 为单一 `new()` 方法，可选参数用 `Option` | `variable.rs`, `start.rs`, `common.rs` |
-| 2 | 提取 `emit_waiting()` 辅助函数消除 `apply_on_fail` 中重复的 StepWaiting 逻辑 | `start.rs` |
-| 3 | `step`/`worktree_dir`/`repo_root` 从 `.clone()` 改为引用 | `start.rs` |
-| 4 | 在 `TaskStatus` 上添加 `is_terminal()` + `can_reach()` 方法，简化 `is_terminal_mismatch` | `state.rs`, `wait.rs` |
-| 5 | `step_name()` 越界时 eprintln warning + 返回 `"step_{idx}"` 而非静默 `"Unknown"` | `log.rs` |
+| P1 | `wf log --jsonl` 原始 JSONL 输出 | `cli.rs`, `mod.rs`, `log.rs` |
+| P2 | `wf wait --until` 多状态（逗号分隔） | `wait.rs` |
+| P3 | `wf status --json` 增加 `retry_count`, `last_feedback` | `status.rs` |
+| P4 | `done()` Running 分支走 `handle_step_completion` 统一管线 | `approve.rs` |
+| P5 | `wf init` 生成 `.wf/lib/ai-helpers.sh` 模板 | `init.rs` |
 
-**驳回的 6 项**（不需要修复）：
-- shell.rs wrapper 函数（合理的 API 分层）
-- git.rs 多层校验（系统边界防御性校验）
-- VerifyOutcome pub（跨模块使用，报告事实错误）
-- JSON 投影结构体（正常 API 设计）
-- 格式化函数（实际使用次数被低估）
-- .to_string() 调用（Rust 所有权要求）
+**Greenfield 清理**：
 
-28 测试全部通过。净删除 ~18 行。
+| 问题 | 修复 |
+|------|------|
+| `is_terminal()` 未使用 | 删除 |
+| `parse_status()` 仅调用一次 | 内联到 `parse_statuses()` |
+| `run_jsonl()` 分支重复 | 合并 |
+| `run_verify()`/`VerifyOutcome` 不必要 pub | 降为模块私有 |
+
+零 warning，29/29 测试通过。
 
 ---
 
 ## 历史 Session
 
-### Session 4: E2E 端到端测试 + Bug 修复
-- 全 13 命令端到端测试 PASS
-- 修复 StepWaiting 不更新 current_step 的 bug
-- 新增回归测试 `test_step_waiting_after_completed_resets_current_step`
+### Session 7: 零基审查 + 代码质量修复
+- 零基审查 11 项裁定（5 同意/6 驳回），净删 ~18 行
 
-### Session 3: Unified Step Pipeline 重构
-- Event 14→11, CLI 19→13, ~570 行净删除
-- `handle_step_completion()` + `apply_on_fail()` 统一管线
+### Session 5-6: Foreman 模式 + 非交互 Claude 闭环
+- worker.sh / wrapper.sh / verify-ai.sh 模式验证
+- 事件 hook 通知闭环、并发互斥
 
-### Session 2: Step 验证模型改造
-- Step 迁移到 4 正交属性（run, verify, on_fail, in_window）
-- 新增 VerifyFailed 事件, verify helpers
-
-### Session 1: TUI 删除 + Event Sourcing
-- 删除 TUI 模块（-3,372 行）
-- 建立 Event Sourcing 架构（JSONL 单一事实来源）
+### Session 1-4: 架构演进
+- TUI 删除 → Event Sourcing → Step 模型 → Unified Pipeline → E2E 测试
 
 ---
+
+## 已知监控项
+
+- `extract_step_context()` (status.rs) 与 `count_auto_retries()` (start.rs) 逻辑相似，两处重复未达 greenfield 3 次阈值，暂保留
 
 ## 关键文件索引
 
@@ -56,11 +54,15 @@
 | CLI 定义（13 命令） | `src/cli.rs` |
 | 配置模型（Step 4 属性） | `src/model/config.rs` |
 | 事件模型 + replay（11 种） | `src/model/event.rs` |
-| 状态投影类型（含 TaskStatus 方法） | `src/model/state.rs` |
+| 状态投影类型 | `src/model/state.rs` |
 | 任务定义（含 skip） | `src/model/task.rs` |
 | 执行引擎 + 统一管线 | `src/cmd/start.rs` |
-| 审批命令（done） | `src/cmd/approve.rs` |
+| 审批命令（done，统一管线） | `src/cmd/approve.rs` |
 | 控制命令（stop/reset/on_exit） | `src/cmd/control.rs` |
+| 状态输出（含 retry_count/last_feedback） | `src/cmd/status.rs` |
+| 日志输出（含 --jsonl） | `src/cmd/log.rs` |
+| 等待命令（多状态支持） | `src/cmd/wait.rs` |
+| 初始化（含 lib 模板生成） | `src/cmd/init.rs` |
 | 公共工具（事件读写、钩子） | `src/cmd/common.rs` |
-| 变量上下文（统一构造函数） | `src/util/variable.rs` |
+| 变量上下文 | `src/util/variable.rs` |
 | 项目概述 | `.claude/CLAUDE.md` |

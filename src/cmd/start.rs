@@ -320,14 +320,14 @@ fn execute_in_window(
 
 // --- Verify helpers ---
 
-pub enum VerifyOutcome {
+enum VerifyOutcome {
     Passed,
     Failed { feedback: String },
 }
 
 /// Run the verify command for a step, if any.
 /// verify:"human" is handled by the caller (apply_on_fail treats it as a special case).
-pub fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
+fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
     match &step.verify {
         None => Ok(VerifyOutcome::Passed),
         Some(v) if v == "human" => {

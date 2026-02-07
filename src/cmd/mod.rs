@@ -29,7 +29,7 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Wait { task, until, timeout, interval } => {
             wait::run(&task, &until, timeout, interval)
         }
-        Command::Log { task, step, all } => log::run(&task, step, all),
+        Command::Log { task, step, all, jsonl } => log::run(&task, step, all, jsonl),
         Command::Done { task, message } => approve::done(&task, message.as_deref()),
         Command::OnExit { task, exit_code } => control::on_exit(&task, exit_code),
     }
