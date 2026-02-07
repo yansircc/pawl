@@ -236,10 +236,10 @@ fn apply_on_fail(
     step: &Step,
 ) -> Result<bool> {
     if step.on_fail_retry() {
-        let retry_count = count_verify_failures(project, task_name, step_idx)?;
-        if retry_count <= step.effective_max_retries() {
+        let retry_count = count_auto_retries(project, task_name, step_idx)?;
+        if retry_count < step.effective_max_retries() {
             println!("  Verify failed (attempt {}/{}). Auto-retrying...",
-                     retry_count, step.effective_max_retries());
+                     retry_count + 1, step.effective_max_retries());
             project.append_event(task_name, &Event::StepReset {
                 ts: event_timestamp(),
                 step: step_idx,
@@ -380,17 +380,18 @@ pub fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usi
     }
 }
 
-/// Count VerifyFailed events for a specific step since last TaskStarted/TaskReset/StepReset.
-fn count_verify_failures(project: &Project, task_name: &str, step_idx: usize) -> Result<usize> {
+/// Count auto-retries for a specific step since last TaskStarted/TaskReset(manual).
+fn count_auto_retries(project: &Project, task_name: &str, step_idx: usize) -> Result<usize> {
     let events = project.read_events(task_name)?;
     let mut count = 0;
 
-    // Iterate from end, counting VerifyFailed for this step until we hit a boundary
     for event in events.iter().rev() {
         match event {
             Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
-            Event::StepReset { step, .. } if *step == step_idx => break,
-            Event::VerifyFailed { step, .. } if *step == step_idx => {
+            // Manual reset (wf reset --step) resets the counter
+            Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
+            // Auto retry counts toward the limit
+            Event::StepReset { step, auto: true, .. } if *step == step_idx => {
                 count += 1;
             }
             _ => {}
