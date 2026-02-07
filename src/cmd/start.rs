@@ -29,7 +29,16 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
                     bail!("Task '{}' is already completed. Use 'wf reset {}' to restart or 'wf start --reset {}'.", task_name, task_name, task_name);
                 }
                 TaskStatus::Waiting => {
-                    bail!("Task '{}' is waiting. Use 'wf done {}' to continue.", task_name, task_name);
+                    let step_name = if state.current_step < project.config.workflow.len() {
+                        &project.config.workflow[state.current_step].name
+                    } else {
+                        "unknown"
+                    };
+                    let reason = state.message.as_deref().unwrap_or("approval");
+                    bail!(
+                        "Task '{}' is waiting at step {} ({}) for {}. Use 'wf done {}' to continue.",
+                        task_name, state.current_step + 1, step_name, reason, task_name
+                    );
                 }
                 _ => {}
             }

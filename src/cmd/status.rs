@@ -272,7 +272,12 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             } else {
                 "Done".to_string()
             };
-            let step_str = format!("[{}/{}] {}", state.current_step + 1, workflow_len, step_name);
+            let display_step = if state.status == TaskStatus::Completed {
+                workflow_len
+            } else {
+                state.current_step + 1
+            };
+            let step_str = format!("[{}/{}] {}", display_step, workflow_len, step_name);
 
             let status_str = format_status(state.status);
 
@@ -281,7 +286,12 @@ fn show_all_tasks(project: &Project) -> Result<()> {
                     format_duration(state.started_at)
                 }
                 TaskStatus::Waiting => {
-                    format_duration(state.started_at)
+                    // Show waiting reason for foreman visibility
+                    if let Some(msg) = &state.message {
+                        format_waiting_reason(msg)
+                    } else {
+                        format_duration(state.started_at)
+                    }
                 }
                 TaskStatus::Failed => {
                     state.message.clone().unwrap_or_default()
@@ -336,11 +346,12 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
 
     if let Some(state) = &state {
         println!("Status: {}", format_status(state.status));
-        println!(
-            "Step: {}/{}",
-            state.current_step + 1,
+        let display_step = if state.status == TaskStatus::Completed {
             workflow.len()
-        );
+        } else {
+            state.current_step + 1
+        };
+        println!("Step: {}/{}", display_step, workflow.len());
 
         if let Some(started) = state.started_at {
             println!("Started: {}", started.format("%Y-%m-%d %H:%M:%S"));
@@ -410,6 +421,15 @@ fn format_step_status(status: StepStatus) -> String {
         StepStatus::Success => "success".to_string(),
         StepStatus::Failed => "failed".to_string(),
         StepStatus::Skipped => "skipped".to_string(),
+    }
+}
+
+fn format_waiting_reason(reason: &str) -> String {
+    match reason {
+        "gate" => "gate".to_string(),
+        "verify_human" => "needs review".to_string(),
+        "on_fail_human" => "needs decision".to_string(),
+        other => other.to_string(),
     }
 }
 

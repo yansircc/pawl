@@ -36,7 +36,7 @@ pub fn create_session(name: &str, dir: Option<&str>) -> Result<()> {
 
 /// Create a new window in a session
 pub fn create_window(session: &str, window: &str, dir: Option<&str>) -> Result<()> {
-    let mut cmd = format!("tmux new-window -t '{}' -n '{}'", session, window);
+    let mut cmd = format!("tmux new-window -d -t '{}' -n '{}'", session, window);
     if let Some(dir) = dir {
         cmd.push_str(&format!(" -c '{}'", dir));
     }

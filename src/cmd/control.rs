@@ -18,11 +18,14 @@ pub fn stop(task_name: &str) -> Result<()> {
         bail!("Task '{}' has not been started. Use 'wf start {}' to begin.", task_name, task_name);
     };
 
-    if state.status != TaskStatus::Running {
-        bail!("Task '{}' is not running (status: {:?}).", task_name, state.status);
+    match state.status {
+        TaskStatus::Running | TaskStatus::Waiting => {}
+        _ => {
+            bail!("Task '{}' is not running (status: {:?}).", task_name, state.status);
+        }
     }
 
-    // Send Ctrl+C to the tmux window
+    // Send Ctrl+C to the tmux window (if running)
     let session = project.session_name();
     let window = &task_name;
 
@@ -100,10 +103,21 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
         project.append_event(&task_name, &Event::TaskReset { ts: event_timestamp() })?;
 
         println!("Task '{}' reset to initial state.", task_name);
-        println!("Note: Git resources (branch, worktree) are NOT automatically cleaned.");
-        println!("Clean up manually if needed:");
-        println!("  git worktree remove .wf/worktrees/{} --force", task_name);
-        println!("  git branch -D wf/{}", task_name);
+
+        // Only show git cleanup hints if resources actually exist
+        let worktree_path = std::path::Path::new(&project.repo_root).join(&project.config.worktree_dir).join(&task_name);
+        let branch_name = format!("wf/{}", task_name);
+        let worktree_exists = worktree_path.exists();
+        let branch_exists = crate::util::git::branch_exists(&branch_name);
+        if worktree_exists || branch_exists {
+            println!("Note: Git resources are NOT automatically cleaned. Clean up manually:");
+            if worktree_exists {
+                println!("  git worktree remove {} --force", worktree_path.display());
+            }
+            if branch_exists {
+                println!("  git branch -D {}", branch_name);
+            }
+        }
     }
 
     Ok(())

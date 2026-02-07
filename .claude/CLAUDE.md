@@ -47,7 +47,7 @@ src/
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
 │   ├── common.rs        # Project context, event append/read/replay/check_window_health
-│   ├── init.rs          # wf init (scaffold + lib template)
+│   ├── init.rs          # wf init (scaffold + lib template + foreman guide)
 │   ├── create.rs        # wf create
 │   ├── start.rs         # wf start (execution engine, resolve/dispatch pipeline)
 │   ├── status.rs        # wf status / wf list
@@ -59,7 +59,7 @@ src/
 │   ├── events.rs        # wf events (unified event stream, --follow)
 │   └── log.rs           # wf log (--step/--all/--all-runs/--jsonl)
 └── util/
-    ├── git.rs           # get_repo_root, validate_branch_name
+    ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
     ├── shell.rs         # run_command variants, CommandResult
     ├── tmux.rs          # Session/window/pane ops, session_id extraction
     └── variable.rs      # Context struct, expand(), to_env_vars()
@@ -169,7 +169,7 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `wf list` | List all tasks |
 | `wf start <task> [--reset]` | Start task execution (--reset auto-resets first) |
 | `wf status [task] [--json]` | Show status (--json uses 0-based step index) |
-| `wf stop <task>` | Stop running task |
+| `wf stop <task>` | Stop task (Running or Waiting) |
 | `wf reset <task>` | Reset to initial state |
 | `wf reset --step <task>` | Retry current step |
 | `wf enter <task>` | Attach to tmux window |
@@ -229,7 +229,9 @@ check_window_health(task_name) → bool:
 ├── worktrees/            # Git worktrees (one per task)
 │   └── {task}/
 ├── hooks/                # Generated hook files (e.g. settings.json)
-└── lib/                  # Shell helper library (ai-helpers.sh)
+└── lib/                  # Helper library
+    ├── ai-helpers.sh     # AI worker functions (extract_session_id, run_ai_worker)
+    └── foreman-guide.md  # Foreman agent operation manual
 ```
 
 ## Dev Commands

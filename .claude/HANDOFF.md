@@ -2,33 +2,49 @@
 
 ## 本次 Session 完成的工作
 
-### Session 13: P0/P1/P2 重构 + Greenfield 清理
+### Session 14: E2E 包工头测试 + 痛点修复 + Foreman Guide
 
-**代码改动**（36 tests 全过，零 warning）：
+**E2E 测试**（8 步工作流 × 3 task × 16 场景）：
+- A 组: Happy path（全流程、skip、start --reset）
+- B 组: 失败与恢复（verify retry、retry 耗尽、on_fail:human、reset --step）
+- C 组: in_window + tmux（正常完成、window_lost、wf enter、wf capture）
+- D 组: 并发与边界（多 task 并发、wf wait 多状态、wf stop、边界条件）
+- E 组: CLI 输出格式（status --json、log、events、list）
+- F 组: Event Hook（触发验证、变量展开）
 
-| 改动 | 文件 | 说明 |
+**痛点修复**（6 个文件，36 tests 全过）：
+
+| 修复 | 文件 | 说明 |
 |------|------|------|
-| **P0: resolve/dispatch** | `start.rs` | Action 枚举 + resolve() 纯函数(7 单元测试) + dispatch() IO 函数。删除 apply_on_fail，重写 handle_step_completion 为三步组合 |
-| **P1: WindowLost 统一** | `common.rs` | 新增 check_window_health() 作为唯一 WindowLost 发射点，删除 replay_task_with_health_check() |
-| **P1: 调用点替换** | `status.rs` `capture.rs` `control.rs` | 4+1+1 处 replay_task_with_health_check → check_window_health + replay_task |
-| **P2: wait.rs API** | `wait.rs` | 完全走 Project API，删除 replay_state_from_file/append_window_lost，简化 poll_status 签名 |
-| **Greenfield** | `event.rs` | 新增 pub count_auto_retries() 共享函数 |
-| **Greenfield** | `status.rs` | extract_step_context 使用 event::count_auto_retries |
-| **Greenfield** | `config.rs` | 删除未使用的 on_fail_retry/on_fail_human |
+| `wf stop` 支持 Waiting 状态 | `control.rs` | 接受 Running\|Waiting，符合规则 5 "failure is routable" |
+| `wf list` 显示等待原因 | `status.rs` | INFO 列: gate / needs review / needs decision |
+| Completed 显示 Step 8/8 | `status.rs` | 不再泄露内部 9/8，detail 和 list 视图统一修复 |
+| `wf reset` 条件输出 git 提示 | `control.rs` | 检测 worktree/branch 存在才提示清理 |
+| `wf start` Waiting 错误加上下文 | `start.rs` | 报 "waiting at step N (name) for reason" |
+| in_window 窗口不抢焦点 | `tmux.rs` | `new-window -d` 后台创建 |
+| `branch_exists()` 辅助函数 | `git.rs` | 支持 reset 条件检测 |
 
-**解决的审计项**：V1(查询混写副作用) V2(event hook 失效) V3(WindowLost 竞态) V7(双权威竞态缓解) V8(wait 第三裁决者)
+**Foreman Guide + Config 模板**：
+
+| 产物 | 位置 | 说明 |
+|------|------|------|
+| 包工头操作手册 (222 行) | `init.rs` → `.wf/lib/foreman-guide.md` | 心智模型、主循环、5 种决策场景、注意事项 |
+| Config 详细注释 (145 行) | `init.rs` → `.wf/config.jsonc` | Step 4 属性、6 种类型速查、变量表、设计建议、Hook 参考 |
+
+两份文件在 `wf init` 时自动生成。
 
 ---
 
 ## 历史 Session
 
-### Session 12: 第一性原理审视 + VerifyFailed 消除
-- Phase 1: 事件 11→10，StepCompleted 发射收归 handle_step_completion
-- 三 agent 审计发现 11 项规则违反，P0/P1/P2 重构计划
+### Session 13: P0/P1/P2 重构 + Greenfield
+- resolve/dispatch 分离（7 单元测试）、WindowLost 统一、wait.rs 走 Project API
 
-### Session 9-11: 辩论驱动改进 + E2E 修复
+### Session 12: 第一性原理审视 + VerifyFailed 消除
+- 事件 11→10，StepCompleted 统一发射，三 agent 审计
+
+### Session 9-11: 辩论驱动改进 + E2E
 - Step 0-based 统一、start --reset、events --follow、log 当前轮
-- P12 窗口检测、P4 Waiting reason、P3 wait health check
 
 ### Session 5-8: Foreman 模式 + P1-P5
 - 非交互 Claude、wrapper.sh、事件 hook、并发 task
@@ -57,13 +73,15 @@
 | 任务定义（含 skip） | `src/model/task.rs` |
 | 执行引擎 + resolve/dispatch 管线 | `src/cmd/start.rs` |
 | 审批命令（done） | `src/cmd/approve.rs` |
-| 控制命令（stop/reset/on_exit + check_window_health） | `src/cmd/control.rs` |
-| 状态输出（retry_count/last_feedback） | `src/cmd/status.rs` |
+| 控制命令（stop/reset/on_exit） | `src/cmd/control.rs` |
+| 状态输出（retry_count/last_feedback/waiting reason） | `src/cmd/status.rs` |
 | 日志输出（当前轮/全历史/--jsonl） | `src/cmd/log.rs` |
 | 统一事件流（--follow） | `src/cmd/events.rs` |
 | 等待命令（Project API + check_window_health） | `src/cmd/wait.rs` |
-| 初始化（含 lib 模板） | `src/cmd/init.rs` |
+| 初始化（含 config 模板 + foreman guide + lib） | `src/cmd/init.rs` |
 | 公共工具（事件读写、钩子、check_window_health） | `src/cmd/common.rs` |
+| tmux 工具（窗口后台创建） | `src/util/tmux.rs` |
+| git 工具（branch_exists） | `src/util/git.rs` |
 | 变量上下文 | `src/util/variable.rs` |
-| 重构设计文档 | `.claude/specs/event-model-refactor.md` |
+| 包工头操作手册 | `.wf/lib/foreman-guide.md` |
 | 项目概述 | `.claude/CLAUDE.md` |

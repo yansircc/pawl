@@ -45,6 +45,11 @@ pub fn validate_branch_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check if a git branch exists
+pub fn branch_exists(branch_name: &str) -> bool {
+    run_command_success(&format!("git rev-parse --verify refs/heads/{}", branch_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
