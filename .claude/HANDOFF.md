@@ -2,31 +2,33 @@
 
 ## 本次 Session 完成的工作
 
-### Session 15: Foreman 文档全面完善
+### Session 16: 文档重构为 Claude Code Skill
 
-**新增 3 份文档**（嵌入 init.rs，`wf init` 自动生成到 `.wf/lib/`）：
+将 wf 操作文档从 `.wf/lib/` 重构为 `.claude/skills/wf/` Claude Code skill 体系。
 
-| 产物 | 位置 | 行数 | 覆盖内容 |
-|------|------|------|---------|
-| Task.md 编写指南 | `.wf/lib/task-authoring-guide.md` | 314 | 双重身份（人类文档+AI prompt）、frontmatter 完整字段、五要素写作法、迭代反馈模式、skip 用法、3 个完整示例 |
-| AI Worker 集成指南 | `.wf/lib/ai-worker-guide.md` | 275 | ai-helpers.sh 函数参考、wrapper.sh 模式、Claude 非交互模式、会话续接流程、Event Hook 通知闭环、环境变量表、实战配置示例 |
-| Foreman Guide 增强版 | `.wf/lib/foreman-guide.md` | 468 | 原有内容全保留 + 创建任务章节 + JSON 输出格式完整 schema + 状态决策速查表 + 故障排查 + 相关文档索引 |
+**新增**:
+- `src/cmd/templates/wf-skill.md` — SKILL.md 参考卡 (~100 行)，包含 CLI 命令表、Step 类型速查、状态机、Config 格式、变量表、Event Hooks
 
-**改进 `wf create` 模板** (create.rs)：
-- 新增 `skip` 字段注释示例（frontmatter）
-- 新增 AI Worker prompt 使用提示
-- 默认模板结构改为：目标 / 约束 / 验收标准
+**精简**:
+- `config.jsonc` 模板: 144→15 行 (删除全部教程注释，纯配置)
+- `foreman-guide.md`: 369→291 行 (删除 SKILL.md 已覆盖的速查表、消除支撑文件间互引)
+- `ai-worker-guide.md`: 274→246 行 (Claude 非交互模式精简、环境变量表指向 SKILL.md)
 
-**init.rs 重构** — `include_str!` 拆分：
-- 模板文件独立到 `src/cmd/templates/`（config.jsonc, ai-helpers.sh, 3 份 guide）
-- init.rs 从 ~640 行降至 205 行
-- Hook 模板（verify-stop.sh, settings.json, gitignore）保持内联，下轮处理
+**修改**:
+- `init.rs`: `create_lib_files()` 只保留 ai-helpers.sh，新增 `create_skill_files()` 写 4 文件到 `.claude/skills/wf/`
+- `create.rs`: 路径引用 `.wf/lib/` → `.claude/skills/wf/`
+- CLAUDE.md / HANDOFF.md / README.md: 目录结构和路径索引更新
 
-**技术指标**: 36 tests, zero warnings, `cargo install --path .` 完成
+**信息架构**: SKILL.md → 3 个独立叶子 guide（无互引），符合三条规则（只放关键参考、最多 2 层、支撑文件不互引）
+
+**技术指标**: 36 tests, zero warnings, 净减 330 行
 
 ---
 
 ## 历史 Session
+
+### Session 15: Foreman 文档全面完善
+- 新增 3 份指南文档 (task-authoring/ai-worker/foreman-guide)，改进 create 模板，init.rs include_str! 拆分
 
 ### Session 14: E2E 包工头测试 + 痛点修复 + Foreman Guide
 - 8步 × 3task × 16场景 E2E、6个UX修复、初版 Foreman Guide + Config 模板
@@ -72,14 +74,15 @@
 | 日志输出（当前轮/全历史/--jsonl） | `src/cmd/log.rs` |
 | 统一事件流（--follow） | `src/cmd/events.rs` |
 | 等待命令（Project API + check_window_health） | `src/cmd/wait.rs` |
-| 初始化（include_str! 加载模板） | `src/cmd/init.rs` |
-| 模板文件（config/guides/ai-helpers） | `src/cmd/templates/` |
+| 初始化（include_str! 加载模板 + skill 生成） | `src/cmd/init.rs` |
+| 模板文件（config/skill/guides/ai-helpers） | `src/cmd/templates/` |
 | 任务创建（含改进模板） | `src/cmd/create.rs` |
 | 公共工具（事件读写、钩子、check_window_health） | `src/cmd/common.rs` |
 | tmux 工具（窗口后台创建） | `src/util/tmux.rs` |
 | git 工具（branch_exists） | `src/util/git.rs` |
 | 变量上下文 | `src/util/variable.rs` |
-| 包工头操作手册 (增强版) | `.wf/lib/foreman-guide.md` |
-| Task.md 编写指南 | `.wf/lib/task-authoring-guide.md` |
-| AI Worker 集成指南 | `.wf/lib/ai-worker-guide.md` |
+| wf Skill 参考卡 | `.claude/skills/wf/SKILL.md` |
+| 包工头操作手册 | `.claude/skills/wf/foreman-guide.md` |
+| Task.md 编写指南 | `.claude/skills/wf/task-authoring-guide.md` |
+| AI Worker 集成指南 | `.claude/skills/wf/ai-worker-guide.md` |
 | 项目概述 | `.claude/CLAUDE.md` |
