@@ -1,7 +1,5 @@
 /target
 .claude/
-.wf/
-.wt/
 .pawl/*
 !.pawl/tasks/
 !.pawl/config.jsonc

@@ -18,7 +18,7 @@ AI coding agents (Claude, Codex, etc.) are powerful but messy to run in parallel
 ## Install
 
 ```bash
-cargo install --path .
+cargo install pawl
 ```
 
 Requires: Rust toolchain, tmux, git.
