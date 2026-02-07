@@ -192,7 +192,7 @@ start(task)
      ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
      ├─ Gate step (no run) → StepWaiting, return (wait for wf done)
      ├─ Normal step → run sync → handle_step_completion
-     └─ in_window step → send to tmux → return (wait for wf done)
+     └─ in_window step → write runner script → bash via tmux → return (wait for wf done)
 
 handle_step_completion(exit_code, step, run_output):
   1. run_verify (if exit_code == 0) → VerifyOutcome

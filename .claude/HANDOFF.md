@@ -1,74 +1,86 @@
 # Session Handoff
 
-## Current Session (S19): Unified SKILL.md + claude_command activation + i18n
+## Current Session (S20): in_window bug fixes + E2E bootstrap testing
 
-### Unified SKILL.md (2 files -> 1 file)
+### Bug fixes (2 commits)
 
-Merged SKILL.md (130 lines) + reference.md (75 lines) into a single SKILL.md (409 lines). Restored critical non-inferrable information that S17 over-deleted:
+#### 1. Runner script for in_window execution (`start.rs`)
 
-- **Config Recipes**: 5 verified patterns (basic AI dev / full human review / auto verify+retry / multi-agent parallel+foreman / pure automation)
-- **Anti-pattern table**: 4 common misconfigurations with fixes
-- **Verify strategy table**: when to use script vs human
-- **Foreman coordination**: main loop pseudo-code, status decision table, 3 key constraints
-- **AI Worker integration**: run_ai_worker decision flow diagram, parameter table, custom wrapper example
-- **Event-variable mapping**: complete 10-event table with extra variables per event
-- **Hook concurrency pattern**: mkdir atomic mutex for tmux send-keys
+**Problem**: `execute_in_window()` sent commands directly via `tmux send-keys`. Two issues:
+- WF_* env vars were never injected into tmux window (AI worker crashed on unset `$WF_LOG_FILE`)
+- tmux shell is zsh, but `ai-helpers.sh` is bash — `source` into zsh caused compatibility issues
 
-Deleted `reference.md` template and its generation in `init.rs`.
+**Fix**: Write a bash runner script to `.wf/logs/.run.{task}.sh` containing env exports + trap + command, then send `bash 'script'` to tmux. This guarantees bash execution regardless of the user's shell.
 
-### claude_command activation (was dead field)
+**File**: `src/cmd/start.rs` — `execute_in_window()` function
 
-`config.claude_command` existed in config.rs but was never wired to anything. Now fully activated:
+#### 2. ai-helpers.sh grep safety
 
-```
-config.jsonc: claude_command → config.rs → Context → ${claude_command} / WF_CLAUDE_COMMAND → ai-helpers.sh
-```
+**Problem**: `set -euo pipefail` + `grep` finding no matches (exit 1) = shell exit. Fresh JSONL files have no `session_id` entries, so `extract_session_id()` always killed the shell.
 
-- `variable.rs`: Added `claude_command` field to Context, `${claude_command}` expansion, `WF_CLAUDE_COMMAND` env var
-- `ai-helpers.sh`: `run_ai_worker` defaults to `${WF_CLAUDE_COMMAND:-claude}` instead of hardcoded `"claude"`
-- All `Context::new` call sites updated (common.rs, start.rs x2)
+**Fix**: Changed `set -euo pipefail` → `set -uo pipefail` (removed `-e`). Wrapped all `grep` calls with `{ grep ... || true; }`.
 
-### i18n: Chinese -> English
+**File**: `src/cmd/templates/ai-helpers.sh`
 
-All project documentation and CLI copy converted to English:
-- `src/cmd/templates/wf-skill.md` (full 409-line translation)
-- `src/cmd/templates/config.jsonc` (comment)
-- `src/cmd/create.rs` (7 template strings in task scaffolding)
-- `.wf/config.jsonc` (comment)
+### E2E bootstrap testing
 
-### README.md alignment
+Tested SKILL.md's ability to guide AI in configuring wf for new projects:
 
-Config example updated to follow the 3 design rules (was violating all 3). File layout updated to reflect single SKILL.md.
+**Test 1: nanobot-go** (Go project, detailed prompt with hints)
+- AI correctly produced config with `go test ./...` verify, proper Design Rules compliance
+- 5 tasks with dependency chain: store/provider/workspace/tools → agent
 
-### Build status
+**Test 2: bm** (Go project, minimal prompt — one sentence)
+- Prompt: `"为这个项目配置 wf 工作流并创建开发任务。"`
+- AI correctly inferred `go build ./... && go test ./...` for verify
+- 3 tasks with dependencies: db → fetch → cli
 
-36 tests, zero warnings, installed.
+**Test 3: pv** (Python project, minimal prompt — one sentence)
+- Prompt: `"做一个类似 dpaste 的命令行粘贴板工具，Python 实现。写好 PLAN.md，配置 wf 工作流，创建开发任务。"`
+- AI correctly inferred `python -m pytest tests/ -q` for verify
+- Wrote its own PLAN.md + 4 tasks: core → api → cli → polish
+
+**Conclusion**: SKILL.md successfully guides AI to produce correct configs and tasks from one-sentence prompts. 3 Config Design Rules are consistently followed.
+
+### Remaining work for next session
+
+- **jql (Rust) and kv (Node.js) bootstrap**: not yet tested (tmux sessions cleaned up before completion)
+- **`_on-exit` trap not triggering in tmux**: after AI worker finishes, `wf _on-exit` should fire via bash EXIT trap, but status remains "running". Needs investigation — may be a tmux + bash interaction issue
+- **`claude_command` default**: projects need `"claude_command": "ccc"` in config for ccc users. Default template still has `"claude"`. Consider auto-detecting or documenting this better
+- **wf as foreman workflow**: user wants to build a standardized workflow where wf manages multiple AI agents across projects. The bootstrap pattern (one-sentence prompt → AI configures everything) works but needs polish
+
+### Test projects created (in ~/code/tmp/)
+
+| Project | Tech | Status | Notes |
+|---------|------|--------|-------|
+| nanobot-go | Go | bootstrap done | 5 tasks, deps correct |
+| bm | Go | bootstrap done | 3 tasks, minimal prompt |
+| pv | Python | bootstrap done | 4 tasks, AI wrote PLAN.md |
+| jql | Rust | not tested | wf init done, bootstrap task created |
+| kv | Node.js | not tested | wf init done, bootstrap task created |
 
 ---
 
 ## Historical Sessions
 
-### S17-18: Skill docs restructuring
-- S15-16: docs restructured as `.claude/skills/wf/` skill system
-- S17: Skill compression (4 files 949 lines -> 2 files ~200 lines) + config validation warnings
-- S18: Identified S17 over-deletion, planned restoration (executed in S19)
+### S19: Unified SKILL.md + claude_command activation + i18n
+- 2→1 file SKILL.md (409 lines), claude_command wired through, English i18n
 
-### S13-14: resolve/dispatch refactor + E2E
-- resolve/dispatch separation, unified WindowLost, wait.rs via Project API, E2E foreman tests
+### S13-18: resolve/dispatch refactor + docs restructuring
+- resolve/dispatch separation, WindowLost unification, wait.rs via Project API
+- Skill docs: 4 files → 2 files → 1 file, config validation warnings
 
 ### S9-12: First principles + debate-driven improvements
 - Event model audit, step 0-based unification, start --reset, events --follow
 
-### S5-8: Foreman mode
-- Non-interactive Claude, wrapper.sh, event hooks, tmux notification loop
-
-### S1-4: Architecture evolution
-- TUI removal -> Event Sourcing -> Step model -> Unified Pipeline -> E2E testing
+### S1-8: Architecture evolution + Foreman mode
+- TUI removal → Event Sourcing → Step model → Foreman → E2E testing
 
 ---
 
 ## Known Issues
 
+- **_on-exit trap not triggering in tmux**: bash EXIT trap in runner script may not fire correctly when tmux window's bash process exits — needs investigation
 - **on_exit + wf done dual-authority race**: in_window steps have two verdict sources that can fire simultaneously
 - **on_exit loses RunOutput**: in_window process exit has no stdout/stderr/duration
 - **retry exhaustion has no audit event**: no event emitted when transitioning from retry to terminal state
@@ -79,12 +91,12 @@ Config example updated to follow the 3 design rules (was violating all 3). File 
 | Area | File |
 |------|------|
 | CLI definition (14 commands) | `src/cli.rs` |
-| Config model + **in_window validation warnings** | `src/model/config.rs` |
+| Config model + in_window validation warnings | `src/model/config.rs` |
 | Event model + replay + count_auto_retries | `src/model/event.rs` |
-| Execution engine + resolve/dispatch pipeline | `src/cmd/start.rs` |
+| Execution engine + **runner script** + resolve/dispatch | `src/cmd/start.rs` |
 | Init (generates single SKILL.md) | `src/cmd/init.rs` |
-| Templates (config/skill/ai-helpers) | `src/cmd/templates/` |
+| Templates (config/skill/**ai-helpers**) | `src/cmd/templates/` |
 | Common utils (event R/W, hooks, check_window_health) | `src/cmd/common.rs` |
-| Variables (Context, expand, to_env_vars, **claude_command**) | `src/util/variable.rs` |
+| Variables (Context, expand, to_env_vars, claude_command) | `src/util/variable.rs` |
 | Unified Skill reference (409 lines) | `src/cmd/templates/wf-skill.md` |
 | Project overview | `.claude/CLAUDE.md` |
