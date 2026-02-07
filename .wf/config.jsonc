@@ -2,55 +2,33 @@
   // ============================================
   // 基础配置
   // ============================================
-
-  // tmux session 名称（默认: 项目目录名）
-  // "session": "my-project",
-
-  // Terminal multiplexer（默认: "tmux"）
-  // "multiplexer": "tmux",
-
   // Worktree 存放目录（相对于 repo root，默认: ".wf/worktrees"）
   // "worktree_dir": ".wf/worktrees",
-
   // 基础分支（用于创建任务分支的起点，默认: "main"）
   // "base_branch": "main",
-
   // ============================================
   // Workflow
   // ============================================
   // 所有任务共享的执行流程
-  // 支持变量: ${task}, ${branch}, ${worktree}, ${window},
-  //          ${session}, ${repo_root}, ${step}, ${base_branch}
-
+  // 支持变量: ${task}, ${branch}, ${worktree},
+  //          ${repo_root}, ${step}, ${base_branch}
   "workflow": [
     // 创建资源
-    { "name": "Create branch", "run": "git branch ${branch} ${base_branch}" },
-    { "name": "Create worktree", "run": "git worktree add ${worktree} ${branch}" },
-    { "name": "Create window", "run": "tmux new-window -t ${session} -n ${window} -c ${worktree}" },
-
-    // 开发（在 tmux window 中执行）
     {
-      "name": "Develop",
-      "run": "claude --settings ${repo_root}/.wf/hooks/settings.json -p '@.wf/tasks/${task}.md'",
-      "in_window": true
+      "name": "Create branch",
+      "run": "git branch ${branch} ${base_branch}"
     },
-
-    // 人工确认开发完成
-    { "name": "Review development", "verify": "human" },
-
-    // 合并到主分支
     {
-      "name": "Merge",
-      "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from wf'"
+      "name": "Create worktree",
+      "run": "git worktree add ${worktree} ${branch}",
+      "verify": "human"
     },
-
     // 清理资源
     {
       "name": "Cleanup",
-      "run": "tmux kill-window -t ${session}:${window} 2>/dev/null; git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true"
+      "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true"
     }
   ]
-
   // ============================================
   // Event Hooks（可选）
   // ============================================
