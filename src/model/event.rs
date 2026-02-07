@@ -200,6 +200,7 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
             Event::VerifyFailed { ts, step, feedback } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
+                s.current_step = *step; // Roll back: verify failed after step_completed advanced
                 s.step_status.insert(*step, StepStatus::Failed);
                 s.status = TaskStatus::Failed;
                 s.message = Some(feedback.clone());
@@ -326,8 +327,35 @@ mod tests {
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Failed);
+        assert_eq!(state.current_step, 0);
         assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
         assert_eq!(state.message.as_deref(), Some("tests failed"));
+    }
+
+    #[test]
+    fn test_verify_failed_after_step_completed_rollback() {
+        // StepCompleted(exit=0) advances current_step, but VerifyFailed must roll it back
+        let events = vec![
+            Event::TaskStarted { ts: ts() },
+            Event::StepCompleted {
+                ts: ts(),
+                step: 0,
+                exit_code: 0,
+                duration: Some(1.0),
+                stdout: None,
+                stderr: None,
+            },
+            Event::VerifyFailed {
+                ts: ts(),
+                step: 0,
+                feedback: "verify command failed".to_string(),
+            },
+        ];
+        let state = replay(&events, 3).unwrap();
+        assert_eq!(state.status, TaskStatus::Failed);
+        // current_step must be rolled back to 0 (the failed step), not 1
+        assert_eq!(state.current_step, 0);
+        assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
     }
 
     #[test]
