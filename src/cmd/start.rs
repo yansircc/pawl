@@ -306,7 +306,7 @@ fn execute_in_window(
     };
 
     let wrapped = format!(
-        "trap 'cd \"{}\" && wf _on-exit {} $?' EXIT; cd '{}' && {}",
+        "trap 'cd \"{}\" && wf _on-exit {} $?' EXIT; cd '{}' && {}; exit $?",
         ctx.repo_root, task_name, work_dir, command
     );
 
