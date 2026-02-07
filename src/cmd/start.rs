@@ -433,17 +433,20 @@ fn execute_in_window(
         &ctx.repo_root
     };
 
-    // Build export commands for all WF_* environment variables
+    // Write a runner script with env vars + trap + command
     let env = ctx.to_env_vars();
-    let exports: Vec<String> = env.iter()
-        .map(|(k, v)| format!("export {}='{}'", k, v.replace('\'', "'\\''")))
-        .collect();
-    let export_prefix = exports.join("; ");
+    let runner_file = format!("{}/.wf/logs/.run.{}.sh", ctx.repo_root, task_name);
+    let mut script = String::from("#!/usr/bin/env bash\n");
+    for (k, v) in &env {
+        script.push_str(&format!("export {}=\"{}\"\n", k, v.replace('"', "\\\"")));
+    }
+    script.push_str(&format!(
+        "trap 'cd \"{}\" && wf _on-exit {} $?' EXIT\ncd '{}' && {}\nexit $?\n",
+        ctx.repo_root, task_name, work_dir, command
+    ));
+    std::fs::write(&runner_file, &script)?;
 
-    let wrapped = format!(
-        "{}; trap 'cd \"{}\" && wf _on-exit {} $?' EXIT; cd '{}' && {}; exit $?",
-        export_prefix, ctx.repo_root, task_name, work_dir, command
-    );
+    let wrapped = format!("bash '{}'", runner_file);
 
     println!("  → Sending to {}:{}", session, window);
     println!("  → Waiting for 'wf done {}'", task_name);

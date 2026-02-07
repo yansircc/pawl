@@ -3,7 +3,7 @@
 # Source this file in your worker/wrapper scripts:
 #   source "$(dirname "$0")/../lib/ai-helpers.sh"
 
-set -euo pipefail
+set -uo pipefail
 
 # Extract the most recent session_id from a task's JSONL log.
 # Usage: extract_session_id <jsonl_file>
@@ -11,7 +11,7 @@ set -euo pipefail
 extract_session_id() {
     local log_file="${1:?Usage: extract_session_id <jsonl_file>}"
     [ -f "$log_file" ] || { echo ""; return 0; }
-    grep -o '"session_id":"[^"]*"' "$log_file" | tail -1 | cut -d'"' -f4
+    { grep -o '"session_id":"[^"]*"' "$log_file" || true; } | tail -1 | cut -d'"' -f4
 }
 
 # Extract the most recent failure feedback from a task's JSONL log.
@@ -24,12 +24,12 @@ extract_feedback() {
     [ -f "$log_file" ] || { echo ""; return 0; }
 
     if [ -n "$step_idx" ]; then
-        grep '"type":"step_completed"' "$log_file" \
+        { grep '"type":"step_completed"' "$log_file" || true; } \
             | grep "\"step\":${step_idx}" \
             | jq -r 'select(.exit_code != 0) | .stderr // empty' 2>/dev/null \
             | tail -1
     else
-        grep '"type":"step_completed"' "$log_file" \
+        { grep '"type":"step_completed"' "$log_file" || true; } \
             | jq -r 'select(.exit_code != 0) | .stderr // empty' 2>/dev/null \
             | tail -1
     fi
