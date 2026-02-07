@@ -128,12 +128,12 @@ pub enum Command {
         message: Option<String>,
     },
 
-    /// Internal: called on window exit
-    #[command(name = "_on-exit", hide = true)]
-    OnExit {
+    /// Internal: run command in tmux window as parent process
+    #[command(name = "_run", hide = true)]
+    Run {
         /// Task name
         task: String,
-        /// Exit code from the command
-        exit_code: i32,
+        /// Step index (0-based)
+        step: usize,
     },
 }

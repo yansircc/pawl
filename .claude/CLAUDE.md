@@ -51,7 +51,8 @@ src/
 │   ├── create.rs        # wf create (improved task template)
 │   ├── start.rs         # wf start (execution engine, resolve/dispatch pipeline)
 │   ├── status.rs        # wf status / wf list
-│   ├── control.rs       # wf stop/reset + _on-exit
+│   ├── control.rs       # wf stop/reset
+│   ├── run.rs           # wf _run (in_window parent process, replaces runner script + trap)
 │   ├── approve.rs       # wf done (approve waiting step or complete in_window step)
 │   ├── capture.rs       # wf capture (tmux content)
 │   ├── wait.rs          # wf wait (poll via Project API)
@@ -151,7 +152,7 @@ Per-task event log: `.wf/logs/{task}.jsonl`
 
 10 event types:
 - `task_started` — initializes Running, step=0
-- `step_completed` — exit_code==0 ? Success+advance : Failed (unified: sync, on_exit, done, verify failure)
+- `step_completed` — exit_code==0 ? Success+advance : Failed (unified: sync, _run, done, verify failure)
 - `step_waiting` — step paused, waiting for approval (reason: "gate"/"verify_human"/"on_fail_human")
 - `step_approved` — approval granted, advance step
 - `window_launched` — Running (in_window step sent to tmux)
@@ -192,7 +193,7 @@ start(task)
      ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
      ├─ Gate step (no run) → StepWaiting, return (wait for wf done)
      ├─ Normal step → run sync → handle_step_completion
-     └─ in_window step → write runner script → bash via tmux → return (wait for wf done)
+     └─ in_window step → send `wf _run task step` to tmux → return (wait for wf done/_run completion)
 
 handle_step_completion(exit_code, step, run_output):
   1. run_verify (if exit_code == 0) → VerifyOutcome
@@ -214,9 +215,11 @@ done(task)
   │   └─ retry? keep tmux window : kill tmux window
   └─ Waiting: emit StepApproved → continue
 
-on_exit(task, exit_code)
-  ├─ if exit_code==0 && in_window → check_window_health (may emit WindowLost)
-  └─ else → handle_step_completion (emits StepCompleted inside)
+_run(task, step_idx)  [runs inside tmux as parent process]
+  ├─ ignore SIGHUP, fork child (bash -c command), waitpid
+  ├─ redirect stdout/stderr → /dev/null (pty may be gone)
+  ├─ re-check state (wf done may have already handled)
+  └─ if still Running at step_idx → handle_step_completion
 
 check_window_health(task_name) → bool:
   └─ Running + in_window + window gone → emit WindowLost, return false

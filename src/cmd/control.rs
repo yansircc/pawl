@@ -5,8 +5,7 @@ use crate::model::{Event, TaskStatus};
 use crate::util::tmux;
 
 use super::common::Project;
-use super::start;
-use super::start::{continue_execution, RunOutput};
+use super::start::continue_execution;
 
 /// Stop the current task
 pub fn stop(task_name: &str) -> Result<()> {
@@ -116,59 +115,6 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             }
             if branch_exists {
                 println!("  git branch -D {}", branch_name);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Internal: called when in_window command exits
-pub fn on_exit(task_name: &str, exit_code: i32) -> Result<()> {
-    let project = Project::load()?;
-
-    let state = project.replay_task(task_name)?;
-
-    let Some(state) = state else {
-        return Ok(());
-    };
-
-    if state.status != TaskStatus::Running {
-        return Ok(());
-    }
-
-    let step_idx = state.current_step;
-    let step = &project.config.workflow[step_idx];
-
-    // P12 fix: if exit_code=0 but window is gone, it was killed by signal (SIGHUP from kill-window)
-    if exit_code == 0 && step.in_window {
-        if !project.check_window_health(task_name)? {
-            eprintln!("Task '{}' window lost at step {} (killed by signal).", task_name, step_idx + 1);
-            return Ok(());
-        }
-    }
-
-    // Use unified pipeline (StepCompleted emitted inside)
-    let run_output = RunOutput {
-        duration: None,
-        stdout: None,
-        stderr: None,
-    };
-    let step = step.clone();
-    match start::handle_step_completion(&project, task_name, step_idx, exit_code, &step, run_output)? {
-        true => {
-            // Pipeline says continue — run next steps
-            continue_execution(&project, task_name)?;
-        }
-        false => {
-            if exit_code != 0 {
-                eprintln!(
-                    "Task '{}' failed at step {} (exit code: {}). Use 'wf reset --step {}' to retry.",
-                    task_name,
-                    step_idx + 1,
-                    exit_code,
-                    task_name
-                );
             }
         }
     }

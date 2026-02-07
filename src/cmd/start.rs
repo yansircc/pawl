@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use std::os::unix::process::CommandExt as _;
 use std::time::Instant;
 
 use crate::model::config::Step;
@@ -154,7 +155,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
                 step: step_idx,
             })?;
 
-            execute_in_window(project, task_name, &ctx, &expanded)?;
+            execute_in_window(project, task_name, &ctx, step_idx)?;
             return Ok(());
         } else {
             // Normal step: execute synchronously
@@ -366,7 +367,7 @@ fn emit_step_completed_for_failure(
 }
 
 /// Unified pipeline: handles verify + on_fail after any step completion.
-/// Called from execute_step, on_exit, and done.
+/// Called from execute_step, run_in_window, and done.
 /// StepCompleted is emitted INSIDE this function (after verify is resolved).
 pub fn handle_step_completion(
     project: &Project,
@@ -412,8 +413,21 @@ fn execute_in_window(
     _project: &Project,
     task_name: &str,
     ctx: &Context,
-    command: &str,
+    step_idx: usize,
 ) -> Result<()> {
+    let wf_bin = std::env::current_exe()?.to_string_lossy().to_string();
+    let run_cmd = format!("{} _run {} {}", wf_bin, task_name, step_idx);
+
+    // If already running inside a tmux window (consecutive in_window steps),
+    // exec directly instead of send_keys
+    if std::env::var("WF_RUNNING_IN_WINDOW").ok().as_deref() == Some(task_name) {
+        println!("  → exec into next in_window step");
+        let err = std::process::Command::new(&wf_bin)
+            .args(["_run", task_name, &step_idx.to_string()])
+            .exec();
+        bail!("exec failed: {}", err);
+    }
+
     let session = &ctx.session;
     let window = &ctx.window;
 
@@ -427,31 +441,10 @@ fn execute_in_window(
         tmux::create_window(session, window, Some(&ctx.repo_root))?;
     }
 
-    let work_dir = if std::path::Path::new(&ctx.worktree).exists() {
-        &ctx.worktree
-    } else {
-        &ctx.repo_root
-    };
-
-    // Write a runner script with env vars + trap + command
-    let env = ctx.to_env_vars();
-    let runner_file = format!("{}/.wf/logs/.run.{}.sh", ctx.repo_root, task_name);
-    let mut script = String::from("#!/usr/bin/env bash\n");
-    for (k, v) in &env {
-        script.push_str(&format!("export {}=\"{}\"\n", k, v.replace('"', "\\\"")));
-    }
-    script.push_str(&format!(
-        "trap 'cd \"{}\" && wf _on-exit {} $?' EXIT\ncd '{}' && {}\nexit $?\n",
-        ctx.repo_root, task_name, work_dir, command
-    ));
-    std::fs::write(&runner_file, &script)?;
-
-    let wrapped = format!("bash '{}'", runner_file);
-
     println!("  → Sending to {}:{}", session, window);
     println!("  → Waiting for 'wf done {}'", task_name);
 
-    tmux::send_keys(session, window, &wrapped)?;
+    tmux::send_keys(session, window, &run_cmd)?;
 
     Ok(())
 }

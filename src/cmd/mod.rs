@@ -7,6 +7,7 @@ pub mod enter;
 pub mod events;
 pub mod init;
 pub mod log;
+pub mod run;
 pub mod start;
 pub mod status;
 pub mod wait;
@@ -33,6 +34,6 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Log { task, step, all, all_runs, jsonl } => log::run(&task, step, all, all_runs, jsonl),
         Command::Events { task, follow } => events::run(task.as_deref(), follow),
         Command::Done { task, message } => approve::done(&task, message.as_deref()),
-        Command::OnExit { task, exit_code } => control::on_exit(&task, exit_code),
+        Command::Run { task, step } => run::run_in_window(&task, step),
     }
 }

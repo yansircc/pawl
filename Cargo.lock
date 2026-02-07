@@ -596,6 +596,7 @@ dependencies = [
  "clap",
  "fs2",
  "json_comments",
+ "libc",
  "notify",
  "serde",
  "serde_json",
