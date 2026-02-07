@@ -274,6 +274,29 @@ wf is a generic step sequencer — git worktrees are one pattern, not a requirem
 
 No `${worktree}`, `${branch}`, or git operations. Examples: testing pipelines (task = test case), deployment (task = service), data processing (task = dataset), project bootstrapping (task = project name).
 
+### Recipe 7: Plan-First Development (Foreman Reviews Plan Before Execution)
+
+Adds explicit plan approval step. AI creates a plan in read-only mode, foreman reviews and approves before any code is written. Requires one-time setup: `cd .wf/lib && npm install`.
+
+```jsonc
+{
+  "workflow": [
+    { "name": "setup", "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
+    { "name": "plan",
+      "run": "cd ${worktree} && node ${repo_root}/.wf/lib/plan-worker.mjs",
+      "in_window": true, "verify": "human", "on_fail": "human" },
+    { "name": "develop",
+      "run": "source ${repo_root}/.wf/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+      "in_window": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
+    { "name": "review" },
+    { "name": "merge", "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
+    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
+  ]
+}
+```
+
+Notes: plan step runs AI in read-only plan mode via Claude Agent SDK. When AI calls `ExitPlanMode`, the plan is saved to `.wf/plans/${task}.md` and the session ID to `.wf/plans/${task}.session`. Foreman reviews the plan then `wf done` to approve. The develop step's `run_ai_worker` detects the plan session file and resumes it with `-r session_id`, executing the approved plan. Plan rejection: `wf reset --step` on the plan step re-plans from scratch.
+
 ## Foreman Coordination
 
 Foreman is an AI agent that manages multiple worker agents. wf **does not push notifications — Foreman must poll** (unless event hooks are configured).

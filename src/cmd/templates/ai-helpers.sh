@@ -69,7 +69,18 @@ run_ai_worker() {
     local feedback
     feedback=$(extract_feedback "$log_file")
 
-    if [ -n "$session_id" ]; then
+    # Plan-aware resume: if plan step created a session, resume it
+    local plan_dir="${WF_REPO_ROOT:-.}/.wf/plans"
+    local plan_session="${plan_dir}/${WF_TASK:-}.session"
+
+    if [ -f "$plan_session" ] && [ -z "$session_id" ]; then
+        # First run after plan approval — resume plan session
+        local plan_sid
+        plan_sid=$(cat "$plan_session")
+        echo "[ai-helpers] Resuming plan session ${plan_sid}" >&2
+        $claude_cmd -p "The plan has been approved by the foreman. Execute it now. Do not re-plan." \
+            -r "$plan_sid" --tools "$tools" $extra_args
+    elif [ -n "$session_id" ]; then
         # Resume existing session with feedback
         local prompt="Continue working on this task."
         [ -n "$feedback" ] && prompt="Previous attempt failed verification. Feedback: ${feedback}. Please fix and try again."

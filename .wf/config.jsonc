@@ -6,7 +6,7 @@
   "workflow": [
     { "name": "setup", "run": "tmux new-session -d -s wf-test 2>/dev/null; rm -rf ~/code/tmp/${task} && mkdir -p ~/code/tmp/${task} && cd ~/code/tmp/${task} && git init && awk '/^---$/{n++;next}n>=2' ${task_file} > PLAN.md && git add -A && git commit -m 'init'" },
     { "name": "init-wf", "run": "cd ~/code/tmp/${task} && wf init" },
-    { "name": "bootstrap", "run": "cd ~/code/tmp/${task} && awk '/^---$/{n++;next}n>=2' ${task_file} | ${claude_command} -p - --permission-mode bypassPermissions --max-turns 20",
+    { "name": "bootstrap", "run": "cd ~/code/tmp/${task} && (echo '重要约束: 如果需要配置 wf 的 claude_command，必须设为 ccc（不是默认的 claude）'; echo; awk '/^---$/{n++;next}n>=2' ${task_file}) | ${claude_command} -p - --permission-mode bypassPermissions --max-turns 20",
       "in_window": true, "verify": "human", "on_fail": "human" },
     { "name": "review" }
   ]

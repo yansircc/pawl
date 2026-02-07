@@ -19,9 +19,12 @@ const GITIGNORE_ENTRIES: &str = r#"
 !.wf/tasks/
 !.wf/config.jsonc
 !.wf/lib/
+.wf/lib/node_modules/
 "#;
 
 const AI_HELPERS_TEMPLATE: &str = include_str!("templates/ai-helpers.sh");
+const PLAN_WORKER_TEMPLATE: &str = include_str!("templates/plan-worker.mjs");
+const PLAN_PACKAGE_TEMPLATE: &str = include_str!("templates/plan-package.json");
 
 const WF_SKILL: &str = include_str!("templates/wf-skill.md");
 
@@ -50,7 +53,7 @@ pub fn run() -> Result<()> {
         .context("Failed to write config.jsonc")?;
     println!("  Created {}", config_path.display());
 
-    // Write lib files (only ai-helpers.sh)
+    // Write lib files
     create_lib_files(&wf_dir)?;
 
     // Write skill files (.claude/skills/wf/)
@@ -80,6 +83,16 @@ fn create_lib_files(wf_dir: &Path) -> Result<()> {
     fs::set_permissions(&helpers_path, perms)
         .context("Failed to set ai-helpers.sh permissions")?;
     println!("  Created {}", helpers_path.display());
+
+    let plan_worker_path = lib_dir.join("plan-worker.mjs");
+    fs::write(&plan_worker_path, PLAN_WORKER_TEMPLATE)
+        .context("Failed to write plan-worker.mjs")?;
+    println!("  Created {}", plan_worker_path.display());
+
+    let package_path = lib_dir.join("package.json");
+    fs::write(&package_path, PLAN_PACKAGE_TEMPLATE)
+        .context("Failed to write package.json")?;
+    println!("  Created {}", package_path.display());
 
     Ok(())
 }
