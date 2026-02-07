@@ -1,5 +1,5 @@
 ---
-name: compress
+name: essence
 description: 压缩模式——输出问题的最短生成程序，推导不检索
 ---
 
