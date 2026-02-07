@@ -7,7 +7,7 @@ An orchestrator for AI coding agents. Manages agent lifecycle (setup → develop
 ```
 src/
 ├── main.rs              # Entry point
-├── cli.rs               # clap CLI (13 subcommands)
+├── cli.rs               # clap CLI (14 subcommands)
 ├── model/
 │   ├── config.rs        # Config + Step structs, JSONC loader
 │   ├── event.rs         # Event enum (11 variants), replay()
@@ -25,7 +25,8 @@ src/
 │   ├── capture.rs       # wf capture (tmux content)
 │   ├── wait.rs          # wf wait (poll until status)
 │   ├── enter.rs         # wf enter (attach to tmux window)
-│   └── log.rs           # wf log (--step/--all/--jsonl)
+│   ├── events.rs        # wf events (unified event stream, --follow)
+│   └── log.rs           # wf log (--step/--all/--all-runs/--jsonl)
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name
     ├── shell.rs         # run_command variants, CommandResult
@@ -104,6 +105,8 @@ All variables are available as `${var}` in config and as `WF_VAR` env vars in su
 
 **StepStatus**: `Success` | `Failed` | `Skipped`
 
+**Step indexing**: All programmatic interfaces use **0-based** step indices (JSONL events, `--json` output, `--step` filter, env vars). CLI human-readable output uses 1-based (`[1/5] build`).
+
 ## Event Sourcing
 
 JSONL is the **single source of truth** — no `status.json`. State is reconstructed via `replay()`.
@@ -134,15 +137,16 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `wf init` | Initialize project |
 | `wf create <name> [desc] [--depends a,b]` | Create task |
 | `wf list` | List all tasks |
-| `wf start <task>` | Start task execution |
-| `wf status [task] [--json]` | Show status |
+| `wf start <task> [--reset]` | Start task execution (--reset auto-resets first) |
+| `wf status [task] [--json]` | Show status (--json uses 0-based step index) |
 | `wf stop <task>` | Stop running task |
 | `wf reset <task>` | Reset to initial state |
 | `wf reset --step <task>` | Retry current step |
 | `wf enter <task>` | Attach to tmux window |
 | `wf capture <task> [-l N] [--json]` | Capture tmux content |
 | `wf wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
-| `wf log <task> [--step N] [--all] [--jsonl]` | View logs |
+| `wf log <task> [--step N] [--all] [--all-runs] [--jsonl]` | View logs (--all=current run, --all-runs=full history) |
+| `wf events [task] [--follow]` | Unified event stream (--follow for real-time) |
 | `wf done <task> [-m msg]` | Mark step done / approve |
 
 ## Execution Flow

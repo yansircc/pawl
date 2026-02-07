@@ -6,7 +6,7 @@ use crate::model::Event;
 use super::common::Project;
 
 /// Show task logs
-pub fn run(task_name: &str, step: Option<usize>, all: bool, jsonl: bool) -> Result<()> {
+pub fn run(task_name: &str, step: Option<usize>, all: bool, all_runs: bool, jsonl: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
@@ -30,7 +30,7 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, jsonl: bool) -> Resu
     }
 
     if jsonl {
-        return run_jsonl(&log_file, step, all);
+        return run_jsonl(&log_file, step, all, all_runs);
     }
 
     let events = project.read_events(&task_name)?;
@@ -40,6 +40,13 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, jsonl: bool) -> Resu
         return Ok(());
     }
 
+    // Filter to current run unless --all-runs
+    let events = if all_runs {
+        events
+    } else {
+        current_run_events(events)
+    };
+
     if all {
         for (i, event) in events.iter().enumerate() {
             if i > 0 {
@@ -47,16 +54,14 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, jsonl: bool) -> Resu
             }
             print_event(event, &project);
         }
-    } else if let Some(step_num) = step {
-        let step_idx = step_num.saturating_sub(1);
-
+    } else if let Some(step_idx) = step {
         let matching: Vec<&Event> = events
             .iter()
             .filter(|e| e.step_index() == Some(step_idx))
             .collect();
 
         if matching.is_empty() {
-            println!("No log entry found for step {}.", step_num);
+            println!("No log entry found for step {}.", step_idx);
             println!("The step may not have been executed yet.");
         } else {
             for (i, event) in matching.iter().enumerate() {
@@ -78,22 +83,40 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, jsonl: bool) -> Resu
     Ok(())
 }
 
-/// Output raw JSONL lines, optionally filtered by step
-fn run_jsonl(log_file: &std::path::Path, step: Option<usize>, all: bool) -> Result<()> {
+/// Filter events to only the current run (after the last TaskReset).
+fn current_run_events(events: Vec<Event>) -> Vec<Event> {
+    let last_reset_pos = events
+        .iter()
+        .rposition(|e| matches!(e, Event::TaskReset { .. }));
+
+    match last_reset_pos {
+        Some(pos) => events.into_iter().skip(pos + 1).collect(),
+        None => events,
+    }
+}
+
+/// Output raw JSONL lines, optionally filtered by step and/or current run
+fn run_jsonl(log_file: &std::path::Path, step: Option<usize>, all: bool, all_runs: bool) -> Result<()> {
     let file = std::fs::File::open(log_file)?;
     let reader = BufReader::new(file);
-    let step_idx = step.map(|s| s.saturating_sub(1));
 
-    // Collect lines (needed for "last only" default mode)
+    // Collect all lines
     let lines: Vec<String> = reader
         .lines()
         .filter_map(|l| l.ok())
         .filter(|l| !l.trim().is_empty())
         .collect();
 
-    if all || step_idx.is_some() {
+    // Filter to current run unless --all-runs
+    let lines = if all_runs {
+        lines
+    } else {
+        current_run_lines(lines)
+    };
+
+    if all || step.is_some() {
         for line in &lines {
-            if let Some(idx) = step_idx {
+            if let Some(idx) = step {
                 let event: Event = serde_json::from_str(line)?;
                 if event.step_index() != Some(idx) {
                     continue;
@@ -109,6 +132,18 @@ fn run_jsonl(log_file: &std::path::Path, step: Option<usize>, all: bool) -> Resu
     }
 
     Ok(())
+}
+
+/// Filter JSONL lines to only the current run (after the last task_reset line).
+fn current_run_lines(lines: Vec<String>) -> Vec<String> {
+    let last_reset_pos = lines
+        .iter()
+        .rposition(|l| l.contains("\"type\":\"task_reset\""));
+
+    match last_reset_pos {
+        Some(pos) => lines.into_iter().skip(pos + 1).collect(),
+        None => lines,
+    }
 }
 
 fn step_name(project: &Project, step: usize) -> String {

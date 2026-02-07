@@ -11,3 +11,4 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 json_comments = "0.2"
 fs2 = "0.4"
+notify = "7"

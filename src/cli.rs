@@ -30,6 +30,9 @@ pub enum Command {
     Start {
         /// Task name
         task: String,
+        /// Reset task before starting (auto reset+start in one step)
+        #[arg(long)]
+        reset: bool,
     },
 
     /// Show task status
@@ -93,15 +96,27 @@ pub enum Command {
     Log {
         /// Task name
         task: String,
-        /// Show specific step log (1-based index)
+        /// Show specific step log (0-based index)
         #[arg(short, long)]
         step: Option<usize>,
-        /// Show all step logs
+        /// Show all events in the current run
         #[arg(short, long)]
         all: bool,
+        /// Show all events across all runs (including before resets)
+        #[arg(long)]
+        all_runs: bool,
         /// Output raw JSONL (pipe to jq for queries)
         #[arg(long)]
         jsonl: bool,
+    },
+
+    /// Stream events from all (or specified) tasks in real-time
+    Events {
+        /// Only stream events for this task (optional, streams all if omitted)
+        task: Option<String>,
+        /// Keep streaming (tail -f mode). Without this, prints existing events and exits.
+        #[arg(short, long)]
+        follow: bool,
     },
 
     /// Mark current step as done / approve waiting step

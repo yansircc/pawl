@@ -132,7 +132,7 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
             TaskSummary {
                 name: name.clone(),
                 status: format_status(state.status),
-                current_step: state.current_step + 1,
+                current_step: state.current_step,
                 total_steps: workflow_len,
                 step_name,
                 message: state.message.clone(),
@@ -200,7 +200,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
         };
 
         steps.push(StepInfo {
-            index: i + 1,
+            index: i,
             name: step.name.clone(),
             step_type,
             status: step_status,
@@ -222,7 +222,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
             .as_ref()
             .map(|s| format_status(s.status))
             .unwrap_or_else(|| "pending".to_string()),
-        current_step: current_step + 1,
+        current_step,
         total_steps: workflow_len,
         message: state.as_ref().and_then(|s| s.message.clone()),
         started_at: state.as_ref().and_then(|s| s.started_at.map(|t| t.to_rfc3339())),

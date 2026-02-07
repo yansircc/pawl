@@ -10,24 +10,29 @@ use crate::util::variable::Context;
 
 use super::common::Project;
 
-pub fn run(task_name: &str) -> Result<()> {
+pub fn run(task_name: &str, reset: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
     let task_def = project.load_task(&task_name)?;
 
     // Check if task is already running
     if let Some(state) = project.replay_task(&task_name)? {
-        match state.status {
-            TaskStatus::Running => {
-                bail!("Task '{}' is already running at step {}", task_name, state.current_step);
+        if reset {
+            // Auto-reset before starting
+            project.append_event(&task_name, &Event::TaskReset { ts: event_timestamp() })?;
+        } else {
+            match state.status {
+                TaskStatus::Running => {
+                    bail!("Task '{}' is already running at step {}", task_name, state.current_step + 1);
+                }
+                TaskStatus::Completed => {
+                    bail!("Task '{}' is already completed. Use 'wf reset {}' to restart or 'wf start --reset {}'.", task_name, task_name, task_name);
+                }
+                TaskStatus::Waiting => {
+                    bail!("Task '{}' is waiting. Use 'wf done {}' to continue.", task_name, task_name);
+                }
+                _ => {}
             }
-            TaskStatus::Completed => {
-                bail!("Task '{}' is already completed. Use 'wf reset {}' to restart.", task_name, task_name);
-            }
-            TaskStatus::Waiting => {
-                bail!("Task '{}' is waiting. Use 'wf done {}' to continue.", task_name, task_name);
-            }
-            _ => {}
         }
     }
 
