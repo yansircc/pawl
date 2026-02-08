@@ -1,25 +1,6 @@
 # pawl — Resumable Step Sequencer
 
-pawl is a **resumable coroutine**: advance along a fixed step sequence, yield at decision points, rebuild state from an append-only log. Any repeatable multi-step process can be a pawl workflow — AI coding with git worktrees, testing pipelines, deployment automation, project bootstrapping. Steps support verify/retry/gate for human-in-the-loop control; viewports for long-running processes.
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `pawl init` | Initialize project (creates .pawl/) |
-| `pawl create <name> [desc] [--depends a,b]` | Create a task |
-| `pawl list` | List all tasks and their status |
-| `pawl start <task> [--reset]` | Start task execution (--reset resets first) |
-| `pawl status [task] [--json]` | Show status (--json uses 0-based index) |
-| `pawl stop <task>` | Stop a task |
-| `pawl reset <task>` | Fully reset a task |
-| `pawl reset --step <task>` | Retry current step |
-| `pawl done <task> [-m msg]` | Approve / mark done |
-| `pawl enter <task>` | Attach to viewport |
-| `pawl capture <task> [-l N] [--json]` | Capture viewport content |
-| `pawl wait <task> --until <status> [-t sec]` | Wait for specified status |
-| `pawl log <task> [--step N] [--all] [--all-runs]` | View logs |
-| `pawl events [task] [--follow]` | Raw event stream |
+Run `pawl --help` for CLI reference, variables, and state machine. Key subcommands have detailed `--help` (e.g. `pawl status --help` for JSON fields, `pawl done --help` for dual semantics).
 
 ## Step Model
 
@@ -63,31 +44,6 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 | Reliable tests but failure needs analysis | `"cd ${worktree} && cargo test"` | `"human"` | Auto-detect, human decision |
 | Simple step without tests | omit | omit | Failure is terminal, manual reset |
 
-## Config (.pawl/config.jsonc)
-
-```jsonc
-{
-  "session": "my-project",      // tmux session name (default: directory name)
-  "base_branch": "main",        // base branch (default)
-  "workflow": [                  // step sequence (required)
-    { "name": "step-name", "run": "cmd", "verify": "human|script", "on_fail": "retry|human", "in_viewport": true, "max_retries": 3 }
-  ],
-  "on": { "event_name": "shell command" }  // Event hooks (optional)
-}
-```
-
-## Task Definition (.pawl/tasks/{task}.md)
-
-```yaml
----
-name: my-task
-depends: [other-task]    # dependencies (optional, must be Completed first)
-skip: [cleanup]          # skip steps (optional, matches step name)
----
-
-Markdown description of what needs to be done.
-```
-
 ### Iterative Feedback Pattern
 
 After failure, **append** fix guidance to the end of task.md (do not overwrite):
@@ -101,31 +57,6 @@ Fix: Extract token generation into a pure function, pass fixed time in tests
 ```
 
 Append instead of overwrite: preserves history to avoid repeating mistakes.
-
-## Variables
-
-All `run`/`verify`/hook commands support `${var}` expansion, subprocesses get `PAWL_VAR` environment variables:
-
-| Variable | Value |
-|----------|-------|
-| `${task}` / `${branch}` | Task name / `pawl/{task}` |
-| `${worktree}` | `{repo_root}/{worktree_dir}/{task}` |
-| `${session}` | Viewport session name |
-| `${repo_root}` | Repository root directory |
-| `${step}` / `${step_index}` | Current step name / index (0-based) |
-| `${base_branch}` | Base branch |
-| `${log_file}` / `${task_file}` | `.pawl/logs/{task}.jsonl` / `.pawl/tasks/{task}.md` |
-
-## State Machine
-
-```
-Pending → Running → Waiting    (awaits pawl done)
-                  → Completed  (all steps done)
-                  → Failed     (step failed / viewport lost)
-                  → Stopped    (pawl stop)
-```
-
-**Step indexing**: CLI human-readable output is 1-based (`[1/5] build`), all programmatic interfaces are 0-based (`--step 0`, `--json`, JSONL, `PAWL_STEP_INDEX`).
 
 ## Event Hooks
 
@@ -160,52 +91,50 @@ All hooks also have access to standard variables (`${task}`, `${step}`, `${sessi
 
 ## Config Recipes
 
-### Recipe 1: Git Worktree + Custom Worker
+### Git Worktree Skeleton
+
+Recipes 1–3 and Plan-Then-Execute share this skeleton. Replace `⟨work⟩` with a variant below; omit `review` gate if unneeded; add `"on": {...}` for hooks (see Hook Examples above).
 
 ```jsonc
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
-      "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
+    ⟨work step(s)⟩,
     { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ],
-  "on": { "step_finished": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
-}
-```
-
-### Recipe 2: Human Review Flow
-
-```jsonc
-{
-  "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
-      "in_viewport": true, "verify": "human", "on_fail": "human" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ]
 }
 ```
 
-### Recipe 3: Pure Automation (No Viewport)
+Multi-task: `pawl start task-a && pawl start task-b && pawl start task-c` — each gets independent JSONL/worktree/viewport.
+
+### Variant: Viewport + Auto Verify
 
 ```jsonc
-{
-  "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "build",   "run": "cd ${worktree} && make build", "on_fail": "retry", "max_retries": 2 },
-    { "name": "test",    "run": "cd ${worktree} && make test",  "on_fail": "human" },
-    { "name": "review",  "verify": "human" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ]
-}
+{ "name": "work", "run": "cd ${worktree} && ./run-worker.sh",
+  "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 }
 ```
 
-### Recipe 4: Generic Pipeline (No Git)
+### Variant: Viewport + Human Review
+
+```jsonc
+{ "name": "work", "run": "cd ${worktree} && ./run-worker.sh",
+  "in_viewport": true, "verify": "human", "on_fail": "human" }
+```
+
+Omit the `review` gate (human verify on work step already covers it).
+
+### Variant: Sync Steps (No Viewport)
+
+```jsonc
+{ "name": "build", "run": "cd ${worktree} && make build", "on_fail": "retry", "max_retries": 2 },
+{ "name": "test",  "run": "cd ${worktree} && make test",  "on_fail": "human" }
+```
+
+Add `"verify": "human"` to the `review` step.
+
+### Recipe: Generic Pipeline (No Git)
 
 pawl is a generic step sequencer — git worktrees are one pattern, not a requirement:
 
@@ -221,31 +150,9 @@ pawl is a generic step sequencer — git worktrees are one pattern, not a requir
 }
 ```
 
-### Recipe 5: Multi-Task Parallel + Notification
-
-```jsonc
-{
-  "session": "my-project",
-  "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
-      "in_viewport": true, "verify": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 3 },
-    { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ],
-  "on": {
-    "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:supervisor -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:supervisor C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true",
-    "step_yielded": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:supervisor -l '[pawl] ${task} yielded: ${reason}' && tmux send-keys -t ${session}:supervisor C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true"
-  }
-}
-```
-
-Start multiple tasks: `pawl start task-a && pawl start task-b && pawl start task-c`. Each gets independent JSONL/worktree/viewport.
-
 ## AI Worker Integration Recipes
 
-pawl is tool-agnostic. Below are patterns for integrating AI coding agents as viewport workers. The worker is responsible for its own session management — pawl only provides the sequencing, variables, and event log.
+pawl is tool-agnostic. The worker manages its own session — pawl provides sequencing, variables, and event log. Use these as `⟨work⟩` in the git worktree skeleton above.
 
 ### Recipe: Claude Code Worker
 
@@ -255,10 +162,8 @@ pawl is tool-agnostic. Below are patterns for integrating AI coding agents as vi
   "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry" }
 ```
 
-Key points:
-- Session ID stored in `${worktree}/.claude-session`, managed by the worker itself
-- On retry, reads `PAWL_LOG_FILE` to extract failure feedback
-- `-r $(cat $SF)` resumes context, avoids re-understanding codebase
+- Session ID in `${worktree}/.claude-session`, managed by worker
+- On retry, reads `PAWL_LOG_FILE` for failure feedback; `-r $(cat $SF)` resumes context
 
 ### Recipe: Codex CLI Worker
 
@@ -278,23 +183,15 @@ Any CLI that accepts a prompt and runs non-interactively works:
   "in_viewport": true, "verify": "human", "on_fail": "human" }
 ```
 
-### Recipe: Plan-Then-Execute Pattern
+### Recipe: Plan-Then-Execute
 
-Split planning and execution into separate steps. The plan step runs the AI in read-only mode; a human reviews; then the execute step implements.
+Use with the git worktree skeleton, replacing `⟨work⟩` with both steps:
 
 ```jsonc
-{
-  "workflow": [
-    { "name": "setup", "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "plan",  "run": "cd ${worktree} && cat ${task_file} | claude -p - --permission-mode plan --output-format json | jq -r '.session_id' > .claude-session",
-      "in_viewport": true, "verify": "human", "on_fail": "human" },
-    { "name": "develop", "run": "cd ${worktree} && claude -p 'Execute the approved plan.' -r $(cat .claude-session)",
-      "in_viewport": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
-    { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ]
-}
+{ "name": "plan", "run": "cd ${worktree} && cat ${task_file} | claude -p - --permission-mode plan --output-format json | jq -r '.session_id' > .claude-session",
+  "in_viewport": true, "verify": "human", "on_fail": "human" },
+{ "name": "develop", "run": "cd ${worktree} && claude -p 'Execute the approved plan.' -r $(cat .claude-session)",
+  "in_viewport": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 }
 ```
 
 Plan rejection: `pawl reset --step` on the plan step re-plans from scratch.
@@ -338,42 +235,6 @@ while tasks remain incomplete:
 - **viewport_lost is passive detection**: pawl does not proactively notify when a viewport disappears. Detection only happens when `pawl status`/`pawl list`/`pawl wait` is called. Periodically `pawl list` to check health of in_viewport steps.
 - **pawl done dual semantics**: For Waiting status = approve (step advances); for Running+in_viewport = mark done (triggers verify flow).
 - **Retry exhaustion**: After reaching max_retries, status becomes Failed (does not auto-transition to Waiting). Manual intervention required.
-
-## pawl status --json Output
-
-### List Mode (no task argument)
-
-```json
-[{
-  "name": "my-task",
-  "status": "waiting",
-  "current_step": 2,
-  "total_steps": 6,
-  "step_name": "review",
-  "message": "verify_human",
-  "started_at": "RFC3339",
-  "updated_at": "RFC3339",
-  "blocked_by": ["dep-task"],
-  "retry_count": 0,
-  "last_feedback": "string"
-}]
-```
-
-### Single Task Detail (with task argument)
-
-Adds `description`, `depends`, `workflow` fields:
-
-```json
-{
-  "workflow": [
-    { "index": 0, "name": "setup", "status": "success" },
-    { "index": 1, "name": "develop", "step_type": "in_viewport", "status": "current" },
-    { "index": 2, "name": "review", "step_type": "gate", "status": "pending" }
-  ]
-}
-```
-
-Field notes: `retry_count` only counts auto retries (auto=true); `last_feedback` searches backwards, stops at TaskReset; optional fields are omitted when null. `step_type`: `"gate"` / `"in_viewport"` / omitted. `status`: `success` / `failed` / `skipped` / `current` / `pending`.
 
 ## Troubleshooting
 
