@@ -1,4 +1,5 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
+use crate::error::PawlError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -110,7 +111,9 @@ fn parse_frontmatter(content: &str) -> Result<(Option<Frontmatter>, String)> {
     // Find the closing delimiter
     let after_first = &content[3..];
     let Some(end_pos) = after_first.find("\n---") else {
-        bail!("Unclosed frontmatter: missing closing ---");
+        return Err(PawlError::Validation {
+            message: "Unclosed frontmatter: missing closing ---".into(),
+        }.into());
     };
 
     let yaml_content = &after_first[..end_pos].trim();

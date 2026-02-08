@@ -1,9 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use fs2::FileExt;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
+use crate::error::PawlError;
 use crate::model::event::{event_timestamp, replay, Event};
 use crate::model::{Config, TaskDefinition, TaskState, TaskStatus};
 use crate::util::git::get_repo_root;
@@ -63,7 +64,9 @@ impl Project {
         let pawl_dir = PathBuf::from(&repo_root).join(PAWL_DIR);
 
         if !pawl_dir.exists() {
-            bail!("Not a pawl project. Run 'pawl init' first.");
+            return Err(PawlError::NotFound {
+                message: "Not a pawl project. Run 'pawl init' first.".into(),
+            }.into());
         }
 
         let config = Config::load(&pawl_dir)?;
@@ -120,7 +123,9 @@ impl Project {
     pub fn load_task(&self, name: &str) -> Result<TaskDefinition> {
         let task_path = self.pawl_dir.join("tasks").join(format!("{}.md", name));
         if !task_path.exists() {
-            bail!("Task '{}' not found. Create it with: pawl create {}", name, name);
+            return Err(PawlError::NotFound {
+                message: format!("Task '{}' not found. Create it with: pawl create {}", name, name),
+            }.into());
         }
         TaskDefinition::load(&task_path)
     }
@@ -135,11 +140,9 @@ impl Project {
         if let Ok(index) = name_or_index.parse::<usize>() {
             let tasks = self.load_all_tasks()?;
             if index == 0 || index > tasks.len() {
-                bail!(
-                    "Task index {} out of range. Have {} tasks.",
-                    index,
-                    tasks.len()
-                );
+                return Err(PawlError::NotFound {
+                    message: format!("Task index {} out of range. Have {} tasks.", index, tasks.len()),
+                }.into());
             }
             return Ok(tasks[index - 1].name.clone());
         }
@@ -204,6 +207,7 @@ impl Project {
         }
 
         let file = fs::File::open(&log_file)?;
+        file.lock_shared()?;
         let reader = BufReader::new(file);
         let mut events = Vec::new();
 
@@ -289,6 +293,37 @@ impl Project {
         }
     }
 
+    /// Derive routing hints (suggest/prompt) from task status.
+    /// suggest = mechanical commands agent can execute directly.
+    /// prompt = requires judgment, agent must evaluate before deciding.
+    /// `pawl done` never appears in suggest — it requires judgment.
+    pub fn derive_routing(status: &str, message: Option<&str>, task: &str) -> (Vec<String>, Option<String>) {
+        match status {
+            "pending" => (vec![format!("pawl start {task}")], None),
+            "waiting" => match message {
+                Some("gate") => (
+                    vec![],
+                    Some(format!("confirm preconditions, then: pawl done {task}")),
+                ),
+                Some("verify_human") => (
+                    vec![],
+                    Some(format!("verify work quality, then: pawl done {task}")),
+                ),
+                Some("on_fail_human") => (
+                    vec![format!("pawl reset --step {task}")],
+                    Some(format!("review failure, then: pawl done {task} to accept")),
+                ),
+                _ => (vec![], None),
+            },
+            "failed" => (vec![format!("pawl reset --step {task}")], None),
+            "stopped" => (
+                vec![format!("pawl start {task}"), format!("pawl reset {task}")],
+                None,
+            ),
+            _ => (vec![], None),
+        }
+    }
+
     /// Output task state as JSON to stdout — unified output point for all write commands.
     pub fn output_task_state(&self, task_name: &str) -> Result<()> {
         self.detect_viewport_loss(task_name)?;
@@ -303,9 +338,10 @@ impl Project {
         };
 
         let (retry_count, last_feedback) = extract_step_context(&events, current_step);
+        let (suggest, prompt) = Self::derive_routing(&status, message.as_deref(), task_name);
 
-        let json = serde_json::json!({
-            "task": task_name,
+        let mut json = serde_json::json!({
+            "name": task_name,
             "status": status,
             "run_id": run_id,
             "current_step": current_step,
@@ -315,6 +351,12 @@ impl Project {
             "retry_count": retry_count,
             "last_feedback": last_feedback,
         });
+        if !suggest.is_empty() {
+            json["suggest"] = serde_json::to_value(&suggest).unwrap();
+        }
+        if let Some(p) = &prompt {
+            json["prompt"] = serde_json::to_value(p).unwrap();
+        }
         println!("{}", json);
         Ok(())
     }

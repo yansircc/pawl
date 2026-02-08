@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 
+use crate::error::PawlError;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
 
@@ -13,13 +14,21 @@ pub fn stop(task_name: &str) -> Result<()> {
 
     let state = project.replay_task(&task_name)?;
     let Some(state) = state else {
-        bail!("Task '{}' has not been started. Use 'pawl start {}' to begin.", task_name, task_name);
+        return Err(PawlError::StateConflict {
+            task: task_name.clone(),
+            status: "pending".into(),
+            message: format!("not started. Use 'pawl start {}' to begin", task_name),
+        }.into());
     };
 
     match state.status {
         TaskStatus::Running | TaskStatus::Waiting => {}
         _ => {
-            bail!("Task '{}' is not running (status: {}).", task_name, state.status);
+            return Err(PawlError::StateConflict {
+                task: task_name.clone(),
+                status: state.status.to_string(),
+                message: "not running".into(),
+            }.into());
         }
     }
 
@@ -28,7 +37,7 @@ pub fn stop(task_name: &str) -> Result<()> {
 
     if project.viewport.exists(&task_name) {
         eprintln!("Sending interrupt to {}:{}...", session, task_name);
-        project.viewport.send(&task_name, "\x03")?;
+        project.viewport.execute(&task_name, "\x03")?;
     }
 
     project.append_event(&task_name, &Event::TaskStopped {
@@ -54,24 +63,44 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
     if step_only {
         // Step-only reset: reset current step and continue execution
         let Some(state) = state else {
-            bail!("Task '{}' has not been started.", task_name);
+            return Err(PawlError::StateConflict {
+                task: task_name.clone(),
+                status: "pending".into(),
+                message: "not started".into(),
+            }.into());
         };
 
         let step_idx = state.current_step;
         if step_idx >= project.config.workflow.len() {
-            bail!("Task '{}' is already completed. Use 'pawl reset {}' for full reset.", task_name, task_name);
+            return Err(PawlError::StateConflict {
+                task: task_name.clone(),
+                status: "completed".into(),
+                message: format!("use 'pawl reset {}' for full reset", task_name),
+            }.into());
         }
 
         match state.status {
             TaskStatus::Failed | TaskStatus::Stopped | TaskStatus::Waiting => {}
             TaskStatus::Running => {
-                bail!("Task '{}' is already running.", task_name);
+                return Err(PawlError::StateConflict {
+                    task: task_name.clone(),
+                    status: "running".into(),
+                    message: "already running".into(),
+                }.into());
             }
             TaskStatus::Completed => {
-                bail!("Task '{}' is completed. Use 'pawl reset {}' for full reset.", task_name, task_name);
+                return Err(PawlError::StateConflict {
+                    task: task_name.clone(),
+                    status: "completed".into(),
+                    message: format!("use 'pawl reset {}' for full reset", task_name),
+                }.into());
             }
             TaskStatus::Pending => {
-                bail!("Task '{}' has not been started. Use 'pawl start {}'", task_name, task_name);
+                return Err(PawlError::StateConflict {
+                    task: task_name.clone(),
+                    status: "pending".into(),
+                    message: format!("not started. Use 'pawl start {}'", task_name),
+                }.into());
             }
         }
 
@@ -93,7 +122,7 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
         if is_running {
             if project.viewport.exists(&task_name) {
                 eprintln!("Stopping task viewport...");
-                project.viewport.send(&task_name, "\x03")?;
+                project.viewport.execute(&task_name, "\x03")?;
             }
         }
 

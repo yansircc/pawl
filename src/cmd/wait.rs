@@ -1,7 +1,8 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::error::PawlError;
 use crate::model::TaskStatus;
 
 use super::common::Project;
@@ -30,16 +31,16 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
             current_status,
             start.elapsed().as_secs_f64()
         );
+        project.output_task_state(&resolved_name)?;
         return Ok(());
     }
 
     if is_terminal_mismatch_multi(current_status, &targets) {
-        bail!(
-            "Task '{}' is in terminal state '{}', will not reach any of '{}'",
-            resolved_name,
-            current_status,
-            until
-        );
+        return Err(PawlError::StateConflict {
+            task: resolved_name.clone(),
+            status: current_status.to_string(),
+            message: format!("will not reach any of '{}'", until),
+        }.into());
     }
 
     poll_status(&project, &resolved_name, &targets, until, timeout, interval, start)
@@ -63,12 +64,10 @@ fn poll_status(
                 .replay_task(task_name)?
                 .map(|s| s.status)
                 .unwrap_or(TaskStatus::Pending);
-            bail!(
-                "Timeout waiting for task '{}' to reach status '{}' (current: {})",
-                task_name,
-                until,
-                current_status
-            );
+            return Err(PawlError::Timeout {
+                task: task_name.to_string(),
+                message: format!("waiting for task '{}' to reach '{}' (current: {})", task_name, until, current_status),
+            }.into());
         }
 
         // Health check: unified through Project API
@@ -86,16 +85,16 @@ fn poll_status(
                 current_status,
                 start.elapsed().as_secs_f64()
             );
+            project.output_task_state(task_name)?;
             return Ok(());
         }
 
         if is_terminal_mismatch_multi(current_status, targets) {
-            bail!(
-                "Task '{}' is in terminal state '{}', will not reach any of '{}'",
-                task_name,
-                current_status,
-                until
-            );
+            return Err(PawlError::StateConflict {
+                task: task_name.to_string(),
+                status: current_status.to_string(),
+                message: format!("will not reach any of '{}'", until),
+            }.into());
         }
     }
 }

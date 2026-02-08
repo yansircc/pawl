@@ -15,25 +15,6 @@ impl TmuxViewport {
         }
     }
 
-    /// Check if a pane is running a process (has active command).
-    /// This is TmuxViewport-specific (not part of the Viewport trait).
-    pub fn pane_is_active(&self, name: &str) -> bool {
-        let cmd = format!(
-            "tmux list-panes -t '{}:{}' -F '#{{pane_current_command}}' 2>/dev/null",
-            self.session, name
-        );
-        if let Ok(result) = run_command(&cmd) {
-            if result.success {
-                let cmd_name = result.stdout.trim();
-                !matches!(cmd_name, "bash" | "zsh" | "sh" | "fish" | "")
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    }
-
     fn session_exists(&self) -> bool {
         run_command_success(&format!("tmux has-session -t '{}' 2>/dev/null", self.session))
     }
@@ -47,10 +28,6 @@ impl TmuxViewport {
 }
 
 impl Viewport for TmuxViewport {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn open(&self, name: &str, cwd: &str) -> Result<()> {
         if !self.session_exists() {
             let cmd = format!("tmux new-session -d -s '{}' -c '{}'", self.session, cwd);
@@ -70,7 +47,7 @@ impl Viewport for TmuxViewport {
         Ok(())
     }
 
-    fn send(&self, name: &str, text: &str) -> Result<()> {
+    fn execute(&self, name: &str, text: &str) -> Result<()> {
         // Handle raw control characters (e.g., Ctrl+C for interrupt)
         if text == "\x03" {
             let cmd = format!("tmux send-keys -t '{}:{}' C-c", self.session, name);
@@ -109,6 +86,23 @@ impl Viewport for TmuxViewport {
 
     fn exists(&self, name: &str) -> bool {
         self.window_exists_raw(name)
+    }
+
+    fn is_active(&self, name: &str) -> bool {
+        let cmd = format!(
+            "tmux list-panes -t '{}:{}' -F '#{{pane_current_command}}' 2>/dev/null",
+            self.session, name
+        );
+        if let Ok(result) = run_command(&cmd) {
+            if result.success {
+                let cmd_name = result.stdout.trim();
+                !matches!(cmd_name, "bash" | "zsh" | "sh" | "fish" | "")
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 
     fn close(&self, name: &str) -> Result<()> {

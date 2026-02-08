@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 
+use crate::error::PawlError;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
 
@@ -16,7 +17,11 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
     let state = project.replay_task(&task_name)?;
     let Some(state) = state else {
-        bail!("Task '{}' has not been started. Use 'pawl start {}' to begin.", task_name, task_name);
+        return Err(PawlError::StateConflict {
+            task: task_name.clone(),
+            status: "pending".into(),
+            message: format!("not started. Use 'pawl start {}' to begin", task_name),
+        }.into());
     };
 
     let step_idx = state.current_step;
@@ -64,11 +69,11 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             resume_workflow(&project, &task_name)?;
         }
         _ => {
-            bail!(
-                "Task '{}' is {}. Cannot mark as done.",
-                task_name,
-                state.status
-            );
+            return Err(PawlError::StateConflict {
+                task: task_name.clone(),
+                status: state.status.to_string(),
+                message: "cannot mark as done".into(),
+            }.into());
         }
     }
 

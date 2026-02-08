@@ -1,7 +1,8 @@
-use anyhow::bail;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use crate::error::PawlError;
 
 /// Task state — pure projection type reconstructed by replay()
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,10 +85,9 @@ impl std::str::FromStr for TaskStatus {
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
             "stopped" => Ok(Self::Stopped),
-            _ => bail!(
-                "Invalid status '{}'. Valid values: pending, running, waiting, completed, failed, stopped",
-                s
-            ),
+            _ => return Err(PawlError::Validation {
+                message: format!("Invalid status '{}'. Valid values: pending, running, waiting, completed, failed, stopped", s),
+            }.into()),
         }
     }
 }

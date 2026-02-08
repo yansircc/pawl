@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 
+use crate::error::PawlError;
 use super::common::Project;
 
 /// Enter the task's viewport
@@ -14,11 +15,9 @@ pub fn run(task_name: &str) -> Result<()> {
 
     // Check if viewport exists
     if !project.viewport.exists(&task_name) {
-        bail!(
-            "Viewport '{}:{}' does not exist. Task may not have been started.",
-            session,
-            task_name
-        );
+        return Err(PawlError::NotFound {
+            message: format!("Viewport '{}:{}' does not exist. Task may not have been started.", session, task_name),
+        }.into());
     }
 
     // Attach to the viewport

@@ -137,13 +137,16 @@ step_type: "gate" / "in_viewport" / omitted. Optional fields omitted when null."
     },
 
     /// Stream events from all (or specified) tasks in real-time
-    #[command(after_help = "Without --follow: prints existing and exits. With --follow: tails continuously.")]
+    #[command(after_help = "Without --follow: prints existing and exits. With --follow: tails continuously.\n--type: comma-separated event types (e.g. step_finished,step_yielded).")]
     Events {
         /// Only stream events for this task (optional, streams all if omitted)
         task: Option<String>,
         /// Keep streaming (tail -f mode)
         #[arg(short, long)]
         follow: bool,
+        /// Filter by event type (comma-separated, e.g. step_finished,step_yielded)
+        #[arg(long = "type")]
+        event_type: Option<String>,
     },
 
     /// Mark current step as done / approve waiting step

@@ -1,52 +1,42 @@
 # Session Handoff
 
-## Current Session (S33): Agent-First Output Restructuring
+## Current Session (S35): Self-Routing Protocol + Agent-First Identity
 
-### What changed
+### Key Insight
 
-将单一不变量 `state = replay(log)` 延伸到 CLI 边界：`output = serialize(replay(log))`。
+pawl 的消费者是 agent，不是 human。这条认知串起了 S33-S35 的全部重构：
 
-**stdout = JSON/JSONL 数据，stderr = 进度/错误。** 所有 `--json`/`--jsonl` flags 删除（JSON 是默认，不是选项）。
+- S33: stdout=JSON, stderr=progress（机器可读输出）
+- S34: PawlError → JSON stderr + exit codes（结构化错误）
+- S35: suggest/prompt（自路由协议，消除 agent 猜测）
 
-**写命令 JSON 输出**（6 个命令）
+pawl 是协程，不是 daemon——它 yield 出路由提示，由外部 agent 决定是否 resume。真正机械的部分（retry）已在内部自动执行；到达 suggest 的都是内部自动化已穷尽的情况。
 
-| 命令 | stdout |
-|------|--------|
-| `start/done/stop/reset` | `output_task_state()` — task/status/run_id/current_step/step_name/total_steps/message/retry_count/last_feedback |
-| `create` | task/task_file/depends |
-| `init` | pawl_dir/config |
+### What changed (S34 + S35)
 
-所有进度消息 (`println!` → `eprintln!`) 移到 stderr。
+**S34: Structured Errors**
+- `PawlError` enum (6 variants) → JSON stderr + exit codes 2-7
+- ~35 `bail!` → `PawlError` conversions across 12 files
+- Viewport trait: `send` → `execute`, `is_active` promoted to trait
+- `"task"` → `"name"` field unification; `events --type` filter
 
-**读命令删除人类层**（~395 行删除）
-
-- `status.rs`: 删除 `show_all_tasks`/`show_task_detail`/`format_waiting_reason`/`format_duration`/`truncate` (5 个函数)
-- `log.rs`: 删除 `print_event` (108 行) + `run_jsonl` + `current_run_events`
-- `capture.rs`: 删除人类分支，修复 1-based → 0-based bug
-- `model/mod.rs`: 删除未使用的 `StepStatus` re-export
-
-**变量增丰**（10 → 12 个）
-
-| 新变量 | 用途 |
-|--------|------|
-| `${retry_count}` / `$PAWL_RETRY_COUNT` | 当前步骤的自动重试次数 |
-| `${last_verify_output}` / `$PAWL_LAST_VERIFY_OUTPUT` | 上次失败输出 |
-
-4 个注入点: execute loop, run_verify, run_in_viewport, spawn_event_hook。
-
-`extract_step_context()` 从 `status.rs` 移到 `common.rs`（共享于 status + output_task_state）。
-
-orchestrate.md: grep-based retry feedback 样板 → `$PAWL_LAST_VERIFY_OUTPUT` 直接使用。
-
-### Net result
-
-- 37/37 测试通过，零 warnings
-- 所有 `println!` 审计通过：仅用于 JSON/JSONL 数据输出
-- 所有 1-based 索引仅出现在 `eprintln!`（stderr 进度）
+**S35: Self-Routing Protocol**
+- `PawlError::suggest()` — 从错误变体数据派生恢复命令
+- `Project::derive_routing()` — (status, message, task) → (suggest, prompt)
+- `suggest` = 机械命令（agent 直接执行），`prompt` = 需判断力（agent 评估后决定）
+- `pawl done` 永不出现在 suggest（需要判断，不是路由）
+- `Timeout` 变体增加 `task` 字段用于 suggest 派生
+- `output_task_state()` + `TaskSummary`/`TaskDetail` 包含 suggest/prompt
+- supervise.md: 51 → 33 行（Status Decision Table 删除，已编码在 derive_routing）
+- 文档全面更新：CLAUDE.md 新增 Agent-First Interface 章节，README/SKILL.md 反映 agent-first 定位
 
 ---
 
 ## Previous Sessions (compressed)
+
+### S33: Agent-First Output Restructuring
+- `output = serialize(replay(log))`. stdout=JSON/JSONL, stderr=progress. ~395 行人类层删除。
+- `output_task_state()` 统一 6 个写命令输出。新变量 `${retry_count}`, `${last_verify_output}`。
 
 ### S32: Role-Based Skill Architecture
 - SKILL.md: 249 → 29 行 (routing only)。3 role references 创建。config.jsonc 自文档化。
@@ -84,11 +74,14 @@ orchestrate.md: grep-based retry feedback 样板 → `$PAWL_LAST_VERIFY_OUTPUT` 
 | Area | File |
 |------|------|
 | CLI definition (14 commands) + help text | `src/cli.rs` |
-| Project context, extract_step_context, output_task_state | `src/cmd/common.rs` |
+| PawlError enum, exit_code(), suggest() | `src/error.rs` |
+| Project context, output_task_state, derive_routing | `src/cmd/common.rs` |
 | Execution engine, settle_step pipeline, decide() | `src/cmd/start.rs` |
+| Status (JSON output with suggest/prompt) | `src/cmd/status.rs` |
 | in_viewport parent process (`pawl _run`) | `src/cmd/run.rs` |
 | Done/approve handler | `src/cmd/done.rs` |
-| Status (JSON output, no human layer) | `src/cmd/status.rs` |
+| Wait (poll with Timeout suggest) | `src/cmd/wait.rs` |
+| Entry point, PawlError → JSON stderr + suggest | `src/main.rs` |
 | Context builder (build/var/get/expand/to_env_vars/extend) | `src/util/variable.rs` |
 | Event model + replay + count_auto_retries | `src/model/event.rs` |
 | TaskState, TaskStatus (Display+FromStr), StepStatus | `src/model/state.rs` |

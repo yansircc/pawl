@@ -1,6 +1,6 @@
 # pawl
 
-A resumable step sequencer. Define a pipeline once, run it for any task. Each task gets its own git worktree, its own viewport, and a cursor that survives crashes.
+An agent-friendly resumable step sequencer. Define a pipeline once, run it for any task. Each task gets its own git worktree, its own viewport, and a cursor that survives crashes. Every output is machine-readable: JSON stdout, structured errors, self-routing hints.
 
 ```
                ┌─ setup ─── develop ─── verify ─── merge ─── cleanup
@@ -84,13 +84,16 @@ Define a workflow in `.pawl/config.jsonc`:
 
 ## Output
 
-stdout = JSON (write commands) or JSONL (log/events). stderr = progress. Pipe to `jq` for human reading.
+stdout = JSON (write commands) or JSONL (log/events). stderr = progress + structured errors. Designed for agent consumption; pipe to `jq` for human reading.
 
 ```bash
-pawl status task-a | jq .          # pretty-print JSON
-pawl log task-a --all | jq .       # pretty-print JSONL events
+pawl status task-a | jq .          # JSON with suggest/prompt routing hints
+pawl log task-a --all | jq .       # JSONL event stream
 pawl start task-a 2>/dev/null      # JSON only, no progress
+pawl start running-task 2>&1 | jq .suggest  # error recovery commands
 ```
+
+**Self-routing**: Status and errors include `suggest` (mechanical commands — execute directly) and `prompt` (requires judgment — evaluate then decide). `pawl done` never appears in suggest.
 
 ## Commands
 
@@ -144,7 +147,7 @@ Implement login with email/password. Return JWT. Rate limit 5/min.
 │   └── references/           # Role-specific guides
 │       ├── author.md         # Writing tasks
 │       ├── orchestrate.md    # Designing workflows
-│       └── supervise.md      # Monitoring tasks
+│       └── supervise.md      # Polling and troubleshooting
 └── worktrees/*/              # Git worktrees (one per task)
 ```
 

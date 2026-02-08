@@ -1,7 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
+use crate::error::PawlError;
 use crate::util::git::{get_repo_root, validate_branch_name};
 
 use super::common::PAWL_DIR;
@@ -16,13 +17,17 @@ pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Resu
     let pawl_dir = Path::new(&repo_root).join(PAWL_DIR);
 
     if !pawl_dir.exists() {
-        bail!("Not a pawl project. Run 'pawl init' first.");
+        return Err(PawlError::NotFound {
+            message: "Not a pawl project. Run 'pawl init' first.".into(),
+        }.into());
     }
 
     // Check if task already exists
     let task_path = pawl_dir.join(TASKS_DIR).join(format!("{}.md", name));
     if task_path.exists() {
-        bail!("Task '{}' already exists at {}", name, task_path.display());
+        return Err(PawlError::AlreadyExists {
+            message: format!("Task '{}' already exists at {}", name, task_path.display()),
+        }.into());
     }
 
     // Parse depends
@@ -47,7 +52,7 @@ pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Resu
 
     // Output JSON
     let json = serde_json::json!({
-        "task": name,
+        "name": name,
         "task_file": task_path.to_string_lossy(),
         "depends": depends_list,
     });

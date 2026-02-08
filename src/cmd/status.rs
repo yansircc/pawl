@@ -23,6 +23,10 @@ struct TaskSummary {
     retry_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_feedback: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    suggest: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
 }
 
 /// JSON output structure for task detail
@@ -44,6 +48,10 @@ struct TaskDetail {
     retry_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_feedback: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    suggest: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
     workflow: Vec<StepInfo>,
 }
 
@@ -90,10 +98,12 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             let step_name = project.step_name(state.current_step).to_string();
             let events = project.read_events(name)?;
             let (retry_count, last_feedback) = extract_step_context(&events, state.current_step);
+            let status_str = state.status.to_string();
+            let (suggest, prompt) = Project::derive_routing(&status_str, state.message.as_deref(), name);
 
             TaskSummary {
                 name: name.clone(),
-                status: state.status.to_string(),
+                status: status_str,
                 run_id: state.run_id,
                 current_step: state.current_step,
                 total_steps: workflow_len,
@@ -104,8 +114,11 @@ fn show_all_tasks(project: &Project) -> Result<()> {
                 blocked_by: blocking,
                 retry_count,
                 last_feedback,
+                suggest,
+                prompt,
             }
         } else {
+            let (suggest, prompt) = Project::derive_routing("pending", None, name);
             TaskSummary {
                 name: name.clone(),
                 status: "pending".to_string(),
@@ -119,6 +132,8 @@ fn show_all_tasks(project: &Project) -> Result<()> {
                 blocked_by: blocking,
                 retry_count: 0,
                 last_feedback: None,
+                suggest,
+                prompt,
             }
         };
 
@@ -175,6 +190,13 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
     let events = project.read_events(task_name)?;
     let (retry_count, last_feedback) = extract_step_context(&events, current_step);
 
+    let status_str = state
+        .as_ref()
+        .map(|s| s.status.to_string())
+        .unwrap_or_else(|| "pending".to_string());
+    let msg = state.as_ref().and_then(|s| s.message.clone());
+    let (suggest, prompt) = Project::derive_routing(&status_str, msg.as_deref(), task_name);
+
     let detail = TaskDetail {
         name: task_name.to_string(),
         description: if task_def.description.is_empty() {
@@ -183,18 +205,17 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
             Some(task_def.description.clone())
         },
         depends: task_def.depends.clone(),
-        status: state
-            .as_ref()
-            .map(|s| s.status.to_string())
-            .unwrap_or_else(|| "pending".to_string()),
+        status: status_str,
         run_id: state.as_ref().map(|s| s.run_id.clone()).unwrap_or_default(),
         current_step,
         total_steps: workflow_len,
-        message: state.as_ref().and_then(|s| s.message.clone()),
+        message: msg,
         started_at: state.as_ref().and_then(|s| s.started_at.map(|t| t.to_rfc3339())),
         updated_at: state.as_ref().and_then(|s| s.updated_at.map(|t| t.to_rfc3339())),
         retry_count,
         last_feedback,
+        suggest,
+        prompt,
         workflow: steps,
     };
 

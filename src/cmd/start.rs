@@ -3,6 +3,7 @@ use std::os::unix::process::CommandExt as _;
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::error::PawlError;
 use crate::model::config::Step;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
@@ -23,18 +24,27 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
         } else {
             match state.status {
                 TaskStatus::Running => {
-                    bail!("Task '{}' is already running at step {}", task_name, state.current_step);
+                    return Err(PawlError::StateConflict {
+                        task: task_name.clone(),
+                        status: "running".into(),
+                        message: format!("already running at step {}", state.current_step),
+                    }.into());
                 }
                 TaskStatus::Completed => {
-                    bail!("Task '{}' is already completed. Use 'pawl reset {}' to restart or 'pawl start --reset {}'.", task_name, task_name, task_name);
+                    return Err(PawlError::StateConflict {
+                        task: task_name.clone(),
+                        status: "completed".into(),
+                        message: format!("use 'pawl reset {}' to restart or 'pawl start --reset {}'", task_name, task_name),
+                    }.into());
                 }
                 TaskStatus::Waiting => {
                     let step_name = project.step_name(state.current_step);
                     let reason = state.message.as_deref().unwrap_or("approval");
-                    bail!(
-                        "Task '{}' is waiting at step {} ({}) for {}. Use 'pawl done {}' to continue.",
-                        task_name, state.current_step, step_name, reason, task_name
-                    );
+                    return Err(PawlError::StateConflict {
+                        task: task_name.clone(),
+                        status: "waiting".into(),
+                        message: format!("waiting at step {} ({}) for {}. Use 'pawl done {}' to continue", state.current_step, step_name, reason, task_name),
+                    }.into());
                 }
                 _ => {}
             }
@@ -44,11 +54,9 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
     // Check dependencies
     let blocking = project.check_dependencies(&task_def)?;
     if !blocking.is_empty() {
-        bail!(
-            "Task '{}' is blocked by incomplete dependencies: {}",
-            task_name,
-            blocking.join(", ")
-        );
+        return Err(PawlError::Precondition {
+            message: format!("Task '{}' is blocked by incomplete dependencies: {}", task_name, blocking.join(", ")),
+        }.into());
     }
 
     // Emit TaskStarted event with run_id
@@ -388,7 +396,7 @@ fn launch_in_viewport(
     eprintln!("  → Sending to {}:{}", session, task_name);
     eprintln!("  → Waiting for 'pawl done {}'", task_name);
 
-    project.viewport.send(task_name, &run_cmd)?;
+    project.viewport.execute(task_name, &run_cmd)?;
 
     Ok(())
 }

@@ -1,18 +1,17 @@
 pub mod tmux;
 
-use std::any::Any;
-
-use anyhow::{bail, Result};
+use anyhow::Result;
+use crate::error::PawlError;
 
 /// A viewport is a human-observable execution surface.
-/// It provides the ability to open, send commands to, read from, check existence of,
+/// It provides the ability to open, execute commands in, read from, check existence of,
 /// close, and attach to named execution contexts.
 pub trait Viewport {
-    fn as_any(&self) -> &dyn Any;
     fn open(&self, name: &str, cwd: &str) -> Result<()>;
-    fn send(&self, name: &str, text: &str) -> Result<()>;
+    fn execute(&self, name: &str, text: &str) -> Result<()>;
     fn read(&self, name: &str, lines: usize) -> Result<Option<String>>;
     fn exists(&self, name: &str) -> bool;
+    fn is_active(&self, name: &str) -> bool;
     fn close(&self, name: &str) -> Result<()>;
     fn attach(&self, name: &str) -> Result<()>;
 }
@@ -21,6 +20,8 @@ pub trait Viewport {
 pub fn create_viewport(backend: &str, session: &str) -> Result<Box<dyn Viewport>> {
     match backend {
         "tmux" => Ok(Box::new(tmux::TmuxViewport::new(session))),
-        other => bail!("Unsupported viewport backend: {}", other),
+        other => return Err(PawlError::Validation {
+            message: format!("Unsupported viewport backend: {}", other),
+        }.into()),
     }
 }

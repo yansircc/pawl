@@ -32,7 +32,9 @@ pub fn dispatch(cmd: Command) -> Result<()> {
             wait::run(&task, &until, timeout, interval)
         }
         Command::Log { task, step, all, all_runs } => log::run(&task, step, all, all_runs),
-        Command::Events { task, follow } => events::run(task.as_deref(), follow),
+        Command::Events { task, follow, event_type } => {
+            events::run(task.as_deref(), follow, event_type.as_deref())
+        }
         Command::Done { task, message } => done::done(&task, message.as_deref()),
         Command::Run { task, step } => run::run_in_viewport(&task, step),
     }

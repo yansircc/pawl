@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::io::{BufRead, BufReader};
 
+use crate::error::PawlError;
 use crate::model::Event;
 
 use super::common::Project;
@@ -16,7 +17,11 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, all_runs: bool) -> R
     // Check if task has been started
     let state = project.replay_task(&task_name)?;
     if state.is_none() {
-        bail!("Task '{}' has not been started yet.", task_name);
+        return Err(PawlError::StateConflict {
+            task: task_name.clone(),
+            status: "pending".into(),
+            message: "not started yet".into(),
+        }.into());
     }
 
     let log_file = project.log_file(&task_name);

@@ -1,6 +1,6 @@
-# pawl — Resumable Step Sequencer
+# pawl — Agent-Friendly Resumable Step Sequencer
 
-A resumable coroutine: advance along a fixed step sequence, yield when unable to self-decide, rebuild from log after crash. ~4200 lines of Rust powering any multi-step workflow — from AI agent orchestration to deployment pipelines.
+A resumable coroutine whose consumer is **agents, not humans**. pawl advances along a fixed step sequence, yields when unable to self-decide, and rebuilds from log after crash. Every CLI output is designed for machine consumption: JSON stdout, structured errors on stderr, self-routing hints (suggest/prompt) that eliminate agent guesswork. Humans interact through agents; pawl speaks to agents directly.
 
 ## Design Philosophy
 
@@ -44,10 +44,21 @@ From the three generators, five operational rules follow:
 4. **Two authorities per decision point**. Machine (exit code) or human (`pawl done`), never both. *(from: derive, don't write — one source of truth per decision)*
 5. **Failure is routable**. Failure → retry | yield | terminate. *(from: trust the substrate — exit codes + routing algebra)*
 
+### Agent-First Interface
+
+pawl is a coroutine, not a daemon — it yields and waits for external resumption. The consumer is always an agent (AI or script), never a human reading terminal output. Three layers make the CLI self-describing:
+
+1. **Structured output**: stdout = JSON/JSONL, stderr = progress. No `--json` flags — JSON is the only format, not an option.
+2. **Structured errors**: `PawlError` → JSON stderr + exit codes 2-7. Errors carry enough structure for agents to branch on variant, not parse messages.
+3. **Self-routing**: `suggest` = mechanical recovery commands (agent executes directly), `prompt` = requires judgment (agent evaluates then decides). The internal routing algebra (`decide()` → Verdict) is lifted to the CLI boundary. `pawl done` never appears in suggest — it requires judgment, not routing.
+
+The truly mechanical paths (retry within `on_fail="retry"`) are already auto-executed inside pawl. What reaches suggest has exhausted internal automation — the commands are derivable, but the **decision to execute** still needs external judgment (is the root cause fixed?).
+
 ### Coding Conventions
 
 - **Step indexing**: 0-based in all programmatic interfaces. 1-based only in stderr progress.
-- **stdout = JSON, stderr = progress**. Write commands output `output_task_state()` JSON. Read commands output JSON/JSONL directly. No `--json`/`--jsonl` flags.
+- **stdout = JSON, stderr = progress**. Write commands output `output_task_state()` JSON. Read commands output JSON/JSONL directly. Task identifier field is `"name"` (not `"task"`).
+- **Structured errors**: `PawlError` → JSON stderr + exit codes 2-7 (StateConflict=2, Precondition=3, NotFound=4, AlreadyExists=5, Validation=6, Timeout=7). Internal errors remain anyhow (exit 1). Errors include `suggest` via `PawlError::suggest()`. Status/output include suggest/prompt via `derive_routing()`. Empty fields are omitted.
 - **Zero warnings**. Dead code is deleted, not suppressed.
 - **`cargo install --path .` after build**. PATH uses the installed binary.
 - **Tests cover decision logic**: Pure functions (`decide()`) get unit tests. IO is verified via E2E.
@@ -56,8 +67,9 @@ From the three generators, five operational rules follow:
 
 ```
 src/
-├── main.rs              # Entry point
+├── main.rs              # Entry point, PawlError → JSON stderr + exit code
 ├── cli.rs               # clap CLI (14 subcommands)
+├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
 │   ├── config.rs        # Config + Step structs, JSONC loader
 │   ├── event.rs         # Event enum (10 variants), replay(), count_auto_retries()
@@ -65,7 +77,7 @@ src/
 │   └── task.rs          # TaskDefinition + YAML frontmatter parser (with skip)
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
-│   ├── common.rs        # Project context, event append/read/replay/detect_viewport_loss
+│   ├── common.rs        # Project context, event IO, output_task_state, derive_routing
 │   ├── init.rs          # pawl init (scaffold, uses include_str! for templates)
 │   ├── create.rs        # pawl create (improved task template)
 │   ├── start.rs         # pawl start (execution engine, settle_step pipeline)
@@ -76,16 +88,16 @@ src/
 │   ├── capture.rs       # pawl capture (tmux content)
 │   ├── wait.rs          # pawl wait (poll via Project API)
 │   ├── enter.rs         # pawl enter (attach to viewport)
-│   ├── events.rs        # pawl events (unified event stream, --follow)
+│   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all/--all-runs, JSONL output)
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.jsonc           # Default workflow config (self-documented)
 │       ├── pawl-skill.md          # SKILL.md: orientation + role routing
 │       ├── author.md              # Role: task authoring guide
 │       ├── orchestrate.md         # Role: workflow design, recipes, Claude CLI
-│       └── supervise.md           # Role: supervisor loop, troubleshooting
+│       └── supervise.md           # Role: polling and troubleshooting
 ├── viewport/
-│   ├── mod.rs           # Viewport trait + create_viewport() factory
+│   ├── mod.rs           # Viewport trait (open/execute/read/exists/is_active/close/attach)
 │   └── tmux.rs          # TmuxViewport implementation
 └── util/
     ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
@@ -205,7 +217,7 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `pawl capture <task> [-l N]` | Capture tmux content (JSON to stdout) |
 | `pawl wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
 | `pawl log <task> [--step N] [--all] [--all-runs]` | View logs as JSONL (--all=current run, --all-runs=full history) |
-| `pawl events [task] [--follow]` | Unified event stream (--follow for real-time) |
+| `pawl events [task] [--follow] [--type types]` | Unified event stream (--follow, --type filter) |
 | `pawl done <task> [-m msg]` | Mark step done / approve |
 
 ## Execution Flow
@@ -261,7 +273,7 @@ detect_viewport_loss(task_name) → bool:
 │   └── references/           # Role-specific guides (progressive disclosure)
 │       ├── author.md         # Writing effective tasks
 │       ├── orchestrate.md    # Designing workflows + Claude Code CLI
-│       └── supervise.md      # Monitoring, status decisions, troubleshooting
+│       └── supervise.md      # Polling and troubleshooting
 └── worktrees/                # Git worktrees (one per task)
     └── {task}/
 ```

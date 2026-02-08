@@ -1,5 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
+use crate::error::PawlError;
 use super::shell::{run_command_output, run_command_success};
 
 /// Get the root directory of the git repository
@@ -11,35 +12,39 @@ pub fn get_repo_root() -> Result<String> {
 /// Validate that a name is a valid git branch suffix
 pub fn validate_branch_name(name: &str) -> Result<()> {
     if name.is_empty() {
-        bail!("Task name cannot be empty");
+        return Err(PawlError::Validation { message: "Task name cannot be empty".into() }.into());
     }
 
     // Check for invalid characters
     let invalid_chars = [' ', '~', '^', ':', '?', '*', '[', '@', '{', '\\'];
     for c in invalid_chars {
         if name.contains(c) {
-            bail!("Task name cannot contain '{}'", c);
+            return Err(PawlError::Validation {
+                message: format!("Task name cannot contain '{}'", c),
+            }.into());
         }
     }
 
     // Check for invalid patterns
     if name.starts_with('-') {
-        bail!("Task name cannot start with '-'");
+        return Err(PawlError::Validation { message: "Task name cannot start with '-'".into() }.into());
     }
     if name.starts_with('.') {
-        bail!("Task name cannot start with '.'");
+        return Err(PawlError::Validation { message: "Task name cannot start with '.'".into() }.into());
     }
     if name.ends_with(".lock") {
-        bail!("Task name cannot end with '.lock'");
+        return Err(PawlError::Validation { message: "Task name cannot end with '.lock'".into() }.into());
     }
     if name.contains("..") {
-        bail!("Task name cannot contain '..'");
+        return Err(PawlError::Validation { message: "Task name cannot contain '..'".into() }.into());
     }
 
     // Validate with git check-ref-format
     let test_ref = format!("refs/heads/pawl/{}", name);
     if !run_command_success(&format!("git check-ref-format '{}'", test_ref)) {
-        bail!("'{}' is not a valid git branch name", name);
+        return Err(PawlError::Validation {
+            message: format!("'{}' is not a valid git branch name", name),
+        }.into());
     }
 
     Ok(())

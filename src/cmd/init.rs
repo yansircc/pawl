@@ -1,7 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
+use crate::error::PawlError;
 use crate::util::git::get_repo_root;
 
 use super::common::PAWL_DIR;
@@ -25,7 +26,9 @@ pub fn run() -> Result<()> {
     let pawl_dir = Path::new(&repo_root).join(PAWL_DIR);
 
     if pawl_dir.exists() {
-        bail!(".pawl/ directory already exists. Use 'pawl reset' to reinitialize.");
+        return Err(PawlError::AlreadyExists {
+            message: ".pawl/ directory already exists. Use 'pawl reset' to reinitialize.".into(),
+        }.into());
     }
 
     eprintln!("Initializing pawl in {}...", repo_root);

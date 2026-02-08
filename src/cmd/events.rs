@@ -9,7 +9,8 @@ use super::common::Project;
 
 /// Unified event stream: output JSONL events from all (or one) task log files.
 /// With --follow, watches for new events in real-time.
-pub fn run(task_filter: Option<&str>, follow: bool) -> Result<()> {
+/// type_filter: comma-separated event type names (e.g. "step_finished,step_yielded")
+pub fn run(task_filter: Option<&str>, follow: bool, type_filter: Option<&str>) -> Result<()> {
     let project = Project::load()?;
     let logs_dir = project.pawl_dir.join("logs");
 
@@ -30,10 +31,14 @@ pub fn run(task_filter: Option<&str>, follow: bool) -> Result<()> {
     // Discover existing log files
     let log_files = discover_log_files(&logs_dir, task_filter.as_deref())?;
 
+    // Parse type filter into a set
+    let type_set: Option<Vec<&str>> = type_filter
+        .map(|f| f.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect());
+
     // Print existing events (sorted by timestamp across files)
     let mut file_offsets: HashMap<PathBuf, u64> = HashMap::new();
     for (task_name, path) in &log_files {
-        let offset = print_events_from_file(task_name, path, 0)?;
+        let offset = print_events_from_file(task_name, path, 0, type_set.as_deref())?;
         file_offsets.insert(path.clone(), offset);
     }
 
@@ -85,7 +90,7 @@ pub fn run(task_filter: Option<&str>, follow: bool) -> Result<()> {
                     }
 
                     let offset = file_offsets.get(path).copied().unwrap_or(0);
-                    match print_events_from_file(&task_name, path, offset) {
+                    match print_events_from_file(&task_name, path, offset, type_set.as_deref()) {
                         Ok(new_offset) => {
                             file_offsets.insert(path.clone(), new_offset);
                         }
@@ -139,9 +144,10 @@ fn discover_log_files(
 }
 
 /// Print new JSONL events from a file starting at the given byte offset.
-/// Each line is prefixed with a "task" field injected into the JSON.
+/// Each line is prefixed with a "name" field injected into the JSON.
+/// If type_filter is Some, only prints events whose "type" matches.
 /// Returns the new byte offset after reading.
-fn print_events_from_file(task_name: &str, path: &std::path::Path, offset: u64) -> Result<u64> {
+fn print_events_from_file(task_name: &str, path: &std::path::Path, offset: u64, type_filter: Option<&[&str]>) -> Result<u64> {
     let file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
     let file_len = metadata.len();
@@ -168,14 +174,33 @@ fn print_events_from_file(task_name: &str, path: &std::path::Path, offset: u64) 
             continue;
         }
 
-        // Inject "task" field into the JSON object
+        // Apply type filter if present
+        if let Some(types) = type_filter {
+            // Extract "type":"..." from JSON line
+            if let Some(type_val) = extract_json_type(line) {
+                if !types.contains(&type_val) {
+                    continue;
+                }
+            }
+        }
+
+        // Inject "name" field into the JSON object
         if line.starts_with('{') {
             // Insert task name as the first field
-            println!("{{\"task\":\"{}\",{}", task_name, &line[1..]);
+            println!("{{\"name\":\"{}\",{}", task_name, &line[1..]);
         } else {
             println!("{}", line);
         }
     }
 
     Ok(current_pos)
+}
+
+/// Extract the "type" value from a JSON line without full parsing.
+/// Looks for `"type":"value"` pattern.
+fn extract_json_type(line: &str) -> Option<&str> {
+    let marker = "\"type\":\"";
+    let start = line.find(marker)? + marker.len();
+    let end = start + line[start..].find('"')?;
+    Some(&line[start..end])
 }

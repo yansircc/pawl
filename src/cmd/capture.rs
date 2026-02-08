@@ -1,13 +1,11 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::viewport::tmux::TmuxViewport;
-
 use super::common::Project;
 
 #[derive(Serialize)]
 struct CaptureOutput {
-    task: String,
+    name: String,
     session: String,
     viewport_exists: bool,
     process_active: bool,
@@ -47,19 +45,10 @@ pub fn run(task_name: &str, lines: usize) -> Result<()> {
     let viewport_exists = content_opt.is_some();
     let content = content_opt.unwrap_or_default();
 
-    // pane_is_active is TmuxViewport-specific; downcast to check
-    let process_active = if viewport_exists {
-        if let Some(tmux_vp) = project.viewport.as_any().downcast_ref::<TmuxViewport>() {
-            tmux_vp.pane_is_active(&task_name)
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    let process_active = viewport_exists && project.viewport.is_active(&task_name);
 
     let output = CaptureOutput {
-        task: task_name.clone(),
+        name: task_name.clone(),
         session: session.clone(),
         viewport_exists,
         process_active,

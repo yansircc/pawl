@@ -7,10 +7,11 @@ description: >
   CLI integration, supervisor coordination, and troubleshooting.
 ---
 
-# pawl — Resumable Step Sequencer
+# pawl — Agent-Friendly Resumable Step Sequencer
 
-A resumable coroutine: advance through a fixed step sequence, yield when unable to self-decide,
-rebuild state from an append-only log. `state = replay(log)`.
+A resumable coroutine whose consumer is agents, not humans. Advance through a fixed step sequence,
+yield when unable to self-decide, rebuild state from an append-only log. `state = replay(log)`.
+All output is JSON. Errors are structured. Status includes self-routing hints (`suggest`/`prompt`).
 
 - **Step**: 4 orthogonal properties (`run`, `verify`, `on_fail`, `in_viewport`) — see config comments
 - **Gate step**: No `run` — pauses for `pawl done`
@@ -26,4 +27,4 @@ Step properties, design rules, and event hooks are in `.pawl/config.jsonc` comme
 |------|------|-----------|
 | **Author** | Writing task definitions (`.pawl/tasks/*.md`) | [author.md](references/author.md) |
 | **Orchestrator** | Designing workflow config (`.pawl/config.jsonc`) | [orchestrate.md](references/orchestrate.md) |
-| **Supervisor** | Monitoring and managing running tasks | [supervise.md](references/supervise.md) |
+| **Supervisor** | Polling and troubleshooting | [supervise.md](references/supervise.md) |
