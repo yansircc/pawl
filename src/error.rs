@@ -1,22 +1,13 @@
-use serde::Serialize;
-
-/// Structured error type for agent-consumable error output.
-/// Each variant maps to a specific exit code and JSON stderr output.
-#[derive(Debug, Serialize)]
-#[serde(tag = "error", content = "detail")]
+/// Typed error for CLI exit codes.
+/// Each variant maps to a specific exit code (2-7). Internal errors remain anyhow (exit 1).
+#[derive(Debug)]
 pub enum PawlError {
-    /// Task is in a state that conflicts with the requested operation (exit 2)
     StateConflict { task: String, status: String, message: String },
-    /// A precondition for the operation is not met (exit 3)
     Precondition { message: String },
-    /// Referenced resource does not exist (exit 4)
     NotFound { message: String },
-    /// Resource already exists (exit 5)
     AlreadyExists { message: String },
-    /// Input validation failed (exit 6)
     Validation { message: String },
-    /// Operation timed out (exit 7)
-    Timeout { task: String, message: String },
+    Timeout { message: String },
 }
 
 impl PawlError {
@@ -31,32 +22,6 @@ impl PawlError {
         }
     }
 
-    pub fn suggest(&self) -> Vec<String> {
-        match self {
-            Self::StateConflict { task, status, .. } => match status.as_str() {
-                "running" => vec![
-                    format!("pawl stop {task}"),
-                    format!("pawl start --reset {task}"),
-                ],
-                "completed" => vec![
-                    format!("pawl reset {task}"),
-                    format!("pawl start --reset {task}"),
-                ],
-                "waiting" => vec![format!("pawl stop {task}")],
-                "stopped" => vec![
-                    format!("pawl start {task}"),
-                    format!("pawl reset {task}"),
-                ],
-                "pending" => vec![format!("pawl start {task}")],
-                _ => vec![],
-            },
-            Self::NotFound { message } if message.contains("pawl init") => {
-                vec!["pawl init".to_string()]
-            }
-            Self::Timeout { task, .. } => vec![format!("pawl status {task}")],
-            _ => vec![],
-        }
-    }
 }
 
 impl std::fmt::Display for PawlError {
@@ -69,7 +34,7 @@ impl std::fmt::Display for PawlError {
             Self::NotFound { message } => write!(f, "{}", message),
             Self::AlreadyExists { message } => write!(f, "{}", message),
             Self::Validation { message } => write!(f, "{}", message),
-            Self::Timeout { message, .. } => write!(f, "{}", message),
+            Self::Timeout { message } => write!(f, "{}", message),
         }
     }
 }

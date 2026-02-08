@@ -14,12 +14,7 @@ fn main() {
         Ok(()) => {}
         Err(e) => {
             if let Some(pe) = e.downcast_ref::<PawlError>() {
-                let mut json = serde_json::to_value(pe).unwrap();
-                let suggest = pe.suggest();
-                if !suggest.is_empty() {
-                    json["suggest"] = serde_json::to_value(&suggest).unwrap();
-                }
-                eprintln!("{}", json);
+                eprintln!("{pe}");
                 std::process::exit(pe.exit_code());
             } else {
                 eprintln!("Error: {e}");

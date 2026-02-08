@@ -65,7 +65,6 @@ fn poll_status(
                 .map(|s| s.status)
                 .unwrap_or(TaskStatus::Pending);
             return Err(PawlError::Timeout {
-                task: task_name.to_string(),
                 message: format!("waiting for task '{}' to reach '{}' (current: {})", task_name, until, current_status),
             }.into());
         }

@@ -11,7 +11,7 @@ description: >
 
 A resumable coroutine whose consumer is agents, not humans. Advance through a fixed step sequence,
 yield when unable to self-decide, rebuild state from an append-only log. `state = replay(log)`.
-All output is JSON. Errors are structured. Status includes self-routing hints (`suggest`/`prompt`).
+stdout = JSON/JSONL. stderr = plain text (errors + progress). `pawl status` includes routing hints (`suggest`/`prompt`).
 
 - **Step**: 4 orthogonal properties (`run`, `verify`, `on_fail`, `in_viewport`) — see config comments
 - **Gate step**: No `run` — pauses for `pawl done`

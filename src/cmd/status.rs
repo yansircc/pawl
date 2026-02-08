@@ -64,6 +64,35 @@ struct StepInfo {
     status: String,
 }
 
+/// Derive routing hints from task status. Only used by status output.
+/// suggest = mechanical commands, prompt = requires judgment.
+fn derive_routing(status: &str, message: Option<&str>, task: &str) -> (Vec<String>, Option<String>) {
+    match status {
+        "pending" => (vec![format!("pawl start {task}")], None),
+        "waiting" => match message {
+            Some("gate") => (
+                vec![],
+                Some(format!("confirm preconditions, then: pawl done {task}")),
+            ),
+            Some("verify_human") => (
+                vec![],
+                Some(format!("verify work quality, then: pawl done {task}")),
+            ),
+            Some("on_fail_human") => (
+                vec![format!("pawl reset --step {task}")],
+                Some(format!("review failure, then: pawl done {task} to accept")),
+            ),
+            _ => (vec![], None),
+        },
+        "failed" => (vec![format!("pawl reset --step {task}")], None),
+        "stopped" => (
+            vec![format!("pawl start {task}"), format!("pawl reset {task}")],
+            None,
+        ),
+        _ => (vec![], None),
+    }
+}
+
 /// Show status of all tasks or a specific task
 pub fn run(task_name: Option<&str>) -> Result<()> {
     let project = Project::load()?;
@@ -99,7 +128,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             let events = project.read_events(name)?;
             let (retry_count, last_feedback) = extract_step_context(&events, state.current_step);
             let status_str = state.status.to_string();
-            let (suggest, prompt) = Project::derive_routing(&status_str, state.message.as_deref(), name);
+            let (suggest, prompt) = derive_routing(&status_str, state.message.as_deref(), name);
 
             TaskSummary {
                 name: name.clone(),
@@ -118,7 +147,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
                 prompt,
             }
         } else {
-            let (suggest, prompt) = Project::derive_routing("pending", None, name);
+            let (suggest, prompt) = derive_routing("pending", None, name);
             TaskSummary {
                 name: name.clone(),
                 status: "pending".to_string(),
@@ -195,7 +224,7 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
         .map(|s| s.status.to_string())
         .unwrap_or_else(|| "pending".to_string());
     let msg = state.as_ref().and_then(|s| s.message.clone());
-    let (suggest, prompt) = Project::derive_routing(&status_str, msg.as_deref(), task_name);
+    let (suggest, prompt) = derive_routing(&status_str, msg.as_deref(), task_name);
 
     let detail = TaskDetail {
         name: task_name.to_string(),

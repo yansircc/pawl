@@ -293,37 +293,6 @@ impl Project {
         }
     }
 
-    /// Derive routing hints (suggest/prompt) from task status.
-    /// suggest = mechanical commands agent can execute directly.
-    /// prompt = requires judgment, agent must evaluate before deciding.
-    /// `pawl done` never appears in suggest — it requires judgment.
-    pub fn derive_routing(status: &str, message: Option<&str>, task: &str) -> (Vec<String>, Option<String>) {
-        match status {
-            "pending" => (vec![format!("pawl start {task}")], None),
-            "waiting" => match message {
-                Some("gate") => (
-                    vec![],
-                    Some(format!("confirm preconditions, then: pawl done {task}")),
-                ),
-                Some("verify_human") => (
-                    vec![],
-                    Some(format!("verify work quality, then: pawl done {task}")),
-                ),
-                Some("on_fail_human") => (
-                    vec![format!("pawl reset --step {task}")],
-                    Some(format!("review failure, then: pawl done {task} to accept")),
-                ),
-                _ => (vec![], None),
-            },
-            "failed" => (vec![format!("pawl reset --step {task}")], None),
-            "stopped" => (
-                vec![format!("pawl start {task}"), format!("pawl reset {task}")],
-                None,
-            ),
-            _ => (vec![], None),
-        }
-    }
-
     /// Output task state as JSON to stdout — unified output point for all write commands.
     pub fn output_task_state(&self, task_name: &str) -> Result<()> {
         self.detect_viewport_loss(task_name)?;
@@ -338,9 +307,8 @@ impl Project {
         };
 
         let (retry_count, last_feedback) = extract_step_context(&events, current_step);
-        let (suggest, prompt) = Self::derive_routing(&status, message.as_deref(), task_name);
 
-        let mut json = serde_json::json!({
+        let json = serde_json::json!({
             "name": task_name,
             "status": status,
             "run_id": run_id,
@@ -351,12 +319,6 @@ impl Project {
             "retry_count": retry_count,
             "last_feedback": last_feedback,
         });
-        if !suggest.is_empty() {
-            json["suggest"] = serde_json::to_value(&suggest).unwrap();
-        }
-        if let Some(p) = &prompt {
-            json["prompt"] = serde_json::to_value(p).unwrap();
-        }
         println!("{}", json);
         Ok(())
     }

@@ -2,25 +2,13 @@ use clap::{Parser, Subcommand};
 
 /// Resumable step sequencer
 #[derive(Parser)]
-#[command(name = "pawl", version, after_help = r#"STEP PROPERTIES (4 orthogonal):
-  run          Shell command (omit for gate — waits for `pawl done`)
-  verify       "human" (manual approval) or shell command (exit 0 = pass)
-  on_fail      "retry" (auto, up to max_retries) or "human" (yield for decision)
-  in_viewport  Run in tmux window, complete via `pawl done` or exit code
+#[command(name = "pawl", version, after_help = r#"STATES: Pending → Running → Waiting / Completed / Failed / Stopped
 
-STATES: Pending → Running → Waiting / Completed / Failed / Stopped
-
-OUTPUT: stdout = JSON (write cmds) or JSONL (log/events). stderr = progress.
-
-VARIABLES (${var} in config, PAWL_VAR in subprocesses):
-  task, branch (pawl/{task}), worktree, session, repo_root,
-  step, step_index (0-based), base_branch, log_file, task_file, run_id,
-  retry_count (auto retries for current step), last_verify_output (last failure output)
-
+OUTPUT: stdout = JSON (write cmds) or JSONL (log/events). stderr = plain text.
 INDEXING: 0-based in all programmatic output. 1-based only in stderr progress.
 
 FILES:
-  .pawl/config.jsonc      Workflow config (pawl init)
+  .pawl/config.jsonc      Workflow config — step properties, variables, event hooks
   .pawl/tasks/{task}.md   Task definition (pawl create)
   .pawl/logs/{task}.jsonl  Event log — single source of truth"#)]
 pub struct Cli {
@@ -53,7 +41,6 @@ ON RETRY: append fix guidance to end of task file (don't overwrite — preserves
     List,
 
     /// Start a task
-    #[command(after_help = "Steps: skip → gate → sync run → viewport.\nsettle_step: combine(exit_code, verify) → decide(outcome, policy) → apply_verdict.")]
     Start {
         /// Task name
         task: String,
@@ -64,10 +51,10 @@ ON RETRY: append fix guidance to end of task file (don't overwrite — preserves
 
     /// Show task status
     #[command(after_help = r#"Fields: name, status, current_step (0-based), total_steps,
-step_name, message, blocked_by, retry_count, last_feedback.
+step_name, message, blocked_by, retry_count, last_feedback, suggest, prompt.
 With task arg: adds description, depends, workflow[{index, name, status, step_type}].
-retry_count = auto retries only. last_feedback stops at task_reset.
-step_type: "gate" / "in_viewport" / omitted. Optional fields omitted when null."#)]
+suggest = mechanical recovery commands. prompt = requires judgment.
+Optional fields omitted when empty/null."#)]
     Status {
         /// Task name (optional, shows all if omitted)
         task: Option<String>,

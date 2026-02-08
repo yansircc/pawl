@@ -1,6 +1,6 @@
 # pawl — Agent-Friendly Resumable Step Sequencer
 
-A resumable coroutine whose consumer is **agents, not humans**. pawl advances along a fixed step sequence, yields when unable to self-decide, and rebuilds from log after crash. Every CLI output is designed for machine consumption: JSON stdout, structured errors on stderr, self-routing hints (suggest/prompt) that eliminate agent guesswork. Humans interact through agents; pawl speaks to agents directly.
+A resumable coroutine whose consumer is **agents, not humans**. pawl advances along a fixed step sequence, yields when unable to self-decide, and rebuilds from log after crash. CLI output is JSON stdout + plain text stderr. `pawl status` provides routing hints (suggest/prompt) so agents know what to do next. Humans interact through agents; pawl speaks to agents directly.
 
 ## Design Philosophy
 
@@ -34,6 +34,14 @@ The file system is already a database. JSONL is already a state machine. Unix ex
 
 Corollary: the right abstraction is discovered by deletion, not designed by addition.
 
+**Stop condition: less-is-more** — The generators produce structure; this constrains it.
+
+Every mechanism must justify itself by current usage, not design aesthetics. The generators can always find another separation, derivation, or substrate to trust — each locally coherent, globally accumulating complexity. Less-is-more is the discriminator: if no code path consumes a structure, delete it. Elegance that serves no current user is complexity.
+
+Two operational rules:
+- **Dedup benefit ∝ change frequency**. Stable facts (step properties, frontmatter fields) belong inline at consumption points. Only volatile facts (CLI syntax, external tool flags) justify pointers.
+- **Each mechanism exists only in its responsibility scope**. Errors report. Status routes. Write commands confirm. When a mechanism crosses its scope boundary, it creates redundant emission points.
+
 ### Invariant Rules
 
 From the three generators, five operational rules follow:
@@ -49,16 +57,15 @@ From the three generators, five operational rules follow:
 pawl is a coroutine, not a daemon — it yields and waits for external resumption. The consumer is always an agent (AI or script), never a human reading terminal output. Three layers make the CLI self-describing:
 
 1. **Structured output**: stdout = JSON/JSONL, stderr = progress. No `--json` flags — JSON is the only format, not an option.
-2. **Structured errors**: `PawlError` → JSON stderr + exit codes 2-7. Errors carry enough structure for agents to branch on variant, not parse messages.
-3. **Self-routing**: `suggest` = mechanical recovery commands (agent executes directly), `prompt` = requires judgment (agent evaluates then decides). The internal routing algebra (`decide()` → Verdict) is lifted to the CLI boundary. `pawl done` never appears in suggest — it requires judgment, not routing.
-
-The truly mechanical paths (retry within `on_fail="retry"`) are already auto-executed inside pawl. What reaches suggest has exhausted internal automation — the commands are derivable, but the **decision to execute** still needs external judgment (is the root cause fixed?).
+2. **Typed errors**: `PawlError` → plain text stderr + exit codes 2-7. Agents read the message; exit codes provide machine-readable signal.
+3. **Status-driven routing**: `pawl status` includes `suggest` (mechanical commands) and `prompt` (requires judgment). Routing lives only in status output — errors report, they don't route.
+4. **Agent UX ≠ Human UX**: Agents consume pre-loaded context (SKILL.md), not interactive help (`-h`). Progressive disclosure is a human pattern — agents want flat, complete, searchable. Each role reference is self-contained for its core facts.
 
 ### Coding Conventions
 
 - **Step indexing**: 0-based in all programmatic interfaces. 1-based only in stderr progress.
 - **stdout = JSON, stderr = progress**. Write commands output `output_task_state()` JSON. Read commands output JSON/JSONL directly. Task identifier field is `"name"` (not `"task"`).
-- **Structured errors**: `PawlError` → JSON stderr + exit codes 2-7 (StateConflict=2, Precondition=3, NotFound=4, AlreadyExists=5, Validation=6, Timeout=7). Internal errors remain anyhow (exit 1). Errors include `suggest` via `PawlError::suggest()`. Status/output include suggest/prompt via `derive_routing()`. Empty fields are omitted.
+- **Typed errors**: `PawlError` → plain text stderr + exit codes 2-7 (StateConflict=2, Precondition=3, NotFound=4, AlreadyExists=5, Validation=6, Timeout=7). Internal errors remain anyhow (exit 1). Routing (suggest/prompt) only in `pawl status` output via `derive_routing()` in status.rs.
 - **Zero warnings**. Dead code is deleted, not suppressed.
 - **`cargo install --path .` after build**. PATH uses the installed binary.
 - **Tests cover decision logic**: Pure functions (`decide()`) get unit tests. IO is verified via E2E.
@@ -67,7 +74,7 @@ The truly mechanical paths (retry within `on_fail="retry"`) are already auto-exe
 
 ```
 src/
-├── main.rs              # Entry point, PawlError → JSON stderr + exit code
+├── main.rs              # Entry point, PawlError → text stderr + exit code
 ├── cli.rs               # clap CLI (14 subcommands)
 ├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
@@ -77,11 +84,11 @@ src/
 │   └── task.rs          # TaskDefinition + YAML frontmatter parser (with skip)
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
-│   ├── common.rs        # Project context, event IO, output_task_state, derive_routing
+│   ├── common.rs        # Project context, event IO, output_task_state
 │   ├── init.rs          # pawl init (scaffold, uses include_str! for templates)
 │   ├── create.rs        # pawl create (improved task template)
 │   ├── start.rs         # pawl start (execution engine, settle_step pipeline)
-│   ├── status.rs        # pawl status / pawl list
+│   ├── status.rs        # pawl status / pawl list (+ derive_routing for suggest/prompt)
 │   ├── control.rs       # pawl stop/reset
 │   ├── run.rs           # pawl _run (in_viewport parent process, replaces runner script + trap)
 │   ├── done.rs          # pawl done (approve waiting step or complete in_viewport step)
