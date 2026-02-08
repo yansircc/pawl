@@ -1,34 +1,40 @@
 # Session Handoff
 
-## Current Session (S39): E2E viewport tests, doc fix, log cleanup
+## Current Session (S41): Agent E2E tests
 
 ### What changed
 
-**E2E viewport 测试 — 从 0 到 32 个测试覆盖所有 in_viewport 路径**
+**Agent E2E 测试 — 9 个真实 haiku agent 与 pawl 交互的测试**
 
-测试:
-- 新增 `tests/e2e-viewport.sh`: 32 个 viewport E2E 测试，并行执行 (~5s)
-- 新增 `tests/e2e.sh`: 72 个同步路径 E2E 测试（之前在 working dir 未提交）
-- 覆盖: 基本流程、done 外部完成、retry、viewport loss、capture、enter、stop、变量、连续 in_viewport exec 链、done -m、skip viewport 步骤、viewport hooks、verify fail + retry、task 索引解析、full reset with viewport、多 task 并发、events --follow、last_feedback 传递
-- Session 隔离: 每个测试用唯一 tmux session `pawl-e2e-vp-{name}`，trap EXIT 清理
+新增 `tests/e2e-agent.sh`: 9 个 agent E2E 测试，并行执行 (~60s, ~$0.05/run)
 
-文档 — viewport_lost 语义澄清:
-- **CLAUDE.md**: `viewport_lost` 从 "viewport disappeared" 改为安全网语义；`_run` 加注韧性模型；`detect_viewport_loss` 加注被动前提
-- **orchestrate.md**: event hooks 列表内联安全网说明
-- **supervise.md**: viewport failure 两条路径模型（正常 path = `step_finished(128)`，安全网 = `viewport_lost`）
+三组测试:
+- **Supervisor 路由 (4)**: gate→done, verify_manual→done, on_fail→reset --step, multi-step loop — agent 读 `pawl status` 路由提示，执行正确命令
+- **Worker + Verifier (3)**: viewport agent 创建文件, verifier pass, verifier fail→retry→pass — agent 作为 viewport worker 和 structured output verifier
+- **反馈循环 (2)**: worker 写 INITIAL → verifier reject → worker 读 `$PAWL_LAST_VERIFY_OUTPUT` → 写 CORRECTED → pass; multi-task done
 
-代码:
-- 删除 `pawl log --all-runs` flag（死代码，`pawl events` 已覆盖 cross-run 需求）
-- CLAUDE.md 中 log 命令描述同步更新
+三种 agent 角色:
+| 角色 | `--tools` | 用途 |
+|------|-----------|------|
+| Supervisor | `"Bash"` | 跑 `pawl status`/`done`/`reset` |
+| Worker | `"Bash"` | 在 viewport 中执行任务 |
+| Verifier | `"Bash"` + `--json-schema` | 检查产出，返回 `{pass: bool}` |
 
 关键发现:
-- `_run` 韧性（SIGHUP-immune, always settles）导致 viewport kill 的正常路径是 `step_finished(exit_code=128)` 而非 `viewport_lost`
-- `viewport_lost` 仅当 `_run` 本身被 SIGKILL/crash 时触发（安全网）
-- 这是文档缺失，不是设计缺陷——两条路径收敛到同一终态 `Failed`
+- ccc Bash tool **会重置 cwd** → prompt 必须包含 `cd <project_dir>`
+- macOS 无 `timeout` → `run_with_timeout()` (background + watchdog kill)
+- 不能从 Claude Code Bash tool 嵌套调用 ccc（会挂住），必须独立脚本
+- 所有 agent 调用: `--output-format stream-json --verbose --max-budget-usd 0.02`
 
 ---
 
 ## Previous Sessions (compressed)
+
+### S39: E2E viewport tests, doc fix, log cleanup
+- `tests/e2e-viewport.sh`: 32 viewport E2E (并行)
+- `tests/e2e.sh`: 72 sync E2E
+- `viewport_lost` 安全网语义文档修正
+- 删除 `pawl log --all-runs`
 
 ### S38: Decouple from git, add config.vars
 - `git.rs` → `project.rs`，`get_project_root()` 查找 `.pawl/`
@@ -52,8 +58,6 @@
 - S30: 解耦 Claude Code
 - S28: settle_step pipeline, Display+FromStr, context_for
 - S27: Viewport trait + TmuxViewport
-- S25-26: Rename wf → pawl, crates.io
-- S1-24: Architecture evolution
 
 ---
 
@@ -89,3 +93,4 @@ None.
 | Viewport trait + TmuxViewport | `src/viewport/` |
 | E2E tests (sync paths, 72 tests) | `tests/e2e.sh` |
 | E2E tests (viewport paths, 32 tests) | `tests/e2e-viewport.sh` |
+| E2E tests (agent paths, 9 tests) | `tests/e2e-agent.sh` |
