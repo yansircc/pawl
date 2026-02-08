@@ -6,7 +6,7 @@ pawl is a **resumable coroutine**: advance along a fixed step sequence, yield at
 
 | Command | Description |
 |---------|-------------|
-| `pawl init` | Initialize project (creates .pawl/ and .claude/skills/pawl/) |
+| `pawl init` | Initialize project (creates .pawl/) |
 | `pawl create <name> [desc] [--depends a,b]` | Create a task |
 | `pawl list` | List all tasks and their status |
 | `pawl start <task> [--reset]` | Start task execution (--reset resets first) |
@@ -69,7 +69,6 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 {
   "session": "my-project",      // tmux session name (default: directory name)
   "base_branch": "main",        // base branch (default)
-  "claude_command": "claude",   // Claude CLI command (default: "claude", change to "ccc" etc. for aliases)
   "workflow": [                  // step sequence (required)
     { "name": "step-name", "run": "cmd", "verify": "human|script", "on_fail": "retry|human", "in_viewport": true, "max_retries": 3 }
   ],
@@ -79,8 +78,6 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 
 ## Task Definition (.pawl/tasks/{task}.md)
 
-Task.md has a **dual role**: human documentation + AI Worker system prompt (injected via `cat task.md | claude -p`).
-
 ```yaml
 ---
 name: my-task
@@ -88,7 +85,7 @@ depends: [other-task]    # dependencies (optional, must be Completed first)
 skip: [cleanup]          # skip steps (optional, matches step name)
 ---
 
-Markdown description (also serves as AI Worker prompt)
+Markdown description of what needs to be done.
 ```
 
 ### Iterative Feedback Pattern
@@ -103,7 +100,7 @@ Previous issue: test_refresh_token assertion error
 Fix: Extract token generation into a pure function, pass fixed time in tests
 ```
 
-Append instead of overwrite: preserves history to avoid repeating mistakes, Worker can see prior error context.
+Append instead of overwrite: preserves history to avoid repeating mistakes.
 
 ## Variables
 
@@ -113,11 +110,10 @@ All `run`/`verify`/hook commands support `${var}` expansion, subprocesses get `P
 |----------|-------|
 | `${task}` / `${branch}` | Task name / `pawl/{task}` |
 | `${worktree}` | `{repo_root}/{worktree_dir}/{task}` |
-| `${session}` | tmux session name |
+| `${session}` | Viewport session name |
 | `${repo_root}` | Repository root directory |
 | `${step}` / `${step_index}` | Current step name / index (0-based) |
 | `${base_branch}` | Base branch |
-| `${claude_command}` | Claude CLI command (from config, default "claude") |
 | `${log_file}` / `${task_file}` | `.pawl/logs/{task}.jsonl` / `.pawl/tasks/{task}.md` |
 
 ## State Machine
@@ -155,24 +151,22 @@ All hooks also have access to standard variables (`${task}`, `${step}`, `${sessi
 ### Hook Examples
 
 ```jsonc
-// Write to log file (simplest)
+// Write to log file
 "on": { "step_finished": "echo '[${task}] ${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 
-// Notify Foreman TUI (concurrency-safe)
-"on": { "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true" }
+// Notify a supervisor via tmux (concurrency-safe)
+"on": { "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:supervisor -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:supervisor C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true" }
 ```
-
-Foreman notification details: `mkdir` atomic mutex prevents concurrent interleaving; `-l` sends literal text; `C-Enter` submits to Claude Code TUI input; `sleep 0.3` ensures atomicity.
 
 ## Config Recipes
 
-### Recipe 1: Basic AI Development Flow
+### Recipe 1: Git Worktree + Custom Worker
 
 ```jsonc
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
       "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
@@ -182,15 +176,13 @@ Foreman notification details: `mkdir` atomic mutex prevents concurrent interleav
 }
 ```
 
-Notes: develop has verify+on_fail+cd worktree (satisfies all 3 rules); review is a pure gate (no run).
-
-### Recipe 2: Full Human Review Flow
+### Recipe 2: Human Review Flow
 
 ```jsonc
 {
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
       "in_viewport": true, "verify": "human", "on_fail": "human" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -198,48 +190,7 @@ Notes: develop has verify+on_fail+cd worktree (satisfies all 3 rules); review is
 }
 ```
 
-Notes: verify=human lets Foreman review output; on_fail=human lets Foreman decide retry/abandon.
-
-### Recipe 3: Auto Verify + Escalate to Human on Retry Exhaustion
-
-```jsonc
-{
-  "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_viewport": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
-    { "name": "final-review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ]
-}
-```
-
-Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Foreman checks `last_feedback` via `pawl status --json`, fixes the issue, then `pawl reset --step` to continue. final-review is a gate ensuring human confirmation before merge.
-
-### Recipe 4: Multi-Agent Parallel + Foreman Notification
-
-```jsonc
-{
-  "session": "my-project",
-  "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_viewport": true, "verify": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 3 },
-    { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ],
-  "on": {
-    "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true",
-    "step_yielded": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task} yielded: ${reason}' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true"
-  }
-}
-```
-
-Start multiple tasks in parallel: `pawl start task-a && pawl start task-b && pawl start task-c`. Each task has independent JSONL/worktree/viewport and does not interfere with others. Event hooks notify the Foreman viewport via tmux send-keys.
-
-### Recipe 5: Pure Automation Flow (No AI)
+### Recipe 3: Pure Automation (No Viewport)
 
 ```jsonc
 {
@@ -254,11 +205,9 @@ Start multiple tasks in parallel: `pawl start task-a && pawl start task-b && paw
 }
 ```
 
-Notes: no in_viewport or ai-helpers.sh, pure synchronous commands. review is a gate + verify=human combo: first gate waits for pawl done, then verify_human waits for pawl done again.
+### Recipe 4: Generic Pipeline (No Git)
 
-### Recipe 6: Generic Pipeline (No Git Worktrees)
-
-pawl is a generic step sequencer — git worktrees are one pattern, not a requirement. Use `${task}` as any identifier (project name, test scenario, deployment target):
+pawl is a generic step sequencer — git worktrees are one pattern, not a requirement:
 
 ```jsonc
 {
@@ -272,34 +221,87 @@ pawl is a generic step sequencer — git worktrees are one pattern, not a requir
 }
 ```
 
-No `${worktree}`, `${branch}`, or git operations. Examples: testing pipelines (task = test case), deployment (task = service), data processing (task = dataset), project bootstrapping (task = project name).
+### Recipe 5: Multi-Task Parallel + Notification
 
-### Recipe 7: Plan-First Development (Foreman Reviews Plan Before Execution)
+```jsonc
+{
+  "session": "my-project",
+  "workflow": [
+    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
+    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
+      "in_viewport": true, "verify": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 3 },
+    { "name": "review" },
+    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
+    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
+  ],
+  "on": {
+    "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:supervisor -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:supervisor C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true",
+    "step_yielded": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:supervisor -l '[pawl] ${task} yielded: ${reason}' && tmux send-keys -t ${session}:supervisor C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true"
+  }
+}
+```
 
-Adds explicit plan approval step. AI creates a plan in read-only mode, foreman reviews and approves before any code is written. Requires one-time setup: `cd .pawl/lib && npm install`.
+Start multiple tasks: `pawl start task-a && pawl start task-b && pawl start task-c`. Each gets independent JSONL/worktree/viewport.
+
+## AI Worker Integration Recipes
+
+pawl is tool-agnostic. Below are patterns for integrating AI coding agents as viewport workers. The worker is responsible for its own session management — pawl only provides the sequencing, variables, and event log.
+
+### Recipe: Claude Code Worker
+
+```jsonc
+{ "name": "develop",
+  "run": "cd ${worktree} && SF=.claude-session; if [ -f $SF ]; then FB=$(grep '\"step_finished\"' $PAWL_LOG_FILE | grep '\"success\":false' | tail -1 | jq -r '.verify_output // empty' 2>/dev/null); claude -p \"Fix: $FB\" -r $(cat $SF) --output-format json | jq -r '.session_id' > $SF; else cat $PAWL_TASK_FILE | claude -p - --output-format json | jq -r '.session_id' > $SF; fi",
+  "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry" }
+```
+
+Key points:
+- Session ID stored in `${worktree}/.claude-session`, managed by the worker itself
+- On retry, reads `PAWL_LOG_FILE` to extract failure feedback
+- `-r $(cat $SF)` resumes context, avoids re-understanding codebase
+
+### Recipe: Codex CLI Worker
+
+```jsonc
+{ "name": "develop",
+  "run": "cd ${worktree} && FB=$(grep '\"step_finished\"' $PAWL_LOG_FILE | grep '\"success\":false' | tail -1 | jq -r '.verify_output // empty' 2>/dev/null); if [ -n \"$FB\" ]; then codex -q --full-auto \"Fix: $FB\"; else codex -q --full-auto \"$(cat $PAWL_TASK_FILE)\"; fi",
+  "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry" }
+```
+
+### Recipe: Generic Agent Worker
+
+Any CLI that accepts a prompt and runs non-interactively works:
+
+```jsonc
+{ "name": "develop",
+  "run": "cd ${worktree} && cat $PAWL_TASK_FILE | your-agent-cli --non-interactive",
+  "in_viewport": true, "verify": "human", "on_fail": "human" }
+```
+
+### Recipe: Plan-Then-Execute Pattern
+
+Split planning and execution into separate steps. The plan step runs the AI in read-only mode; a human reviews; then the execute step implements.
 
 ```jsonc
 {
   "workflow": [
     { "name": "setup", "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "plan",
-      "run": "cd ${worktree} && node ${repo_root}/.pawl/lib/plan-worker.mjs",
+    { "name": "plan",  "run": "cd ${worktree} && cat ${task_file} | claude -p - --permission-mode plan --output-format json | jq -r '.session_id' > .claude-session",
       "in_viewport": true, "verify": "human", "on_fail": "human" },
-    { "name": "develop",
-      "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
+    { "name": "develop", "run": "cd ${worktree} && claude -p 'Execute the approved plan.' -r $(cat .claude-session)",
       "in_viewport": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
-    { "name": "merge", "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
+    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ]
 }
 ```
 
-Notes: plan step runs AI in read-only plan mode via Claude Agent SDK. When AI calls `ExitPlanMode`, the plan is saved to `.pawl/plans/${task}.md` and the session ID to `.pawl/plans/${task}.session`. Foreman reviews the plan then `pawl done` to approve. The develop step's `run_ai_worker` detects the plan session file and resumes it with `-r session_id`, executing the approved plan. Plan rejection: `pawl reset --step` on the plan step re-plans from scratch.
+Plan rejection: `pawl reset --step` on the plan step re-plans from scratch.
 
-## Foreman Coordination
+## Supervisor Coordination
 
-Foreman is an AI agent that manages multiple worker agents. pawl **does not push notifications — Foreman must poll** (unless event hooks are configured).
+A supervisor (human or AI agent) manages multiple workers. pawl **does not push notifications — the supervisor must poll** (unless event hooks are configured).
 
 ### Main Loop
 
@@ -336,73 +338,6 @@ while tasks remain incomplete:
 - **viewport_lost is passive detection**: pawl does not proactively notify when a viewport disappears. Detection only happens when `pawl status`/`pawl list`/`pawl wait` is called. Periodically `pawl list` to check health of in_viewport steps.
 - **pawl done dual semantics**: For Waiting status = approve (step advances); for Running+in_viewport = mark done (triggers verify flow).
 - **Retry exhaustion**: After reaching max_retries, status becomes Failed (does not auto-transition to Waiting). Manual intervention required.
-
-## AI Worker Integration (Coding Workflow Pattern)
-
-This section covers the AI coding workflow pattern specifically. For non-AI or non-coding use cases, see Recipe 5 (pure automation) or Recipe 6 (generic pipeline).
-
-### run_ai_worker Decision Flow
-
-```
-extract_session_id(JSONL)
-├─ no session_id → first run: cat task.md | claude -p - --tools "Bash,Read,Write"
-└─ has session_id → resume:
-   ├─ extract_feedback(JSONL) to get failure feedback
-   └─ claude -p "Fix: $feedback" -r $session_id --tools "Bash,Read,Write"
-```
-
-Value of resumption: avoids re-understanding the codebase from scratch on each retry. `-r session_id` preserves prior session context.
-
-### run_ai_worker Parameters
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--log-file <path>` | `$PAWL_LOG_FILE` | JSONL log path |
-| `--task-file <path>` | `$PAWL_TASK_FILE` | Task markdown path |
-| `--tools <tools>` | `Bash,Read,Write` | Comma-separated tool list |
-| `--claude-cmd <cmd>` | `$PAWL_CLAUDE_COMMAND` or `claude` | Claude CLI command |
-| `--extra-args <args>` | (empty) | Extra arguments passed to claude |
-
-### Typical in_viewport Step Config
-
-```jsonc
-// Basic
-{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker", "in_viewport": true }
-
-// Custom tools and model
-{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker --tools 'Bash,Read,Write,Edit' --extra-args '--model sonnet'", "in_viewport": true }
-```
-
-### Custom Wrapper
-
-When `run_ai_worker` doesn't meet your needs, bypass it and call claude directly:
-
-```bash
-#!/bin/bash
-source "$PAWL_REPO_ROOT/.pawl/lib/ai-helpers.sh"
-cd "$PAWL_WORKTREE"
-sid=$(extract_session_id "$PAWL_LOG_FILE")
-if [ -n "$sid" ]; then
-    feedback=$(extract_feedback "$PAWL_LOG_FILE")
-    claude -p "Previous error: $feedback. Fix it." -r "$sid" --tools "Bash,Read,Write"
-else
-    cat "$PAWL_TASK_FILE" | claude -p - --tools "Bash,Read,Write,Edit"
-fi
-```
-
-Reference in config: `"run": "bash ${repo_root}/.pawl/lib/my-wrapper.sh"`
-
-### Claude CLI Key Flags
-
-| Flag | Purpose |
-|------|---------|
-| `-p` | Non-interactive mode (required) |
-| `-r <session_id>` | Resume session (preserves context) |
-| `--tools "T1,T2"` | Available tool set |
-| `--output-format json` | JSON output (includes session_id) |
-| `--model <name>` | Specify model |
-
-Constraint: `-r session_id` must be in the same cwd (session data is stored per project directory). pawl's worktree path is deterministic, satisfying this constraint.
 
 ## pawl status --json Output
 
@@ -449,5 +384,4 @@ Field notes: `retry_count` only counts auto retries (auto=true); `last_feedback`
 | Worktree already exists | Leftover from previous run | `git worktree remove .pawl/worktrees/<task> --force && git branch -D pawl/<task>` then `pawl reset` |
 | viewport_lost but process alive | viewport name conflict | `tmux list-windows -t <session>` to inspect |
 | Dependency blocked | Prerequisite task not completed | `pawl list` to check blocking source |
-| `-r session_id` fails | cwd mismatch | Must run in same worktree directory |
 | JSONL corrupted | Write interrupted | `tail -1 .pawl/logs/<task>.jsonl` to check; `pawl reset` to reset |

@@ -1,15 +1,13 @@
 {
-  // pawl workflow config — full reference: .claude/skills/pawl/SKILL.md
+  // pawl workflow config — reference: .pawl/skills/pawl/SKILL.md
   // "session": "my-project",
   // "base_branch": "main",
-  // "claude_command": "claude",
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_viewport": true, "verify": "cd ${worktree} && echo 'TODO: replace with your test command'", "on_fail": "retry", "max_retries": 3 },
+    { "name": "work",    "run": "echo 'TODO: replace with your work command'",
+      "in_viewport": true, "verify": "echo 'TODO: replace with your verify command'", "on_fail": "retry" },
     { "name": "review",  "verify": "human" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ],
-  "on": { "step_finished": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
+  ]
 }

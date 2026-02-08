@@ -58,8 +58,7 @@ mod tests {
             .var("session", "my-project")
             .var("repo_root", "/home/user/project")
             .var("step", "Type check")
-            .var("base_branch", "main")
-            .var("claude_command", "claude");
+            .var("base_branch", "main");
 
         assert_eq!(ctx.expand("${task}"), "auth");
         assert_eq!(ctx.expand("${branch}"), "pawl/auth");
@@ -88,7 +87,6 @@ mod tests {
             .var("repo_root", "/home/user/project")
             .var("step", "Develop")
             .var("base_branch", "develop")
-            .var("claude_command", "claude")
             .var("step_index", "1")
             .var("log_file", "/home/user/project/.pawl/logs/auth.jsonl")
             .var("task_file", "/home/user/project/.pawl/tasks/auth.md");
@@ -119,7 +117,6 @@ mod tests {
             .var("repo_root", "/home/user/project")
             .var("step", "Develop")
             .var("base_branch", "main")
-            .var("claude_command", "ccc")
             .var("step_index", "1")
             .var("log_file", "/logs/auth.jsonl")
             .var("task_file", "/tasks/auth.md");
@@ -129,7 +126,6 @@ mod tests {
         assert_eq!(env.get("PAWL_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
         assert_eq!(env.get("PAWL_STEP_INDEX"), Some(&"1".to_string()));
         assert_eq!(env.get("PAWL_BASE_BRANCH"), Some(&"main".to_string()));
-        assert_eq!(env.get("PAWL_CLAUDE_COMMAND"), Some(&"ccc".to_string()));
     }
 
     #[test]
@@ -141,8 +137,7 @@ mod tests {
             .var("session", "my-project")
             .var("repo_root", "/home/user/project")
             .var("step", "Setup")
-            .var("base_branch", "main")
-            .var("claude_command", "claude");
+            .var("base_branch", "main");
 
         let env = ctx.to_env_vars();
         assert_eq!(env.get("PAWL_TASK"), Some(&"auth".to_string()));

@@ -1,19 +1,21 @@
 # pawl
 
-An orchestrator for AI coding agents. Each agent gets its own git worktree, its own viewport, and a configurable pipeline — from branch creation to merge. You define the pipeline once, then launch as many agents as you want.
+A resumable step sequencer. Define a pipeline once, run it for any task. Each task gets its own git worktree, its own viewport, and a cursor that survives crashes.
 
 ```
                ┌─ setup ─── develop ─── verify ─── merge ─── cleanup
   pawl start A ──┤
-  pawl start B ──┤  Each task runs in its own worktree,
-  pawl start C ──┘  isolated from the others.
+  pawl start B ──┤  Each task: own worktree, own viewport,
+  pawl start C ──┘  own append-only event log.
 ```
 
-## Why
+## Design
 
-AI coding agents (Claude, Codex, etc.) are powerful but messy to run in parallel. They conflict on files, break each other's imports, and leave merge chaos behind. Manual worktree/branch/merge management doesn't scale past 2-3 agents.
+Three ideas, everything else follows:
 
-`pawl` gives each agent an isolated workspace and a structured lifecycle: setup, develop, verify, merge, clean up. The agent communicates back via `pawl done`. Everything in the pipeline is a shell command — no plugins, no SDKs.
+1. **`state = replay(log)`** — No database, no status file. JSONL is the single source of truth. Crash, reboot, replay, resume.
+2. **Separate what from where** — Recording (what happened) and routing (what to do next) never mix. The decision function is pure: `decide(Outcome, FailPolicy) → Verdict`.
+3. **Trust the substrate** — File system, exit codes, `grep`, tmux. Build only what Unix can't: coroutine semantics, failure routing, viewport abstraction.
 
 ## Install
 
@@ -21,113 +23,89 @@ AI coding agents (Claude, Codex, etc.) are powerful but messy to run in parallel
 cargo install pawl
 ```
 
-Requires: Rust toolchain, tmux, git.
+Requires: Rust, tmux, git.
 
 ## Quick Start
 
 ```bash
-# 1. Initialize in your project
-cd your-project
-pawl init
-
-# 2. Create a task
-pawl create auth-login
-
-# 3. Write the task spec
+pawl init                    # scaffold .pawl/
+pawl create auth-login       # create a task
 vim .pawl/tasks/auth-login.md
-
-# 4. Start the task
-pawl start auth-login
+pawl start auth-login        # run the pipeline
 ```
 
 ## How It Works
 
-You define a workflow in `.pawl/config.jsonc` — a list of steps that run for every task:
+Define a workflow in `.pawl/config.jsonc`:
 
 ```jsonc
 {
   "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
+    { "name": "setup",   "run": "git worktree add ${worktree} -b ${branch} ${base_branch}" },
+    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
+      "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry" },
     { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ],
-  "on": { "step_finished": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
+    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch}" },
+    { "name": "cleanup", "run": "git worktree remove ${worktree} --force; true" }
+  ]
 }
 ```
 
 ### Step Types
 
-| Type | Config | Behavior |
-|------|--------|----------|
-| **Command** | `{ "run": "..." }` | Runs synchronously. Fails on non-zero exit. |
-| **Gate** | `{ "name": "..." }` | No `run` — pauses until `pawl done`. |
-| **Agent** | `{ "run": "...", "in_viewport": true }` | Runs in viewport. Waits for `pawl done`. |
-| **Verified** | `{ "run": "...", "verify": "human" }` | Runs, then waits for human approval. |
-
-### Step Properties
-
-| Property | Values | Description |
-|----------|--------|-------------|
-| `run` | shell command | Command to execute (omit for gate step) |
-| `in_viewport` | `true`/`false` | Run in viewport instead of sync |
-| `verify` | `"human"` or shell command | Post-step verification |
-| `on_fail` | `"retry"` or `"human"` | Failure strategy |
-| `max_retries` | number (default: 3) | Max auto-retries when `on_fail="retry"` |
+| Pattern | What happens |
+|---------|-------------|
+| `{ "run": "..." }` | Run sync. Non-zero exit = failure. |
+| `{ "name": "..." }` | Gate — pause until `pawl done`. |
+| `{ "run": "...", "in_viewport": true }` | Run in viewport, wait for `pawl done`. |
+| `{ "verify": "human" }` | Run, then wait for human approval. |
+| `{ "on_fail": "retry" }` | Auto-retry on failure (default: 3×). |
+| `{ "on_fail": "human" }` | Yield to human on failure. |
 
 ### Variables
 
-All `${var}` references are expanded before execution:
+`${var}` in config → expanded before execution. Also available as `PAWL_VAR` env vars.
 
-| Variable | Example |
-|----------|---------|
-| `${task}` | `auth-login` |
-| `${branch}` | `pawl/auth-login` |
-| `${worktree}` | `/project/.pawl/worktrees/auth-login` |
-| `${session}` | `my-project` |
-| `${repo_root}` | `/project` |
-| `${base_branch}` | `main` |
-| `${step}` | `Develop` |
-| `${task_file}` | `/project/.pawl/tasks/auth-login.md` |
-| `${log_file}` | `/project/.pawl/logs/auth-login.jsonl` |
+| Variable | Value |
+|----------|-------|
+| `${task}` | Task name |
+| `${branch}` | `pawl/{task}` |
+| `${worktree}` | `{repo_root}/.pawl/worktrees/{task}` |
+| `${step}` | Current step name |
+| `${repo_root}` | Git repository root |
+| `${base_branch}` | Config base branch |
+| `${session}` | Viewport session name |
+| `${task_file}` | `.pawl/tasks/{task}.md` |
+| `${log_file}` | `.pawl/logs/{task}.jsonl` |
+| `${step_index}` | Current step index (0-based) |
 
 ## Commands
 
-### Lifecycle
-
 ```bash
-pawl init                  # Initialize .pawl/ directory
-pawl create <name>         # Create a task
-pawl start <task>          # Start workflow execution
-```
+# Lifecycle
+pawl init                          # Initialize project
+pawl create <name>                 # Create task
+pawl start <task> [--reset]        # Start pipeline
 
-### Flow Control
+# Flow control
+pawl done <task> [-m msg]          # Approve / mark done
+pawl stop <task>                   # Stop
+pawl reset <task>                  # Reset task
+pawl reset --step <task>           # Retry current step
 
-```bash
-pawl done <task>           # Approve waiting step / mark in_viewport step done
-pawl stop <task>           # Stop running task
-pawl reset <task>          # Reset to initial state
-pawl reset --step <task>   # Retry current step
-```
-
-### Monitoring
-
-```bash
-pawl status [task]         # Show status (--json for machine output)
-pawl list                  # List all tasks
-pawl log <task> --all      # View execution logs
-pawl log <task> --step 3   # View specific step log
-pawl events [task] [--follow]  # Unified event stream
-pawl capture <task>        # Capture viewport content
-pawl wait <task> --until completed  # Wait for status
-pawl enter <task>          # Attach to viewport
+# Observe
+pawl status [task] [--json]        # Status
+pawl list                          # List tasks
+pawl log <task> [--all] [--step N] # Logs
+pawl events [task] [--follow]      # Event stream
+pawl capture <task> [-l N]         # Viewport content
+pawl wait <task> --until <status>  # Poll
+pawl enter <task>                  # Attach to viewport
 ```
 
 ## Task Files
 
-Tasks are defined as markdown in `.pawl/tasks/`:
+`.pawl/tasks/{name}.md` — YAML frontmatter + markdown body:
 
 ```markdown
 ---
@@ -138,33 +116,21 @@ skip:
   - cleanup
 ---
 
-Implement the login API endpoint with email/password authentication.
-
-## Requirements
-- POST /api/auth/login
-- Return JWT token
-- Rate limit: 5 attempts per minute
+Implement login with email/password. Return JWT. Rate limit 5/min.
 ```
 
 ## Project Layout
 
 ```
 .pawl/
-├── config.jsonc          # Workflow configuration
-├── tasks/                # Task definitions (*.md)
-├── logs/                 # Event logs (*.jsonl) — single source of truth
-├── plans/                # Plan outputs (*.md + *.session, generated by plan-worker at runtime)
-├── worktrees/            # Git worktrees (one per task)
-└── lib/
-    ├── ai-helpers.sh     # AI worker helper functions (plan-aware resume)
-    ├── plan-worker.mjs   # SDK plan worker for plan-first workflow (Recipe 7)
-    └── package.json      # Node.js deps for plan-worker (`cd .pawl/lib && npm install`)
-
-.claude/skills/pawl/      # Claude Code skill (generated by pawl init)
-└── SKILL.md              # Complete reference: config rules, recipes, foreman guide, troubleshooting
+├── config.jsonc       # Workflow definition
+├── tasks/*.md         # Task specs
+├── logs/*.jsonl       # Event logs (single source of truth)
+├── skills/pawl/       # Skill reference
+└── worktrees/*/       # Git worktrees (one per task)
 ```
 
-State is reconstructed from event logs via replay — no `status.json`.
+State = `replay(logs/*.jsonl)`. No status file.
 
 ## License
 

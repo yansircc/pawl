@@ -15,10 +15,6 @@ pub struct Config {
     #[serde(default = "default_viewport")]
     pub viewport: String,
 
-    /// Claude CLI command path (default: "claude")
-    #[serde(default = "default_claude_command")]
-    pub claude_command: String,
-
     /// Worktree directory relative to repo root (default: ".pawl/worktrees")
     #[serde(default = "default_worktree_dir")]
     pub worktree_dir: String,
@@ -38,10 +34,6 @@ pub struct Config {
 
 fn default_viewport() -> String {
     "tmux".to_string()
-}
-
-fn default_claude_command() -> String {
-    "claude".to_string()
 }
 
 fn default_worktree_dir() -> String {

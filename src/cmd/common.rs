@@ -58,7 +58,6 @@ impl Project {
             .var("repo_root", &self.repo_root)
             .var("step", step_name)
             .var("base_branch", &self.config.base_branch)
-            .var("claude_command", &self.config.claude_command)
             .var("step_index", step_idx.map(|i| i.to_string()).unwrap_or_default())
             .var("log_file", self.log_file(task_name).to_string_lossy())
             .var("task_file", self.task_file(task_name).to_string_lossy())
