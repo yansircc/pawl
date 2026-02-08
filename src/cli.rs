@@ -31,7 +31,11 @@ pub enum Command {
     Init,
 
     /// Create a new task
-    #[command(after_help = "Frontmatter: name, depends (list), skip (list of step names to auto-skip).")]
+    #[command(after_help = r#"FRONTMATTER: name, depends (list), skip (list of step names to auto-skip).
+
+DUAL PURPOSE: task definition for pawl + AI worker prompt (cat ${task_file} | agent -p).
+
+ON RETRY: append fix guidance to end of task file (don't overwrite — preserves history)."#)]
     Create {
         /// Task name
         name: String,

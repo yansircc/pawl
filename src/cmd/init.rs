@@ -8,6 +8,9 @@ use super::common::PAWL_DIR;
 
 const DEFAULT_CONFIG: &str = include_str!("templates/config.jsonc");
 const PAWL_SKILL: &str = include_str!("templates/pawl-skill.md");
+const SKILL_AUTHOR: &str = include_str!("templates/author.md");
+const SKILL_ORCHESTRATE: &str = include_str!("templates/orchestrate.md");
+const SKILL_SUPERVISE: &str = include_str!("templates/supervise.md");
 
 const GITIGNORE_ENTRIES: &str = r#"
 # pawl - Resumable Step Sequencer
@@ -36,12 +39,22 @@ pub fn run() -> Result<()> {
     println!("  Created {}", config_path.display());
 
     let skill_dir = pawl_dir.join("skills/pawl");
-    fs::create_dir_all(&skill_dir)
-        .context("Failed to create .pawl/skills/pawl/ directory")?;
+    let refs_dir = skill_dir.join("references");
+    fs::create_dir_all(&refs_dir)
+        .context("Failed to create .pawl/skills/pawl/references/ directory")?;
     let skill_path = skill_dir.join("SKILL.md");
     fs::write(&skill_path, PAWL_SKILL)
         .context("Failed to write SKILL.md")?;
     println!("  Created {}", skill_path.display());
+    for (name, content) in [
+        ("author.md", SKILL_AUTHOR),
+        ("orchestrate.md", SKILL_ORCHESTRATE),
+        ("supervise.md", SKILL_SUPERVISE),
+    ] {
+        let path = refs_dir.join(name);
+        fs::write(&path, content).with_context(|| format!("Failed to write {}", name))?;
+        println!("  Created {}", path.display());
+    }
 
     update_gitignore(&repo_root)?;
 

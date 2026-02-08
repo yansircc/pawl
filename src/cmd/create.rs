@@ -79,14 +79,14 @@ fn generate_task_content(name: &str, description: Option<&str>, depends: &[&str]
         content.push('\n');
     } else {
         content.push_str(&format!(
-            "<!-- This file also serves as AI Worker system prompt (cat task.md | claude -p) -->\n\n\
-             ## Task: {}\n\n\
+            "## Task: {}\n\n\
              ### Goal\n\n\
-             <!-- Clearly describe what to do -->\n\n\
+             <!-- Describe what to do -->\n\n\
              ### Constraints\n\n\
-             <!-- Technical constraints, code standards, what NOT to do -->\n\n\
+             <!-- Technical constraints, what NOT to do -->\n\n\
              ### Acceptance Criteria\n\n\
-             - [ ] TODO\n",
+             - [ ] TODO\n\n\
+             <!-- On retry failure, append fix guidance below (don't overwrite — preserves history) -->\n",
             name
         ));
     }

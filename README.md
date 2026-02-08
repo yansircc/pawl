@@ -123,11 +123,16 @@ Implement login with email/password. Return JWT. Rate limit 5/min.
 
 ```
 .pawl/
-├── config.jsonc       # Workflow definition
-├── tasks/*.md         # Task specs
-├── logs/*.jsonl       # Event logs (single source of truth)
-├── skills/pawl/       # Skill reference
-└── worktrees/*/       # Git worktrees (one per task)
+├── config.jsonc              # Workflow definition (self-documented)
+├── tasks/*.md                # Task specs
+├── logs/*.jsonl              # Event logs (single source of truth)
+├── skills/pawl/              # Skill reference
+│   ├── SKILL.md              # Orientation + role routing
+│   └── references/           # Role-specific guides
+│       ├── author.md         # Writing tasks
+│       ├── orchestrate.md    # Designing workflows
+│       └── supervise.md      # Monitoring tasks
+└── worktrees/*/              # Git worktrees (one per task)
 ```
 
 State = `replay(logs/*.jsonl)`. No status file.
