@@ -74,11 +74,11 @@ fn derive_routing(status: &str, message: Option<&str>, task: &str) -> (Vec<Strin
                 vec![],
                 Some(format!("confirm preconditions, then: pawl done {task}")),
             ),
-            Some("verify_human") => (
+            Some("verify_manual") => (
                 vec![],
                 Some(format!("verify work quality, then: pawl done {task}")),
             ),
-            Some("on_fail_human") => (
+            Some("on_fail_manual") => (
                 vec![format!("pawl reset --step {task}")],
                 Some(format!("review failure, then: pawl done {task} to accept")),
             ),

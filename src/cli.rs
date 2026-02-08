@@ -2,15 +2,7 @@ use clap::{Parser, Subcommand};
 
 /// Resumable step sequencer
 #[derive(Parser)]
-#[command(name = "pawl", version, after_help = r#"STATES: Pending → Running → Waiting / Completed / Failed / Stopped
-
-OUTPUT: stdout = JSON (write cmds) or JSONL (log/events). stderr = plain text.
-INDEXING: 0-based in all programmatic output. 1-based only in stderr progress.
-
-FILES:
-  .pawl/config.jsonc      Workflow config — step properties, variables, event hooks
-  .pawl/tasks/{task}.md   Task definition (pawl create)
-  .pawl/logs/{task}.jsonl  Event log — single source of truth"#)]
+#[command(name = "pawl", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -22,11 +14,6 @@ pub enum Command {
     Init,
 
     /// Create a new task
-    #[command(after_help = r#"FRONTMATTER: name, depends (list), skip (list of step names to auto-skip).
-
-DUAL PURPOSE: task definition for pawl + AI worker prompt (cat ${task_file} | agent -p).
-
-ON RETRY: append fix guidance to end of task file (don't overwrite — preserves history)."#)]
     Create {
         /// Task name
         name: String,
@@ -50,11 +37,6 @@ ON RETRY: append fix guidance to end of task file (don't overwrite — preserves
     },
 
     /// Show task status
-    #[command(after_help = r#"Fields: name, status, current_step (0-based), total_steps,
-step_name, message, blocked_by, retry_count, last_feedback, suggest, prompt.
-With task arg: adds description, depends, workflow[{index, name, status, step_type}].
-suggest = mechanical recovery commands. prompt = requires judgment.
-Optional fields omitted when empty/null."#)]
     Status {
         /// Task name (optional, shows all if omitted)
         task: Option<String>,
@@ -67,7 +49,6 @@ Optional fields omitted when empty/null."#)]
     },
 
     /// Reset task (full reset, or --step to retry current step)
-    #[command(after_help = "Full reset: clears all state → Pending.\n--step: retries current step (keeps history, useful after failure).")]
     Reset {
         /// Task name
         task: String,
@@ -92,7 +73,6 @@ Optional fields omitted when empty/null."#)]
     },
 
     /// Wait for task to reach a specific status
-    #[command(after_help = "Comma-separated: --until waiting,failed. Exits 0 on match, 1 on timeout.")]
     Wait {
         /// Task name
         task: String,
@@ -108,7 +88,6 @@ Optional fields omitted when empty/null."#)]
     },
 
     /// Show task logs (JSONL output)
-    #[command(after_help = "--all: current run events. --all-runs: full history.\n--step N: specific step (0-based). Output is JSONL (pipe to jq).")]
     Log {
         /// Task name
         task: String,
@@ -124,7 +103,6 @@ Optional fields omitted when empty/null."#)]
     },
 
     /// Stream events from all (or specified) tasks in real-time
-    #[command(after_help = "Without --follow: prints existing and exits. With --follow: tails continuously.\n--type: comma-separated event types (e.g. step_finished,step_yielded).")]
     Events {
         /// Only stream events for this task (optional, streams all if omitted)
         task: Option<String>,
@@ -137,7 +115,6 @@ Optional fields omitted when empty/null."#)]
     },
 
     /// Mark current step as done / approve waiting step
-    #[command(after_help = "Waiting → approve (step advances).\nRunning + in_viewport → mark done (triggers verify/on_fail flow).")]
     Done {
         /// Task name
         task: String,

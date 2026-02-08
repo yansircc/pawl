@@ -57,11 +57,11 @@ pub struct Step {
     #[serde(default)]
     pub in_viewport: bool,
 
-    /// Verifier: a shell command (must exit 0) or "human" for manual approval
+    /// Verifier: a shell command (must exit 0) or "manual" for manual approval
     #[serde(default)]
     pub verify: Option<String>,
 
-    /// Failure strategy: "retry" (auto-retry) or "human" (wait for decision)
+    /// Failure strategy: "retry" (auto-retry) or "manual" (wait for decision)
     #[serde(default)]
     pub on_fail: Option<String>,
 

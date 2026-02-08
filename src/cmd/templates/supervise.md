@@ -1,5 +1,18 @@
 # Supervisor — Monitoring and Troubleshooting
 
+## States
+
+Pending → Running → Waiting / Completed / Failed / Stopped
+
+## Status Fields
+
+`pawl status [task]` JSON output:
+- `name`, `status`, `current_step` (0-based), `total_steps`, `step_name`
+- `message`, `blocked_by`, `retry_count`, `last_feedback`
+- `suggest`, `prompt` (routing — see below)
+- With task arg: adds `description`, `depends`, `workflow` (array of `{index, name, status, step_type}`)
+- Optional fields omitted when empty/null
+
 ## Routing Hints
 
 `pawl status`/`pawl list` JSON output includes two routing fields:

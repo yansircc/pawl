@@ -1,48 +1,49 @@
 # Session Handoff
 
-## Current Session (S36): Less-Is-More Audit
+## Current Session (S37): Skill Self-Containment + human→manual
 
 ### Key Insight
 
-三个生成元（separate/derive/trust）是发动机，但没有刹车。S33-S35 每轮局部优雅、全局膨胀。S36 引入 less-is-more 作为停机条件：每个机制必须由当前使用证明其存在，不是由设计美学。
+Skill 文档应该是每个角色的唯一信息源，zero jumps。`-h` 和 config.jsonc 注释不应该承担文档职责 — 它们只是使用时的辅助，不是学习入口。
 
-两条派生规则：
-1. **去重收益 ∝ 变更频率** — 稳定事实内联，易变细节才用指针
-2. **每个机制只在其职责范围内** — 错误报告，状态路由，写命令确认
+`"human"` 一词暗示只有人类能做 verify/on_fail 决策，但实际上 supervisor agent 同样可以。替换为 `"manual"` — 对立面是 automated（retry / shell command），不隐含操作者身份。
 
-Agent UX 发现：progressive disclosure 是人类模式。Agent 要 flat, complete, searchable。
+### What changed (S37)
 
-### What changed (S36)
+**Skill 文档自完备（zero jumps from SKILL.md）**
+- SKILL.md: 删 `pawl --help` 指针，删 config.jsonc 指针，内联 states + indexing
+- author.md: 加 `pawl create` 入口命令
+- supervise.md: 加 States 段 + Status Fields 段（完整字段列表）
+- orchestrate.md: 加 Top-Level Options + Step Properties 表 + Variables 列表 + Design Rules + Event hook event types
 
-**代码精简（retroactive S33-S35 cleanup）**
-- `PawlError`: 删 `Serialize`, `#[serde]`, `suggest()`, `Timeout.task`。error.rs: 77 → 43 行
-- `main.rs`: JSON error → `eprintln!("{pe}")` + exit code。8 → 3 行 error handling
-- `output_task_state()`: 删 suggest/prompt。写命令只报告状态，不路由
-- `derive_routing()`: 从 `Project` (common.rs) 移到 `status.rs` — 唯一消费者
-- suggest/prompt 单一发射点：`pawl status` 输出
+**config.jsonc 空画布**
+- 46 行 → 4 行。删预置 git worktree 骨架 + 35 行文档注释
+- 强制 agent 读 orchestrate.md 设计自己的 workflow，不再开箱即用
 
-**Skill 文档自包含**
-- SKILL.md: "Errors are structured" → "stderr = plain text"
-- author.md: 内联 frontmatter 字段（was: "run `pawl create --help`"）
-- supervise.md: 内联 suggest/prompt 语义，补充 events --follow / wait / capture
-- orchestrate.md: 不动（已自包含）
+**CLI -h 全面精简**
+- 删除所有 8 个 `after_help` 块。cli.rs: 157 → 134 行
+- `-h` 只保留 clap 自动生成的 usage + arg descriptions
 
-**CLI -h 精简**
-- 顶层: 删 STEP PROPERTIES + VARIABLES（在 config.jsonc 注释里）
-- `start -h`: 删内部管线描述（settle_step pipeline）
-- `status -h`: 加 suggest/prompt 字段说明
-
-**设计哲学更新**
-- CLAUDE.md: 新增 "Stop condition: less-is-more" + "Agent UX ≠ Human UX"
+**`"human"` → `"manual"` 全局替换**
+- 配置值: `verify: "manual"`, `on_fail: "manual"`
+- 事件 reason: `verify_manual`, `on_fail_manual`
+- 枚举: `ManualNeeded`, `FailPolicy::Manual`
+- 影响 13 个文件（src + templates + README）
 
 ---
 
 ## Previous Sessions (compressed)
 
+### S36: Less-Is-More Audit
+- 三个生成元缺刹车 → less-is-more 作为停机条件
+- PawlError 精简（删 Serialize/suggest）。error.rs: 77→43 行
+- derive_routing() 移到 status.rs（唯一消费者）
+- Skill 文档开始内联（author.md frontmatter, supervise.md suggest/prompt）
+
 ### S33-S35: Agent-First Interface
 - S33: stdout=JSON/JSONL, stderr=progress。~395 行人类层删除。output_task_state() 统一输出。
-- S34: PawlError enum → exit codes 2-7。~35 bail! 转换。Viewport trait 精简。
-- S35: derive_routing() 自路由协议。~~JSON errors, suggest in errors~~ (reverted S36)
+- S34: PawlError enum → exit codes 2-7。Viewport trait 精简。
+- S35: derive_routing() 自路由协议。
 
 ### S32: Role-Based Skill Architecture
 - SKILL.md: 249 → 29 行。3 role references。config.jsonc 自文档化。
@@ -50,18 +51,12 @@ Agent UX 发现：progressive disclosure 是人类模式。Agent 要 flat, compl
 ### S31: Trust the Substrate
 - SKILL.md: 388 → 248 行。CLI `after_help` 自文档化。
 
-### S30: Decouple Claude Code
-- 删除 `claude_command` + `ai-helpers.sh` + `plan-worker.mjs`
-
-### S28: Structure Compression
-- `settle_step()` pipeline, `Display`+`FromStr`, `context_for/step_name/worktree_path`
-
-### S27: Viewport Trait
-- `Viewport` trait + `TmuxViewport` impl
-
-### S25-26: Rename wf → pawl, crates.io publish
-
-### S1-24: Architecture evolution, Foreman mode, first principles
+### S30 and earlier
+- S30: 解耦 Claude Code（删 claude_command + ai-helpers.sh + plan-worker.mjs）
+- S28: 结构压缩（settle_step pipeline, Display+FromStr, context_for/step_name）
+- S27: Viewport trait + TmuxViewport
+- S25-26: Rename wf → pawl, crates.io publish
+- S1-24: Architecture evolution, Foreman mode, first principles
 
 ---
 
@@ -73,13 +68,13 @@ Agent UX 发现：progressive disclosure 是人类模式。Agent 要 flat, compl
 
 - **retry exhaustion has no audit event**: no event when transitioning from retry to terminal state
 - `pawl events` outputs full history (not filtered by current run), inconsistent with `pawl log --all`
-- **clap 4.5 long_about broken**: doc comments don't set `long_about`; use `after_help` attribute
+- **clap 4.5 long_about broken**: doc comments don't set `long_about`; use `after_help` attribute (now moot — all after_help deleted in S37)
 
 ## Key File Index
 
 | Area | File |
 |------|------|
-| CLI definition (14 commands) + help text | `src/cli.rs` |
+| CLI definition (14 commands), usage only | `src/cli.rs` |
 | PawlError enum (6 variants, exit codes 2-7) | `src/error.rs` |
 | Project context, output_task_state | `src/cmd/common.rs` |
 | Status + derive_routing (suggest/prompt) | `src/cmd/status.rs` |

@@ -59,7 +59,7 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             }
         }
         TaskStatus::Waiting => {
-            // Human approval: emit StepResumed and continue
+            // Manual approval: emit StepResumed and continue
             project.append_event(&task_name, &Event::StepResumed {
                 ts: event_timestamp(),
                 step: step_idx,

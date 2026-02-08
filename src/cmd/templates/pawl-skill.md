@@ -13,18 +13,17 @@ A resumable coroutine whose consumer is agents, not humans. Advance through a fi
 yield when unable to self-decide, rebuild state from an append-only log. `state = replay(log)`.
 stdout = JSON/JSONL. stderr = plain text (errors + progress). `pawl status` includes routing hints (`suggest`/`prompt`).
 
-- **Step**: 4 orthogonal properties (`run`, `verify`, `on_fail`, `in_viewport`) — see config comments
+- **Step**: 4 orthogonal properties (`run`, `verify`, `on_fail`, `in_viewport`) — see orchestrate.md
 - **Gate step**: No `run` — pauses for `pawl done`
-- **Yield**: Step can't self-decide → waits for human/supervisor input
+- **Yield**: Step can't self-decide → waits for external input
 - **Replay**: All state derived from JSONL log, no separate storage
 
-Run `pawl --help` for CLI reference, variables, states, and indexing.
-Step properties, design rules, and event hooks are in `.pawl/config.jsonc` comments.
+States: Pending → Running → Waiting / Completed / Failed / Stopped. Indexing: 0-based everywhere.
 
 ## Roles
 
 | Role | When | Reference |
 |------|------|-----------|
-| **Author** | Writing task definitions (`.pawl/tasks/*.md`) | [author.md](references/author.md) |
 | **Orchestrator** | Designing workflow config (`.pawl/config.jsonc`) | [orchestrate.md](references/orchestrate.md) |
+| **Author** | Writing task definitions (`.pawl/tasks/*.md`) | [author.md](references/author.md) |
 | **Supervisor** | Polling and troubleshooting | [supervise.md](references/supervise.md) |

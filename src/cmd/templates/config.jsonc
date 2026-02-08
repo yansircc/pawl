@@ -1,46 +1,4 @@
 {
-  // ── pawl workflow config ──────────────────────────────────────────
-  //
-  // Top-level options (all optional):
-  //   session       — tmux session name (default: directory name)
-  //   viewport      — viewport backend (default: "tmux")
-  //   worktree_dir  — worktree location (default: ".pawl/worktrees")
-  //   base_branch   — base branch for worktrees (default: "main")
-  //
-  // Step properties:
-  //   name        — (required) unique identifier
-  //   run         — shell command; omit → gate step (pauses for `pawl done`)
-  //   in_viewport — run in viewport window (default: false)
-  //   verify      — "human" (manual approval) or shell command (exit 0 = pass)
-  //   on_fail     — "retry" (auto, up to max_retries) or "human" (pause)
-  //   max_retries — limit for on_fail="retry" (default: 3)
-  //
-  // Variables (in commands and as PAWL_* env vars):
-  //   ${task}  ${branch}  ${worktree}  ${session}  ${repo_root}
-  //   ${step}  ${step_index}  ${base_branch}  ${log_file}  ${task_file}
-  //   ${run_id}  ${retry_count}  ${last_verify_output}
-  //
-  // Design rules:
-  //   - in_viewport run MUST cd to working dir (cd ${worktree} && ...)
-  //   - failable in_viewport step → add on_fail (otherwise failure is terminal)
-  //   - observable output → add verify (otherwise pawl done trusts blindly)
-  //   - gate step (no run) → verify/on_fail are ignored, don't set them
-  //
-  // Event hooks (optional top-level "on" field, fire-and-forget — async, silent on failure):
-  //   "on": { "step_finished": "echo ${task}/${step} exit=${exit_code} >> hook.log" }
-  //   Events: task_started, step_finished (${success} ${exit_code} ${duration}),
-  //     step_yielded (${reason}), step_resumed, viewport_launched, step_skipped,
-  //     step_reset (${auto}), viewport_lost, task_stopped, task_reset
-  //
-  // Run `pawl --help` for full CLI reference.
-  // ──────────────────────────────────────────────────────────────────
-
-  "workflow": [
-    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
-    { "name": "work",    "run": "cd ${worktree} && echo 'TODO: your work command'",
-      "in_viewport": true, "verify": "cd ${worktree} && echo 'TODO: your verify command'", "on_fail": "retry" },
-    { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
-  ]
+  // Design your workflow — see orchestrate.md for step properties, variables, and recipes.
+  "workflow": []
 }

@@ -220,7 +220,7 @@ fn execute_step(
 #[derive(Debug, PartialEq)]
 pub(crate) enum Outcome {
     Success,
-    HumanNeeded,
+    ManualNeeded,
     Failure { feedback: String },
 }
 
@@ -228,7 +228,7 @@ pub(crate) enum Outcome {
 pub(crate) enum FailPolicy {
     Terminal,
     Retry { can_retry: bool },
-    Human,
+    Manual,
 }
 
 #[derive(Debug, PartialEq)]
@@ -243,10 +243,10 @@ pub(crate) enum Verdict {
 pub(crate) fn decide(outcome: Outcome, policy: FailPolicy) -> Verdict {
     match outcome {
         Outcome::Success => Verdict::Advance,
-        Outcome::HumanNeeded => Verdict::Yield { reason: "verify_human" },
+        Outcome::ManualNeeded => Verdict::Yield { reason: "verify_manual" },
         Outcome::Failure { .. } => match policy {
             FailPolicy::Retry { can_retry: true } => Verdict::Retry,
-            FailPolicy::Human => Verdict::Yield { reason: "on_fail_human" },
+            FailPolicy::Manual => Verdict::Yield { reason: "on_fail_manual" },
             _ => Verdict::Fail,
         },
     }
@@ -259,7 +259,7 @@ fn derive_fail_policy(project: &Project, task_name: &str, step: &Step, step_idx:
             let count = crate::model::event::count_auto_retries(&events, step_idx);
             Ok(FailPolicy::Retry { can_retry: count < step.effective_max_retries() })
         }
-        Some("human") => Ok(FailPolicy::Human),
+        Some("manual") => Ok(FailPolicy::Manual),
         _ => Ok(FailPolicy::Terminal),
     }
 }
@@ -274,7 +274,7 @@ fn apply_verdict(
     verdict: &Verdict,
     verify_output: Option<String>,
 ) -> Result<bool> {
-    let success = matches!(verdict, Verdict::Advance | Verdict::Yield { reason: "verify_human" });
+    let success = matches!(verdict, Verdict::Advance | Verdict::Yield { reason: "verify_manual" });
 
     // Phase 1: Recording — always faithfully record the run result
     project.append_event(task_name, &Event::StepFinished {
@@ -305,11 +305,11 @@ fn apply_verdict(
                 reason: reason.to_string(),
             })?;
             match *reason {
-                "verify_human" => {
-                    eprintln!("  → Waiting for human verification. Use 'pawl done {}' to approve.", task_name);
+                "verify_manual" => {
+                    eprintln!("  → Waiting for manual verification. Use 'pawl done {}' to approve.", task_name);
                 }
-                "on_fail_human" => {
-                    eprintln!("  Verify failed. Waiting for human decision.");
+                "on_fail_manual" => {
+                    eprintln!("  Verify failed. Waiting for manual decision.");
                     eprintln!("  Use 'pawl done {}' to approve or 'pawl reset --step {}' to retry.", task_name, task_name);
                 }
                 _ => {}
@@ -349,7 +349,7 @@ pub fn settle_step(
     let (outcome, verify_output) = if record.exit_code == 0 {
         match run_verify(project, task_name, step, step_idx)? {
             VerifyResult::Passed => (Outcome::Success, None),
-            VerifyResult::HumanNeeded => (Outcome::HumanNeeded, None),
+            VerifyResult::ManualNeeded => (Outcome::ManualNeeded, None),
             VerifyResult::Failed { feedback } => (
                 Outcome::Failure { feedback: feedback.clone() },
                 Some(feedback),
@@ -406,7 +406,7 @@ fn launch_in_viewport(
 #[derive(Debug, PartialEq)]
 enum VerifyResult {
     Passed,
-    HumanNeeded,
+    ManualNeeded,
     Failed { feedback: String },
 }
 
@@ -414,7 +414,7 @@ enum VerifyResult {
 fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyResult> {
     match &step.verify {
         None => Ok(VerifyResult::Passed),
-        Some(v) if v == "human" => Ok(VerifyResult::HumanNeeded),
+        Some(v) if v == "manual" => Ok(VerifyResult::ManualNeeded),
         Some(cmd) => {
             let run_id = project.replay_task(task_name)
                 .ok()
@@ -461,8 +461,8 @@ mod tests {
     }
 
     #[test]
-    fn test_decide_yield_verify_human() {
-        assert_eq!(decide(Outcome::HumanNeeded, FailPolicy::Terminal), Verdict::Yield { reason: "verify_human" });
+    fn test_decide_yield_verify_manual() {
+        assert_eq!(decide(Outcome::ManualNeeded, FailPolicy::Terminal), Verdict::Yield { reason: "verify_manual" });
     }
 
     #[test]
@@ -490,10 +490,10 @@ mod tests {
     }
 
     #[test]
-    fn test_decide_failure_human() {
+    fn test_decide_failure_manual() {
         assert_eq!(
-            decide(Outcome::Failure { feedback: "bad".into() }, FailPolicy::Human),
-            Verdict::Yield { reason: "on_fail_human" }
+            decide(Outcome::Failure { feedback: "bad".into() }, FailPolicy::Manual),
+            Verdict::Yield { reason: "on_fail_manual" }
         );
     }
 }

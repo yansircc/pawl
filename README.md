@@ -58,9 +58,9 @@ Define a workflow in `.pawl/config.jsonc`:
 | `{ "run": "..." }` | Run sync. Non-zero exit = failure. |
 | `{ "name": "..." }` | Gate — pause until `pawl done`. |
 | `{ "run": "...", "in_viewport": true }` | Run in viewport, wait for `pawl done`. |
-| `{ "verify": "human" }` | Run, then wait for human approval. |
+| `{ "verify": "manual" }` | Run, then wait for manual approval. |
 | `{ "on_fail": "retry" }` | Auto-retry on failure (default: 3×). |
-| `{ "on_fail": "human" }` | Yield to human on failure. |
+| `{ "on_fail": "manual" }` | Yield for manual decision on failure. |
 
 ### Variables
 

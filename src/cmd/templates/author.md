@@ -1,5 +1,7 @@
 # Author — Writing Task Definitions
 
+Create: `pawl create <name> [description] [--depends a,b]`
+
 Task files (`.pawl/tasks/{task}.md`) serve dual purpose:
 1. **pawl definition**: frontmatter (name, depends, skip) controls sequencing
 2. **AI worker prompt**: `cat $PAWL_TASK_FILE | <agent-cli>` — the file IS the prompt

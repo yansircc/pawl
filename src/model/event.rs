@@ -305,7 +305,7 @@ mod tests {
         let events = vec![
             Event::TaskStarted { ts: ts(), run_id: String::new() },
             finished(0, true, 0),
-            Event::StepYielded { ts: ts(), step: 0, reason: "verify_human".to_string() },
+            Event::StepYielded { ts: ts(), step: 0, reason: "verify_manual".to_string() },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);

@@ -49,7 +49,7 @@ From the three generators, five operational rules follow:
 1. **Memory = append-only log**. `state = replay(log)`, no separate storage. *(from: trust the substrate)*
 2. **Cursor moves forward monotonically**. `current_step` only increases, except on explicit Reset. *(from: separate what from where)*
 3. **Verdict before advance**. Cursor advances only after success/failure is determined. *(from: separate what from where)*
-4. **Two authorities per decision point**. Machine (exit code) or human (`pawl done`), never both. *(from: derive, don't write — one source of truth per decision)*
+4. **Two authorities per decision point**. Machine (exit code) or manual (`pawl done`), never both. *(from: derive, don't write — one source of truth per decision)*
 5. **Failure is routable**. Failure → retry | yield | terminate. *(from: trust the substrate — exit codes + routing algebra)*
 
 ### Agent-First Interface
@@ -98,7 +98,7 @@ src/
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all/--all-runs, JSONL output)
 │   └── templates/       # Template files embedded via include_str!
-│       ├── config.jsonc           # Default workflow config (self-documented)
+│       ├── config.jsonc           # Empty workflow scaffold (orchestrate.md has design guide)
 │       ├── pawl-skill.md          # SKILL.md: orientation + role routing
 │       ├── author.md              # Role: task authoring guide
 │       ├── orchestrate.md         # Role: workflow design, recipes, Claude CLI
@@ -117,8 +117,8 @@ src/
 - **Step**: 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_viewport`
 - **Gate step**: No `run` command — waits for `pawl done`
 - **in_viewport**: Runs command in viewport, waits for `pawl done`
-- **Verify**: `"human"` for manual approval, or a shell command (must exit 0)
-- **on_fail**: `"retry"` for auto-retry (up to max_retries), `"human"` to wait for decision
+- **Verify**: `"manual"` for manual approval, or a shell command (must exit 0)
+- **on_fail**: `"retry"` for auto-retry (up to max_retries), `"manual"` to wait for decision
 - **skip** (per-task): Task frontmatter `skip: [step_name, ...]` auto-skips listed steps
 
 ## Config (`.pawl/config.jsonc`)
@@ -138,8 +138,8 @@ src/
   name: string,             // required
   run?: string,             // shell command (omit for gate step)
   in_viewport?: boolean,    // default: false
-  verify?: string,          // "human" or shell command (must exit 0)
-  on_fail?: string,         // "retry" or "human"
+  verify?: string,          // "manual" or shell command (must exit 0)
+  on_fail?: string,         // "retry" or "manual"
   max_retries?: number      // default: 3 (when on_fail="retry")
 }
 ```
@@ -195,7 +195,7 @@ Per-task event log: `.pawl/logs/{task}.jsonl`
 10 event types:
 - `task_started` — initializes Running, step=0
 - `step_finished` — success=true ? Success+advance : Failed (unified: sync, _run, done, verify failure). Includes `verify_output` for verify failures.
-- `step_yielded` — step paused, waiting for approval (reason: "gate"/"verify_human"/"on_fail_human")
+- `step_yielded` — step paused, waiting for approval (reason: "gate"/"verify_manual"/"on_fail_manual")
 - `step_resumed` — approval granted, advance step
 - `viewport_launched` — Running (in_viewport step sent to tmux)
 - `step_skipped` — Skipped+advance
@@ -238,17 +238,17 @@ start(task)
      └─ in_viewport step → send `pawl _run task step` to tmux → return (wait for pawl done/_run completion)
 
 settle_step(record, step):
-  1. combine: (exit_code, verify) → Outcome (Success/HumanNeeded/Failure)
+  1. combine: (exit_code, verify) → Outcome (Success/ManualNeeded/Failure)
   2. derive_fail_policy: Step config + retry state → FailPolicy
   3. decide(outcome, policy) → Verdict (pure function, 6 rules)
   4. apply_verdict: unconditionally record StepFinished, then route (Advance/Yield/Retry/Fail)
 
 decide(outcome, policy) → Verdict (pure function, 6 rules):
   ├─ Success → Advance
-  ├─ HumanNeeded → Yield("verify_human")
+  ├─ ManualNeeded → Yield("verify_manual")
   ├─ Failure + Retry(can_retry) → Retry
   ├─ Failure + Retry(!can_retry) → Fail
-  ├─ Failure + Human → Yield("on_fail_human")
+  ├─ Failure + Manual → Yield("on_fail_manual")
   └─ Failure + Terminal → Fail
 
 done(task)

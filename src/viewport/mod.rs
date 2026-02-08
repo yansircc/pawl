@@ -3,7 +3,7 @@ pub mod tmux;
 use anyhow::Result;
 use crate::error::PawlError;
 
-/// A viewport is a human-observable execution surface.
+/// A viewport is an observable execution surface.
 /// It provides the ability to open, execute commands in, read from, check existence of,
 /// close, and attach to named execution contexts.
 pub trait Viewport {

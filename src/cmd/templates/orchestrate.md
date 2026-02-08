@@ -1,15 +1,42 @@
 # Orchestrator — Designing Workflow Config
 
+## Top-Level Options
+
+All optional: `session` (tmux session name, default: dir name), `viewport` (default: `"tmux"`), `worktree_dir` (default: `".pawl/worktrees"`), `base_branch` (default: `"main"`).
+
+## Step Properties
+
+| Property | Values | Default |
+|---|---|---|
+| `name` | unique identifier | (required) |
+| `run` | shell command; omit → gate step (pauses for `pawl done`) | — |
+| `in_viewport` | run in viewport window | `false` |
+| `verify` | `"manual"` or shell command (exit 0 = pass) | — |
+| `on_fail` | `"retry"` or `"manual"` | — |
+| `max_retries` | retry limit when on_fail=retry | `3` |
+
+Rules: `in_viewport` run MUST `cd ${worktree} && ...`. Failable `in_viewport` → add `on_fail` (otherwise terminal). Observable output → add `verify` (otherwise `pawl done` trusts blindly). Gate step (no `run`) → `verify`/`on_fail` ignored.
+
+## Variables
+
+Available as `${var}` in config commands, `PAWL_*` env vars in subprocesses:
+
+`task` `branch` `worktree` `session` `repo_root` `step` `step_index` `base_branch` `log_file` `task_file` `run_id` `retry_count` `last_verify_output`
+
 ## Verify Strategy
 
 | Scenario | verify | on_fail | Rationale |
 |----------|--------|---------|-----------|
 | Has automated tests | `"cd ${worktree} && npm test"` | `"retry"` | Fast feedback, auto-fix |
-| Critical path needs human oversight | `"human"` | `"human"` | Human review + human decision |
-| Reliable tests but failure needs analysis | `"cd ${worktree} && cargo test"` | `"human"` | Auto-detect, human decision |
+| Critical path needs manual oversight | `"manual"` | `"manual"` | Manual review + manual decision |
+| Reliable tests but failure needs analysis | `"cd ${worktree} && cargo test"` | `"manual"` | Auto-detect, manual decision |
 | Simple step without tests | omit | omit | Failure is terminal, manual reset |
 
-## Event Hook Examples
+## Event Hooks
+
+Top-level `"on"` field maps event type → shell command (fire-and-forget, async, silent on failure).
+
+Event types: `task_started`, `step_finished` (+`${success}` `${exit_code}` `${duration}`), `step_yielded` (+`${reason}`), `step_resumed`, `viewport_launched`, `step_skipped`, `step_reset` (+`${auto}`), `viewport_lost`, `task_stopped`, `task_reset`.
 
 ```jsonc
 // Write to log file
@@ -23,7 +50,7 @@
 
 ### Git Worktree Skeleton
 
-Replace `⟨work⟩` with work steps below. Omit `review` gate if work step already has `"verify": "human"`.
+Replace `⟨work⟩` with work steps below. Omit `review` gate if work step already has `"verify": "manual"`.
 
 ```jsonc
 {
@@ -43,10 +70,10 @@ Multi-task: `pawl start task-a && pawl start task-b` — each gets independent J
 
 All work steps start with `"run": "cd ${worktree} && <command>"`. Two orthogonal choices:
 
-| | auto verify | human verify |
+| | auto verify | manual verify |
 |---|---|---|
-| **viewport** | `"in_viewport": true, "verify": "<test>", "on_fail": "retry"` | `"in_viewport": true, "verify": "human", "on_fail": "human"` |
-| **sync** | `"on_fail": "retry"` | `"verify": "human"` |
+| **viewport** | `"in_viewport": true, "verify": "<test>", "on_fail": "retry"` | `"in_viewport": true, "verify": "manual", "on_fail": "manual"` |
+| **sync** | `"on_fail": "retry"` | `"verify": "manual"` |
 
 ### Retry Feedback Loop
 
@@ -79,7 +106,7 @@ Split work into sequential steps with different verify strategies (e.g. plan →
 
 ```jsonc
 { "name": "plan",    "run": "cd ${worktree} && <agent> --plan-only",
-  "in_viewport": true, "verify": "human", "on_fail": "human" },
+  "in_viewport": true, "verify": "manual", "on_fail": "manual" },
 { "name": "develop", "run": "cd ${worktree} && <agent> --execute",
   "in_viewport": true, "verify": "cd ${worktree} && <test>", "on_fail": "retry" }
 ```
@@ -97,7 +124,7 @@ Workflow-essential flags (full reference: `claude --help`):
 | `--input-format stream-json` | Streaming JSON input (programmatic multi-turn, `-p` only) |
 | `-r <session_id>` | Resume session (full context preserved across retries) |
 | `--session-id <uuid>` | Specify session ID (must be valid UUID, enables deterministic resume) |
-| `--permission-mode plan` | Plan-only mode (human reviews before execution) |
+| `--permission-mode plan` | Plan-only mode (reviews before execution) |
 | `--dangerously-skip-permissions` | **Default for automation**. Skip all permission prompts (otherwise worker blocks) |
 | `--append-system-prompt "..."` | Inject extra instructions (preserves defaults) |
 | `--append-system-prompt-file path` | Same, from file (version-controllable) |
@@ -127,7 +154,7 @@ fi
 
 ```jsonc
 { "name": "plan",    "run": "cd ${worktree} && cat ${task_file} | claude -p --session-id $PAWL_RUN_ID --permission-mode plan",
-  "in_viewport": true, "verify": "human", "on_fail": "human" },
+  "in_viewport": true, "verify": "manual", "on_fail": "manual" },
 { "name": "develop", "run": "cd ${worktree} && claude -p 'Execute the approved plan.' -r $PAWL_RUN_ID --dangerously-skip-permissions",
   "in_viewport": true, "verify": "cd ${worktree} && <test>", "on_fail": "retry" }
 ```
