@@ -29,18 +29,13 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let session = project.session_name();
 
     // Get task status via replay (auto-repairs viewport-lost)
-    project.check_viewport_health(&task_name)?;
+    project.detect_viewport_loss(&task_name)?;
     let state = project.replay_task(&task_name)?;
     let (status, current_step, step_name) = if let Some(state) = &state {
-        let step_name = if state.current_step < project.config.workflow.len() {
-            project.config.workflow[state.current_step].name.clone()
-        } else {
-            "Done".to_string()
-        };
         (
-            format!("{:?}", state.status).to_lowercase(),
+            state.status.to_string(),
             state.current_step + 1,
-            step_name,
+            project.step_name(state.current_step).to_string(),
         )
     } else {
         ("pending".to_string(), 0, "--".to_string())

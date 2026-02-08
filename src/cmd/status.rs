@@ -93,11 +93,14 @@ fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<Str
         match event {
             Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
             Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
-            Event::StepCompleted { step, exit_code, stdout, stderr, .. }
-                if *step == step_idx && *exit_code != 0 =>
+            Event::StepFinished { step, success, stdout, stderr, verify_output, .. }
+                if *step == step_idx && !*success =>
             {
                 if last_feedback.is_none() {
                     let mut parts = Vec::new();
+                    if let Some(vo) = verify_output {
+                        if !vo.is_empty() { parts.push(vo.as_str()); }
+                    }
                     if let Some(out) = stdout {
                         if !out.is_empty() { parts.push(out.as_str()); }
                     }
@@ -126,20 +129,15 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
         let name = &task_def.name;
         let blocking = project.check_dependencies(task_def)?;
 
-        project.check_viewport_health(name)?;
+        project.detect_viewport_loss(name)?;
         let summary = if let Some(state) = project.replay_task(name)? {
-            let step_name = if state.current_step < workflow_len {
-                project.config.workflow[state.current_step].name.clone()
-            } else {
-                "Done".to_string()
-            };
-
+            let step_name = project.step_name(state.current_step).to_string();
             let events = project.read_events(name)?;
             let (retry_count, last_feedback) = extract_step_context(&events, state.current_step);
 
             TaskSummary {
                 name: name.clone(),
-                status: format_status(state.status),
+                status: state.status.to_string(),
                 current_step: state.current_step,
                 total_steps: workflow_len,
                 step_name,
@@ -178,7 +176,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
 
-    project.check_viewport_health(task_name)?;
+    project.detect_viewport_loss(task_name)?;
     let state = project.replay_task(task_name)?;
     let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
 
@@ -197,7 +195,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
                 state
                     .step_status
                     .get(&i)
-                    .map(|s| format_step_status(*s))
+                    .map(|s| s.to_string())
                     .unwrap_or_else(|| "success".to_string())
             } else if i == current_step {
                 "current".to_string()
@@ -229,7 +227,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
         depends: task_def.depends.clone(),
         status: state
             .as_ref()
-            .map(|s| format_status(s.status))
+            .map(|s| s.status.to_string())
             .unwrap_or_else(|| "pending".to_string()),
         current_step,
         total_steps: workflow_len,
@@ -265,13 +263,9 @@ fn show_all_tasks(project: &Project) -> Result<()> {
     for task_def in &tasks {
         let name = &task_def.name;
 
-        project.check_viewport_health(name)?;
+        project.detect_viewport_loss(name)?;
         let (step_str, status_str, info) = if let Some(state) = project.replay_task(name)? {
-            let step_name = if state.current_step < workflow_len {
-                project.config.workflow[state.current_step].name.clone()
-            } else {
-                "Done".to_string()
-            };
+            let step_name = project.step_name(state.current_step).to_string();
             let display_step = if state.status == TaskStatus::Completed {
                 workflow_len
             } else {
@@ -279,7 +273,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             };
             let step_str = format!("[{}/{}] {}", display_step, workflow_len, step_name);
 
-            let status_str = format_status(state.status);
+            let status_str = state.status.to_string();
 
             let info = match state.status {
                 TaskStatus::Running => {
@@ -341,11 +335,11 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
         println!("Dependencies: {}", task_def.depends.join(", "));
     }
 
-    project.check_viewport_health(task_name)?;
+    project.detect_viewport_loss(task_name)?;
     let state = project.replay_task(task_name)?;
 
     if let Some(state) = &state {
-        println!("Status: {}", format_status(state.status));
+        println!("Status: {}", state.status.to_string());
         let display_step = if state.status == TaskStatus::Completed {
             workflow.len()
         } else {
@@ -403,25 +397,6 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn format_status(status: TaskStatus) -> String {
-    match status {
-        TaskStatus::Pending => "pending".to_string(),
-        TaskStatus::Running => "running".to_string(),
-        TaskStatus::Waiting => "waiting".to_string(),
-        TaskStatus::Completed => "completed".to_string(),
-        TaskStatus::Failed => "failed".to_string(),
-        TaskStatus::Stopped => "stopped".to_string(),
-    }
-}
-
-fn format_step_status(status: StepStatus) -> String {
-    match status {
-        StepStatus::Success => "success".to_string(),
-        StepStatus::Failed => "failed".to_string(),
-        StepStatus::Skipped => "skipped".to_string(),
-    }
 }
 
 fn format_waiting_reason(reason: &str) -> String {

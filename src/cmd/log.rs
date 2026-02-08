@@ -146,33 +146,25 @@ fn current_run_lines(lines: Vec<String>) -> Vec<String> {
     }
 }
 
-fn step_name(project: &Project, step: usize) -> String {
-    match project.config.workflow.get(step) {
-        Some(s) => s.name.clone(),
-        None => {
-            eprintln!("Warning: step index {} out of range (workflow has {} steps), event log may be corrupted",
-                step, project.config.workflow.len());
-            format!("step_{}", step)
-        }
-    }
-}
-
 fn print_event(event: &Event, project: &Project) {
     match event {
         Event::TaskStarted { ts } => {
             println!("=== Task Started ===");
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
-        Event::StepCompleted {
+        Event::StepFinished {
             ts,
             step,
+            success,
             exit_code,
             duration,
             stdout,
             stderr,
+            verify_output,
         } => {
-            let name = step_name(project, *step);
-            println!("=== Step {}: {} (completed, exit {}) ===", step + 1, name, exit_code);
+            let name = project.step_name(*step);
+            let status_label = if *success { "success" } else { "failed" };
+            println!("=== Step {}: {} ({}, exit {}) ===", step + 1, name, status_label, exit_code);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             if let Some(d) = duration {
                 println!("Duration: {:.1}s", d);
@@ -208,30 +200,40 @@ fn print_event(event: &Event, project: &Project) {
                     }
                 }
             }
+
+            if let Some(vo) = verify_output {
+                if !vo.is_empty() {
+                    println!("\n[verify]");
+                    print!("{}", vo);
+                    if !vo.ends_with('\n') {
+                        println!();
+                    }
+                }
+            }
         }
-        Event::StepWaiting { ts, step, reason } => {
-            let name = step_name(project, *step);
-            println!("=== Step {}: {} (waiting) ===", step + 1, name);
+        Event::StepYielded { ts, step, reason } => {
+            let name = project.step_name(*step);
+            println!("=== Step {}: {} (yielded) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             println!("Waiting for approval ({}).", reason);
         }
-        Event::StepApproved { ts, step } => {
-            let name = step_name(project, *step);
-            println!("=== Step {}: {} (approved) ===", step + 1, name);
+        Event::StepResumed { ts, step } => {
+            let name = project.step_name(*step);
+            println!("=== Step {}: {} (resumed) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::ViewportLaunched { ts, step } => {
-            let name = step_name(project, *step);
+            let name = project.step_name(*step);
             println!("=== Step {}: {} (viewport launched) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::StepSkipped { ts, step } => {
-            let name = step_name(project, *step);
+            let name = project.step_name(*step);
             println!("=== Step {}: {} (skipped) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::StepReset { ts, step, auto } => {
-            let name = step_name(project, *step);
+            let name = project.step_name(*step);
             let mode = if *auto { "auto" } else { "manual" };
             println!("=== Step {}: {} (reset, {}) ===", step + 1, name, mode);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
@@ -245,7 +247,7 @@ fn print_event(event: &Event, project: &Project) {
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::ViewportLost { ts, step } => {
-            let name = step_name(project, *step);
+            let name = project.step_name(*step);
             println!("=== Step {}: {} (viewport lost) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
             println!("Viewport disappeared — auto-marked as failed.");

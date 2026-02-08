@@ -31,7 +31,7 @@ pub struct Config {
     pub workflow: Vec<Step>,
 
     /// Event hooks: event type (snake_case) -> shell command
-    /// Keys match Event enum serde tags: task_started, step_completed, etc.
+    /// Keys match Event enum serde tags: task_started, step_finished, etc.
     #[serde(default)]
     pub on: HashMap<String, String>,
 }

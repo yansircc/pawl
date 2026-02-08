@@ -10,9 +10,10 @@ pub enum Event {
     TaskStarted {
         ts: DateTime<Utc>,
     },
-    StepCompleted {
+    StepFinished {
         ts: DateTime<Utc>,
         step: usize,
+        success: bool,
         exit_code: i32,
         #[serde(skip_serializing_if = "Option::is_none")]
         duration: Option<f64>,
@@ -20,13 +21,15 @@ pub enum Event {
         stdout: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         stderr: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        verify_output: Option<String>,
     },
-    StepWaiting {
+    StepYielded {
         ts: DateTime<Utc>,
         step: usize,
         reason: String,
     },
-    StepApproved {
+    StepResumed {
         ts: DateTime<Utc>,
         step: usize,
     },
@@ -65,9 +68,9 @@ impl Event {
     pub fn type_name(&self) -> &'static str {
         match self {
             Event::TaskStarted { .. } => "task_started",
-            Event::StepCompleted { .. } => "step_completed",
-            Event::StepWaiting { .. } => "step_waiting",
-            Event::StepApproved { .. } => "step_approved",
+            Event::StepFinished { .. } => "step_finished",
+            Event::StepYielded { .. } => "step_yielded",
+            Event::StepResumed { .. } => "step_resumed",
             Event::ViewportLaunched { .. } => "viewport_launched",
             Event::StepSkipped { .. } => "step_skipped",
             Event::StepReset { .. } => "step_reset",
@@ -81,9 +84,9 @@ impl Event {
     pub fn step_index(&self) -> Option<usize> {
         match self {
             Event::TaskStarted { .. } | Event::TaskReset { .. } => None,
-            Event::StepCompleted { step, .. }
-            | Event::StepWaiting { step, .. }
-            | Event::StepApproved { step, .. }
+            Event::StepFinished { step, .. }
+            | Event::StepYielded { step, .. }
+            | Event::StepResumed { step, .. }
             | Event::ViewportLaunched { step, .. }
             | Event::StepSkipped { step, .. }
             | Event::StepReset { step, .. }
@@ -96,13 +99,14 @@ impl Event {
     pub fn extra_vars(&self) -> HashMap<String, String> {
         let mut vars = HashMap::new();
         match self {
-            Event::StepCompleted { exit_code, duration, .. } => {
+            Event::StepFinished { success, exit_code, duration, .. } => {
+                vars.insert("success".to_string(), success.to_string());
                 vars.insert("exit_code".to_string(), exit_code.to_string());
                 if let Some(d) = duration {
                     vars.insert("duration".to_string(), format!("{:.1}", d));
                 }
             }
-            Event::StepWaiting { reason, .. } => {
+            Event::StepYielded { reason, .. } => {
                 vars.insert("reason".to_string(), reason.clone());
             }
             Event::StepReset { auto, .. } => {
@@ -134,15 +138,15 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
             Event::TaskReset { .. } => {
                 state = None;
             }
-            Event::StepCompleted {
+            Event::StepFinished {
                 ts,
                 step,
-                exit_code,
+                success,
                 ..
             } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
-                if *exit_code == 0 {
+                if *success {
                     s.step_status.insert(*step, StepStatus::Success);
                     s.current_step = step + 1;
                     s.status = TaskStatus::Running;
@@ -150,17 +154,17 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 } else {
                     s.step_status.insert(*step, StepStatus::Failed);
                     s.status = TaskStatus::Failed;
-                    s.message = Some(format!("Exit code: {}", exit_code));
+                    s.message = None;
                 }
             }
-            Event::StepWaiting { ts, step, reason } => {
+            Event::StepYielded { ts, step, reason } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.current_step = *step;
                 s.status = TaskStatus::Waiting;
                 s.message = Some(reason.clone());
             }
-            Event::StepApproved { ts, step } => {
+            Event::StepResumed { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.step_status.insert(*step, StepStatus::Success);
@@ -236,6 +240,13 @@ mod tests {
         Utc::now()
     }
 
+    fn finished(step: usize, success: bool, exit_code: i32) -> Event {
+        Event::StepFinished {
+            ts: ts(), step, success, exit_code,
+            duration: Some(1.0), stdout: None, stderr: None, verify_output: None,
+        }
+    }
+
     #[test]
     fn test_task_started() {
         let events = vec![Event::TaskStarted { ts: ts() }];
@@ -245,17 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn test_step_completed_success() {
+    fn test_step_finished_success() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 0,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
+            finished(0, true, 0),
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.current_step, 1);
@@ -264,17 +268,10 @@ mod tests {
     }
 
     #[test]
-    fn test_step_completed_failure() {
+    fn test_step_finished_failure() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 1,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
+            finished(0, false, 1),
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Failed);
@@ -282,35 +279,28 @@ mod tests {
     }
 
     #[test]
-    fn test_step_waiting_approved() {
+    fn test_step_yielded_resumed() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepWaiting { ts: ts(), step: 0, reason: "gate".to_string() },
+            Event::StepYielded { ts: ts(), step: 0, reason: "gate".to_string() },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);
         assert_eq!(state.message.as_deref(), Some("gate"));
 
         let mut events2 = events;
-        events2.push(Event::StepApproved { ts: ts(), step: 0 });
+        events2.push(Event::StepResumed { ts: ts(), step: 0 });
         let state = replay(&events2, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Running);
         assert_eq!(state.current_step, 1);
     }
 
     #[test]
-    fn test_step_waiting_after_completed_resets_current_step() {
+    fn test_step_yielded_after_finished_resets_current_step() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 0,
-                duration: None,
-                stdout: None,
-                stderr: None,
-            },
-            Event::StepWaiting { ts: ts(), step: 0, reason: "verify_human".to_string() },
+            finished(0, true, 0),
+            Event::StepYielded { ts: ts(), step: 0, reason: "verify_human".to_string() },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);
@@ -318,42 +308,27 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_failure_as_step_completed() {
+    fn test_verify_failure_as_step_finished() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 1,
-                duration: Some(2.0),
-                stdout: None,
-                stderr: Some("verify: tests failed".to_string()),
+            Event::StepFinished {
+                ts: ts(), step: 0, success: false, exit_code: 0,
+                duration: Some(2.0), stdout: None, stderr: None,
+                verify_output: Some("verify: tests failed".to_string()),
             },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Failed);
         assert_eq!(state.current_step, 0);
         assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
-        assert_eq!(state.message.as_deref(), Some("Exit code: 1"));
     }
 
     #[test]
     fn test_verify_failure_then_retry() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 1,
-                duration: Some(2.0),
-                stdout: None,
-                stderr: Some("verify failed".to_string()),
-            },
-            Event::StepReset {
-                ts: ts(),
-                step: 0,
-                auto: true,
-            },
+            finished(0, false, 1),
+            Event::StepReset { ts: ts(), step: 0, auto: true },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Running);
@@ -365,14 +340,7 @@ mod tests {
     fn test_auto_complete() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 0,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
+            finished(0, true, 0),
         ];
         let state = replay(&events, 1).unwrap();
         assert_eq!(state.status, TaskStatus::Completed);
@@ -382,14 +350,7 @@ mod tests {
     fn test_reset_clears_state() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 0,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
+            finished(0, true, 0),
             Event::TaskReset { ts: ts() },
         ];
         let state = replay(&events, 3);
@@ -400,14 +361,7 @@ mod tests {
     fn test_reset_then_restart() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 0,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
+            finished(0, true, 0),
             Event::TaskReset { ts: ts() },
             Event::TaskStarted { ts: ts() },
         ];
@@ -442,19 +396,8 @@ mod tests {
     fn test_step_reset_auto() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 1,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
-            Event::StepReset {
-                ts: ts(),
-                step: 0,
-                auto: true,
-            },
+            finished(0, false, 1),
+            Event::StepReset { ts: ts(), step: 0, auto: true },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.current_step, 0);
@@ -466,19 +409,8 @@ mod tests {
     fn test_step_reset_manual() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::StepCompleted {
-                ts: ts(),
-                step: 0,
-                exit_code: 0,
-                duration: Some(1.0),
-                stdout: None,
-                stderr: None,
-            },
-            Event::StepReset {
-                ts: ts(),
-                step: 0,
-                auto: false,
-            },
+            finished(0, true, 0),
+            Event::StepReset { ts: ts(), step: 0, auto: false },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.current_step, 0);
@@ -500,16 +432,40 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let event = Event::StepCompleted {
-            ts: ts(),
-            step: 0,
-            exit_code: 0,
-            duration: Some(5.2),
-            stdout: Some("output".to_string()),
-            stderr: None,
+        let event = Event::StepFinished {
+            ts: ts(), step: 0, success: true, exit_code: 0,
+            duration: Some(5.2), stdout: Some("output".to_string()),
+            stderr: None, verify_output: None,
         };
         let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains(r#""type":"step_completed""#));
+        assert!(json.contains(r#""type":"step_finished""#));
         let _: Event = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_type_name_matches_serde_tag() {
+        let events: Vec<Event> = vec![
+            Event::TaskStarted { ts: ts() },
+            Event::StepFinished {
+                ts: ts(), step: 0, success: true, exit_code: 0,
+                duration: None, stdout: None, stderr: None, verify_output: None,
+            },
+            Event::StepYielded { ts: ts(), step: 0, reason: "gate".to_string() },
+            Event::StepResumed { ts: ts(), step: 0 },
+            Event::ViewportLaunched { ts: ts(), step: 0 },
+            Event::StepSkipped { ts: ts(), step: 0 },
+            Event::StepReset { ts: ts(), step: 0, auto: false },
+            Event::TaskStopped { ts: ts(), step: 0 },
+            Event::TaskReset { ts: ts() },
+            Event::ViewportLost { ts: ts(), step: 0 },
+        ];
+        for event in &events {
+            let json: serde_json::Value = serde_json::to_value(event).unwrap();
+            let serde_tag = json.get("type").unwrap().as_str().unwrap();
+            assert_eq!(
+                event.type_name(), serde_tag,
+                "type_name() mismatch for {:?}", event.type_name()
+            );
+        }
     }
 }

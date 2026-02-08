@@ -54,7 +54,7 @@ You define a workflow in `.pawl/config.jsonc` — a list of steps that run for e
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ],
-  "on": { "step_completed": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
+  "on": { "step_finished": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 }
 ```
 

@@ -7,7 +7,6 @@ use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
 use crate::util::shell::run_command_with_env;
 use crate::util::variable::Context;
-
 use super::common::Project;
 
 pub fn run(task_name: &str, reset: bool) -> Result<()> {
@@ -29,11 +28,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
                     bail!("Task '{}' is already completed. Use 'pawl reset {}' to restart or 'pawl start --reset {}'.", task_name, task_name, task_name);
                 }
                 TaskStatus::Waiting => {
-                    let step_name = if state.current_step < project.config.workflow.len() {
-                        &project.config.workflow[state.current_step].name
-                    } else {
-                        "unknown"
-                    };
+                    let step_name = project.step_name(state.current_step);
                     let reason = state.message.as_deref().unwrap_or("approval");
                     bail!(
                         "Task '{}' is waiting at step {} ({}) for {}. Use 'pawl done {}' to continue.",
@@ -67,7 +62,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
 }
 
 /// Continue execution from current step (called by pawl done, pawl reset --step, etc.)
-pub fn continue_execution(project: &Project, task_name: &str) -> Result<()> {
+pub fn resume_workflow(project: &Project, task_name: &str) -> Result<()> {
     execute(project, task_name)
 }
 
@@ -82,7 +77,6 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         let step_idx = state.current_step;
 
         let workflow_len = project.config.workflow.len();
-        let session = project.session_name();
 
         // Check if we've completed all steps
         if step_idx >= workflow_len {
@@ -91,8 +85,6 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         }
 
         let step = &project.config.workflow[step_idx];
-        let worktree_dir = &project.config.worktree_dir;
-        let repo_root = &project.repo_root;
 
         // Check if this step should be skipped for this task
         if task_def.skip.contains(&step.name) {
@@ -109,21 +101,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             continue;
         }
 
-        let log_file = project.log_file(task_name);
-        let task_file = project.task_file(task_name);
-
-        let ctx = Context::new(
-            task_name,
-            &session,
-            repo_root,
-            worktree_dir,
-            &step.name,
-            &project.config.base_branch,
-            &project.config.claude_command,
-            Some(step_idx),
-            Some(&log_file.to_string_lossy()),
-            Some(&task_file.to_string_lossy()),
-        );
+        let ctx = project.context_for(task_name, Some(step_idx));
 
         println!(
             "[{}/{}] {}",
@@ -135,7 +113,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         // Handle different step types
         if step.is_gate() {
             // Gate step: wait for approval
-            project.append_event(task_name, &Event::StepWaiting {
+            project.append_event(task_name, &Event::StepYielded {
                 ts: event_timestamp(),
                 step: step_idx,
                 reason: "gate".to_string(),
@@ -154,11 +132,11 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
                 step: step_idx,
             })?;
 
-            execute_in_viewport(project, task_name, &ctx, step_idx)?;
+            launch_in_viewport(project, task_name, &ctx, step_idx)?;
             return Ok(());
         } else {
             // Normal step: execute synchronously
-            let should_continue = execute_step(project, task_name, &step, &ctx, &expanded)?;
+            let should_continue = execute_step(project, task_name, step, &ctx, &expanded)?;
             if !should_continue {
                 return Ok(());
             }
@@ -166,7 +144,10 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
     }
 }
 
-pub struct RunOutput {
+// --- Step record ---
+
+pub struct StepRecord {
+    pub exit_code: i32,
     pub duration: Option<f64>,
     pub stdout: Option<String>,
     pub stderr: Option<String>,
@@ -190,7 +171,8 @@ fn execute_step(
 
     let duration = start_time.elapsed().as_secs_f64();
 
-    let run_output = RunOutput {
+    let record = StepRecord {
+        exit_code: result.exit_code,
         duration: Some(duration),
         stdout: Some(result.stdout.clone()),
         stderr: Some(result.stderr.clone()),
@@ -207,79 +189,85 @@ fn execute_step(
         }
     }
 
-    handle_step_completion(project, task_name, step_idx, result.exit_code, step, run_output)
+    settle_step(project, task_name, step_idx, step, record)
 }
 
-// --- resolve/dispatch pipeline ---
+// --- combine | decide | split pipeline ---
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum Action {
+pub(crate) enum Outcome {
+    Success,
+    HumanNeeded,
+    Failure { feedback: String },
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum FailPolicy {
+    Terminal,
+    Retry { can_retry: bool },
+    Human,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Verdict {
     Advance,
-    YieldVerifyHuman,
-    Retry { exit_code: i32, feedback: String },
-    YieldOnFailHuman { exit_code: i32, feedback: String },
-    Fail { exit_code: i32, feedback: String },
+    Yield { reason: &'static str },
+    Retry,
+    Fail,
 }
 
-/// Pure decision function: given step outcome, determine the next action.
-pub(crate) fn resolve(
-    exit_code: i32,
-    verify_outcome: VerifyOutcome,
-    on_fail: Option<&str>,
-    retry_count: usize,
-    max_retries: usize,
-) -> Action {
-    if exit_code == 0 {
-        match verify_outcome {
-            VerifyOutcome::Passed => Action::Advance,
-            VerifyOutcome::HumanRequired => Action::YieldVerifyHuman,
-            VerifyOutcome::Failed { feedback } => {
-                resolve_failure(1, feedback, on_fail, retry_count, max_retries)
-            }
-        }
-    } else {
-        let feedback = format!("Exit code: {}", exit_code);
-        resolve_failure(exit_code, feedback, on_fail, retry_count, max_retries)
+/// Pure decision function: 2 parameters, 6 rules.
+pub(crate) fn decide(outcome: Outcome, policy: FailPolicy) -> Verdict {
+    match outcome {
+        Outcome::Success => Verdict::Advance,
+        Outcome::HumanNeeded => Verdict::Yield { reason: "verify_human" },
+        Outcome::Failure { .. } => match policy {
+            FailPolicy::Retry { can_retry: true } => Verdict::Retry,
+            FailPolicy::Human => Verdict::Yield { reason: "on_fail_human" },
+            _ => Verdict::Fail,
+        },
     }
 }
 
-fn resolve_failure(
-    exit_code: i32,
-    feedback: String,
-    on_fail: Option<&str>,
-    retry_count: usize,
-    max_retries: usize,
-) -> Action {
-    match on_fail {
-        Some("retry") if retry_count < max_retries => {
-            Action::Retry { exit_code, feedback }
+fn derive_fail_policy(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<FailPolicy> {
+    match step.on_fail.as_deref() {
+        Some("retry") => {
+            let events = project.read_events(task_name)?;
+            let count = crate::model::event::count_auto_retries(&events, step_idx);
+            Ok(FailPolicy::Retry { can_retry: count < step.effective_max_retries() })
         }
-        Some("human") => {
-            Action::YieldOnFailHuman { exit_code, feedback }
-        }
-        _ => Action::Fail { exit_code, feedback },
+        Some("human") => Ok(FailPolicy::Human),
+        _ => Ok(FailPolicy::Terminal),
     }
 }
 
-/// IO function: execute the decided action (emit events, print messages).
-fn dispatch(
+/// Recording + Routing: first unconditionally record, then route.
+fn apply_verdict(
     project: &Project,
     task_name: &str,
     step_idx: usize,
     step: &Step,
-    run_output: RunOutput,
-    action: Action,
+    record: StepRecord,
+    verdict: &Verdict,
+    verify_output: Option<String>,
 ) -> Result<bool> {
-    match action {
-        Action::Advance => {
-            project.append_event(task_name, &Event::StepCompleted {
-                ts: event_timestamp(),
-                step: step_idx,
-                exit_code: 0,
-                duration: run_output.duration,
-                stdout: run_output.stdout,
-                stderr: run_output.stderr,
-            })?;
+    let success = matches!(verdict, Verdict::Advance | Verdict::Yield { reason: "verify_human" });
+
+    // Phase 1: Recording — always faithfully record the run result
+    project.append_event(task_name, &Event::StepFinished {
+        ts: event_timestamp(),
+        step: step_idx,
+        success,
+        exit_code: record.exit_code,
+        duration: record.duration,
+        stdout: record.stdout,
+        stderr: record.stderr,
+        verify_output,
+    })?;
+
+    // Phase 2: Routing — control flow decision
+    match verdict {
+        Verdict::Advance => {
             let new_state = project.replay_task(task_name)?.expect("Task state missing");
             if new_state.status == TaskStatus::Completed {
                 println!("Task '{}' completed!", task_name);
@@ -287,20 +275,25 @@ fn dispatch(
             }
             Ok(true)
         }
-        Action::YieldVerifyHuman => {
-            project.append_event(task_name, &Event::StepCompleted {
+        Verdict::Yield { reason } => {
+            project.append_event(task_name, &Event::StepYielded {
                 ts: event_timestamp(),
                 step: step_idx,
-                exit_code: 0,
-                duration: run_output.duration,
-                stdout: run_output.stdout,
-                stderr: run_output.stderr,
+                reason: reason.to_string(),
             })?;
-            emit_waiting(project, task_name, step_idx, "verify_human",
-                &format!("  → Waiting for human verification. Use 'pawl done {}' to approve.", task_name))
+            match *reason {
+                "verify_human" => {
+                    println!("  → Waiting for human verification. Use 'pawl done {}' to approve.", task_name);
+                }
+                "on_fail_human" => {
+                    println!("  Verify failed. Waiting for human decision.");
+                    println!("  Use 'pawl done {}' to approve or 'pawl reset --step {}' to retry.", task_name, task_name);
+                }
+                _ => {}
+            }
+            Ok(false)
         }
-        Action::Retry { exit_code, feedback } => {
-            emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
+        Verdict::Retry => {
             let events = project.read_events(task_name)?;
             let retry_count = crate::model::event::count_auto_retries(&events, step_idx);
             println!("  Verify failed (attempt {}/{}). Auto-retrying...",
@@ -310,105 +303,51 @@ fn dispatch(
                 step: step_idx,
                 auto: true,
             })?;
-            continue_execution(project, task_name)?;
+            resume_workflow(project, task_name)?;
             Ok(false)
         }
-        Action::YieldOnFailHuman { exit_code, feedback } => {
-            emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
-            emit_waiting(project, task_name, step_idx, "on_fail_human",
-                &format!("  Verify failed. Waiting for human decision.\n  Use 'pawl done {}' to approve or 'pawl reset --step {}' to retry.", task_name, task_name))
-        }
-        Action::Fail { exit_code, feedback } => {
-            emit_step_completed_for_failure(project, task_name, step_idx, exit_code, &feedback, &run_output)?;
+        Verdict::Fail => {
             println!("  ✗ Failed.");
-            if !feedback.is_empty() {
-                for line in feedback.lines().take(5) {
-                    println!("    {}", line);
-                }
-            }
             Ok(false)
         }
     }
 }
 
-/// Emit StepCompleted for failure cases.
-/// For run failures (exit_code from the run command), use original run_output.
-/// For verify failures (exit_code == 1, synthetic), use stdout=None, stderr=Some(feedback).
-fn emit_step_completed_for_failure(
-    project: &Project,
-    task_name: &str,
-    step_idx: usize,
-    exit_code: i32,
-    feedback: &str,
-    run_output: &RunOutput,
-) -> Result<()> {
-    let is_verify_failure = feedback != format!("Exit code: {}", exit_code).as_str();
-    if is_verify_failure {
-        project.append_event(task_name, &Event::StepCompleted {
-            ts: event_timestamp(),
-            step: step_idx,
-            exit_code,
-            duration: run_output.duration,
-            stdout: None,
-            stderr: Some(feedback.to_string()),
-        })?;
-    } else {
-        project.append_event(task_name, &Event::StepCompleted {
-            ts: event_timestamp(),
-            step: step_idx,
-            exit_code,
-            duration: run_output.duration,
-            stdout: run_output.stdout.clone(),
-            stderr: run_output.stderr.clone(),
-        })?;
-    }
-    Ok(())
-}
-
-/// Unified pipeline: handles verify + on_fail after any step completion.
+/// Unified pipeline: combine → decide → split.
 /// Called from execute_step, run_in_viewport, and done.
-/// StepCompleted is emitted INSIDE this function (after verify is resolved).
-pub fn handle_step_completion(
+pub fn settle_step(
     project: &Project,
     task_name: &str,
     step_idx: usize,
-    exit_code: i32,
     step: &Step,
-    run_output: RunOutput,
+    record: StepRecord,
 ) -> Result<bool> {
-    let verify_outcome = if exit_code == 0 {
-        run_verify(project, task_name, step, step_idx)?
+    // combine: (exit_code, verify) → Outcome
+    let (outcome, verify_output) = if record.exit_code == 0 {
+        match run_verify(project, task_name, step, step_idx)? {
+            VerifyResult::Passed => (Outcome::Success, None),
+            VerifyResult::HumanNeeded => (Outcome::HumanNeeded, None),
+            VerifyResult::Failed { feedback } => (
+                Outcome::Failure { feedback: feedback.clone() },
+                Some(feedback),
+            ),
+        }
     } else {
-        VerifyOutcome::Passed
+        (Outcome::Failure { feedback: format!("Exit code: {}", record.exit_code) }, None)
     };
 
-    let events = project.read_events(task_name)?;
-    let retry_count = crate::model::event::count_auto_retries(&events, step_idx);
+    // derive FailPolicy from Step config + retry state
+    let policy = derive_fail_policy(project, task_name, step, step_idx)?;
 
-    let action = resolve(
-        exit_code,
-        verify_outcome,
-        step.on_fail.as_deref(),
-        retry_count,
-        step.effective_max_retries(),
-    );
+    // decide
+    let verdict = decide(outcome, policy);
 
-    dispatch(project, task_name, step_idx, step, run_output, action)
-}
-
-/// Emit a StepWaiting event and print a message. Returns Ok(false) to stop the execution loop.
-fn emit_waiting(project: &Project, task_name: &str, step_idx: usize, reason: &str, message: &str) -> Result<bool> {
-    project.append_event(task_name, &Event::StepWaiting {
-        ts: event_timestamp(),
-        step: step_idx,
-        reason: reason.to_string(),
-    })?;
-    println!("{}", message);
-    Ok(false)
+    // split: apply verdict
+    apply_verdict(project, task_name, step_idx, step, record, &verdict, verify_output)
 }
 
 /// Execute an in_viewport step (send to viewport)
-fn execute_in_viewport(
+fn launch_in_viewport(
     project: &Project,
     task_name: &str,
     ctx: &Context,
@@ -427,9 +366,9 @@ fn execute_in_viewport(
         bail!("exec failed: {}", err);
     }
 
-    let session = &ctx.session;
+    let session = ctx.get("session").unwrap();
 
-    project.viewport.open(task_name, &ctx.repo_root)?;
+    project.viewport.open(task_name, ctx.get("repo_root").unwrap())?;
 
     println!("  → Sending to {}:{}", session, task_name);
     println!("  → Waiting for 'pawl done {}'", task_name);
@@ -442,42 +381,25 @@ fn execute_in_viewport(
 // --- Verify helpers ---
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum VerifyOutcome {
+enum VerifyResult {
     Passed,
-    HumanRequired,
+    HumanNeeded,
     Failed { feedback: String },
 }
 
 /// Run the verify command for a step, if any.
-/// Pure function — no event emission (side-effect-free).
-pub(crate) fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyOutcome> {
+fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) -> Result<VerifyResult> {
     match &step.verify {
-        None => Ok(VerifyOutcome::Passed),
-        Some(v) if v == "human" => Ok(VerifyOutcome::HumanRequired),
+        None => Ok(VerifyResult::Passed),
+        Some(v) if v == "human" => Ok(VerifyResult::HumanNeeded),
         Some(cmd) => {
-            let session = project.session_name();
-            let log_file = project.log_file(task_name);
-            let task_file = project.task_file(task_name);
-
-            let ctx = Context::new(
-                task_name,
-                &session,
-                &project.repo_root,
-                &project.config.worktree_dir,
-                &step.name,
-                &project.config.base_branch,
-                &project.config.claude_command,
-                Some(step_idx),
-                Some(&log_file.to_string_lossy()),
-                Some(&task_file.to_string_lossy()),
-            );
-
+            let ctx = project.context_for(task_name, Some(step_idx));
             let expanded = ctx.expand(cmd);
             let env = ctx.to_env_vars();
             let result = run_command_with_env(&expanded, &env)?;
 
             if result.success {
-                Ok(VerifyOutcome::Passed)
+                Ok(VerifyResult::Passed)
             } else {
                 let mut feedback = String::new();
                 if !result.stdout.is_empty() {
@@ -489,7 +411,7 @@ pub(crate) fn run_verify(project: &Project, task_name: &str, step: &Step, step_i
                     }
                     feedback.push_str(&result.stderr);
                 }
-                Ok(VerifyOutcome::Failed { feedback })
+                Ok(VerifyResult::Failed { feedback })
             }
         }
     }
@@ -500,52 +422,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_resolve_advance() {
-        assert_eq!(resolve(0, VerifyOutcome::Passed, None, 0, 3), Action::Advance);
+    fn test_decide_advance() {
+        assert_eq!(decide(Outcome::Success, FailPolicy::Terminal), Verdict::Advance);
     }
 
     #[test]
-    fn test_resolve_yield_verify_human() {
-        assert_eq!(resolve(0, VerifyOutcome::HumanRequired, None, 0, 3), Action::YieldVerifyHuman);
+    fn test_decide_yield_verify_human() {
+        assert_eq!(decide(Outcome::HumanNeeded, FailPolicy::Terminal), Verdict::Yield { reason: "verify_human" });
     }
 
     #[test]
-    fn test_resolve_verify_failed_no_on_fail() {
+    fn test_decide_failure_terminal() {
         assert_eq!(
-            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, None, 0, 3),
-            Action::Fail { exit_code: 1, feedback: "bad".into() }
+            decide(Outcome::Failure { feedback: "bad".into() }, FailPolicy::Terminal),
+            Verdict::Fail
         );
     }
 
     #[test]
-    fn test_resolve_verify_failed_retry_under_limit() {
+    fn test_decide_failure_retry_under_limit() {
         assert_eq!(
-            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, Some("retry"), 1, 3),
-            Action::Retry { exit_code: 1, feedback: "bad".into() }
+            decide(Outcome::Failure { feedback: "bad".into() }, FailPolicy::Retry { can_retry: true }),
+            Verdict::Retry
         );
     }
 
     #[test]
-    fn test_resolve_verify_failed_retry_at_limit() {
+    fn test_decide_failure_retry_at_limit() {
         assert_eq!(
-            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, Some("retry"), 3, 3),
-            Action::Fail { exit_code: 1, feedback: "bad".into() }
+            decide(Outcome::Failure { feedback: "bad".into() }, FailPolicy::Retry { can_retry: false }),
+            Verdict::Fail
         );
     }
 
     #[test]
-    fn test_resolve_verify_failed_human() {
+    fn test_decide_failure_human() {
         assert_eq!(
-            resolve(0, VerifyOutcome::Failed { feedback: "bad".into() }, Some("human"), 0, 3),
-            Action::YieldOnFailHuman { exit_code: 1, feedback: "bad".into() }
-        );
-    }
-
-    #[test]
-    fn test_resolve_run_failed_no_on_fail() {
-        assert_eq!(
-            resolve(42, VerifyOutcome::Passed, None, 0, 3),
-            Action::Fail { exit_code: 42, feedback: "Exit code: 42".into() }
+            decide(Outcome::Failure { feedback: "bad".into() }, FailPolicy::Human),
+            Verdict::Yield { reason: "on_fail_human" }
         );
     }
 }

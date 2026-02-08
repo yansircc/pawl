@@ -11,7 +11,7 @@ use crate::util::shell::spawn_background;
 use crate::util::variable::Context;
 use crate::viewport::{self, Viewport};
 
-const PAWL_DIR: &str = ".pawl";
+pub const PAWL_DIR: &str = ".pawl";
 
 /// Project context with loaded config
 pub struct Project {
@@ -41,6 +41,39 @@ impl Project {
             config,
             viewport: vp,
         })
+    }
+
+    /// Build a Context for variable expansion / env vars.
+    pub fn context_for(&self, task_name: &str, step_idx: Option<usize>) -> Context {
+        let step_name = step_idx
+            .and_then(|i| self.config.workflow.get(i))
+            .map(|s| s.name.as_str())
+            .unwrap_or("");
+
+        Context::build()
+            .var("task", task_name)
+            .var("branch", format!("pawl/{}", task_name))
+            .var("worktree", self.worktree_path(task_name).to_string_lossy())
+            .var("session", self.session_name())
+            .var("repo_root", &self.repo_root)
+            .var("step", step_name)
+            .var("base_branch", &self.config.base_branch)
+            .var("claude_command", &self.config.claude_command)
+            .var("step_index", step_idx.map(|i| i.to_string()).unwrap_or_default())
+            .var("log_file", self.log_file(task_name).to_string_lossy())
+            .var("task_file", self.task_file(task_name).to_string_lossy())
+    }
+
+    /// Get step name by index, returns "done" if past end.
+    pub fn step_name(&self, step_idx: usize) -> &str {
+        self.config.workflow.get(step_idx)
+            .map(|s| s.name.as_str())
+            .unwrap_or("done")
+    }
+
+    /// Get the worktree path for a task.
+    pub fn worktree_path(&self, task_name: &str) -> PathBuf {
+        PathBuf::from(&self.repo_root).join(&self.config.worktree_dir).join(task_name)
     }
 
     /// Get session name
@@ -122,7 +155,7 @@ impl Project {
         file.unlock()?;
 
         // Auto-fire hook if configured
-        self.fire_event_hook(task_name, event);
+        self.spawn_event_hook(task_name, event);
 
         Ok(())
     }
@@ -160,7 +193,7 @@ impl Project {
 
     /// Check viewport health. If a Running in_viewport step's viewport is gone, emit ViewportLost.
     /// Returns true = healthy (or not applicable), false = ViewportLost emitted.
-    pub fn check_viewport_health(&self, task_name: &str) -> Result<bool> {
+    pub fn detect_viewport_loss(&self, task_name: &str) -> Result<bool> {
         let state = self.replay_task(task_name)?;
 
         if let Some(ref s) = state {
@@ -187,42 +220,19 @@ impl Project {
 
     /// Fire a hook for an event (fire-and-forget).
     /// Looks up config.on by the event's serde tag name, expands variables, spawns in background.
-    fn fire_event_hook(&self, task_name: &str, event: &Event) {
+    fn spawn_event_hook(&self, task_name: &str, event: &Event) {
         let event_type = event.type_name();
         let Some(cmd) = self.config.on.get(event_type) else {
             return;
         };
 
-        // Build context with correct step name (not event name)
         let step_idx = event.step_index();
-        let step_name = step_idx
-            .and_then(|i| self.config.workflow.get(i))
-            .map(|s| s.name.as_str())
-            .unwrap_or("");
+        let mut ctx = self.context_for(task_name, step_idx);
 
-        let log_file = self.log_file(task_name);
-        let task_file = self.task_file(task_name);
+        // Extend with event-specific variables (${exit_code}, ${duration}, etc.)
+        ctx.extend(event.extra_vars());
 
-        let ctx = Context::new(
-            task_name,
-            &self.session_name(),
-            &self.repo_root,
-            &self.config.worktree_dir,
-            step_name,
-            &self.config.base_branch,
-            &self.config.claude_command,
-            step_idx,
-            Some(&log_file.to_string_lossy()),
-            Some(&task_file.to_string_lossy()),
-        );
-
-        // First pass: standard variable expansion
-        let mut expanded = ctx.expand(cmd);
-
-        // Second pass: event-specific variables (${exit_code}, ${result}, ${message}, etc.)
-        for (key, value) in event.extra_vars() {
-            expanded = expanded.replace(&format!("${{{}}}", key), &value);
-        }
+        let expanded = ctx.expand(cmd);
 
         if let Err(e) = spawn_background(&expanded) {
             eprintln!("Warning: hook '{}' failed: {}", event_type, e);

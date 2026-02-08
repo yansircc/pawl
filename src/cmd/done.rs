@@ -5,12 +5,14 @@ use crate::model::{Event, TaskStatus};
 
 use super::common::Project;
 use super::start;
-use super::start::{continue_execution, RunOutput};
+use super::start::{resume_workflow, StepRecord};
 
 /// Mark current step as done (approve waiting step, or complete in_viewport step)
 pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
+
+    project.detect_viewport_loss(&task_name)?;
 
     let state = project.replay_task(&task_name)?;
     let Some(state) = state else {
@@ -24,7 +26,8 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             // Agent in viewport reporting done — go through unified pipeline
             let step = &project.config.workflow[step_idx];
 
-            let run_output = RunOutput {
+            let record = StepRecord {
+                exit_code: 0,
                 duration: None,
                 stdout: message.map(|s| s.to_string()),
                 stderr: None,
@@ -32,16 +35,16 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
             println!("Step {} marked as done.", step_idx + 1);
 
-            // Unified pipeline: verify + emit StepCompleted + apply_on_fail
-            let should_continue = start::handle_step_completion(
-                &project, &task_name, step_idx, 0, step, run_output
+            // Unified pipeline: combine → decide → split
+            let should_continue = start::settle_step(
+                &project, &task_name, step_idx, step, record
             )?;
 
             if should_continue {
-                continue_execution(&project, &task_name)?;
+                resume_workflow(&project, &task_name)?;
             }
 
-            // Cleanup viewport — but not if retrying (apply_on_fail re-sent command)
+            // Cleanup viewport — but not if retrying
             let new_state = project.replay_task(&task_name)?;
             let retrying = matches!(&new_state,
                 Some(s) if s.status == TaskStatus::Running && s.current_step == step_idx
@@ -51,18 +54,18 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             }
         }
         TaskStatus::Waiting => {
-            // Human approval: emit StepApproved and continue
-            project.append_event(&task_name, &Event::StepApproved {
+            // Human approval: emit StepResumed and continue
+            project.append_event(&task_name, &Event::StepResumed {
                 ts: event_timestamp(),
                 step: step_idx,
             })?;
 
             println!("Step {} approved.", step_idx + 1);
-            continue_execution(&project, &task_name)?;
+            resume_workflow(&project, &task_name)?;
         }
         _ => {
             bail!(
-                "Task '{}' is {:?}. Cannot mark as done.",
+                "Task '{}' is {}. Cannot mark as done.",
                 task_name,
                 state.status
             );

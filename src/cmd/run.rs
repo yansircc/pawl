@@ -1,13 +1,12 @@
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use anyhow::{bail, Result};
 
 use crate::model::TaskStatus;
-use crate::util::variable::Context;
-
 use super::common::Project;
-use super::start::{continue_execution, handle_step_completion, RunOutput};
+use super::start::{resume_workflow, settle_step, StepRecord};
 
 /// Internal: run a command in viewport as the parent process.
 /// Replaces the old runner-script + EXIT-trap + `pawl _on-exit` chain.
@@ -44,33 +43,22 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
     };
 
     // 4. Build context, expand command, prepare env vars
-    let session = project.session_name();
-    let log_file = project.log_file(task_name);
-    let task_file = project.task_file(task_name);
-
-    let ctx = Context::new(
-        task_name,
-        &session,
-        &project.repo_root,
-        &project.config.worktree_dir,
-        &step.name,
-        &project.config.base_branch,
-        &project.config.claude_command,
-        Some(step_idx),
-        Some(&log_file.to_string_lossy()),
-        Some(&task_file.to_string_lossy()),
-    );
+    let ctx = project.context_for(task_name, Some(step_idx));
 
     let expanded = ctx.expand(&command);
     let env = ctx.to_env_vars();
 
-    let work_dir = if std::path::Path::new(&ctx.worktree).exists() {
-        &ctx.worktree
+    let worktree = ctx.get("worktree").unwrap();
+    let repo_root = ctx.get("repo_root").unwrap();
+    let work_dir = if std::path::Path::new(worktree).exists() {
+        worktree
     } else {
-        &ctx.repo_root
+        repo_root
     };
 
     // 5. Fork child process (bash -c), inherit stdio for viewport interactivity
+    let start_time = Instant::now();
+
     let mut child = unsafe {
         Command::new("bash")
             .arg("-c")
@@ -91,6 +79,7 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
     // 6. Wait for child (OS-guaranteed delivery)
     let status = child.wait()?;
     let exit_code = status.code().unwrap_or(128);
+    let elapsed = start_time.elapsed().as_secs_f64();
 
     // 7. Redirect stdout/stderr to /dev/null (pty may be closed after viewport close)
     redirect_to_devnull();
@@ -108,17 +97,18 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
 
     // 9. Use unified pipeline
     let step = project.config.workflow[step_idx].clone();
-    let run_output = RunOutput {
-        duration: None,
+    let record = StepRecord {
+        exit_code,
+        duration: Some(elapsed),
         stdout: None,
         stderr: None,
     };
 
-    match handle_step_completion(&project, task_name, step_idx, exit_code, &step, run_output)? {
+    match settle_step(&project, task_name, step_idx, &step, record)? {
         true => {
             // Pipeline says continue — check if next step is also in_viewport
             // If so, execute() will detect PAWL_IN_VIEWPORT and exec into next pawl _run
-            continue_execution(&project, task_name)?;
+            resume_workflow(&project, task_name)?;
         }
         false => {}
     }

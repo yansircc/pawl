@@ -17,7 +17,7 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
     let resolved_name = project.resolve_task_name(task_name)?;
 
     // Check initial status
-    project.check_viewport_health(&resolved_name)?;
+    project.detect_viewport_loss(&resolved_name)?;
     let current_status = project
         .replay_task(&resolved_name)?
         .map(|s| s.status)
@@ -25,7 +25,7 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
 
     if targets.contains(&current_status) {
         println!(
-            "Task '{}' reached status '{:?}' after {:.1}s",
+            "Task '{}' reached status '{}' after {:.1}s",
             resolved_name,
             current_status,
             start.elapsed().as_secs_f64()
@@ -35,7 +35,7 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
 
     if is_terminal_mismatch_multi(current_status, &targets) {
         bail!(
-            "Task '{}' is in terminal state '{:?}', will not reach any of '{}'",
+            "Task '{}' is in terminal state '{}', will not reach any of '{}'",
             resolved_name,
             current_status,
             until
@@ -64,7 +64,7 @@ fn poll_status(
                 .map(|s| s.status)
                 .unwrap_or(TaskStatus::Pending);
             bail!(
-                "Timeout waiting for task '{}' to reach status '{}' (current: {:?})",
+                "Timeout waiting for task '{}' to reach status '{}' (current: {})",
                 task_name,
                 until,
                 current_status
@@ -72,7 +72,7 @@ fn poll_status(
         }
 
         // Health check: unified through Project API
-        project.check_viewport_health(task_name)?;
+        project.detect_viewport_loss(task_name)?;
 
         let current_status = project
             .replay_task(task_name)?
@@ -81,7 +81,7 @@ fn poll_status(
 
         if targets.contains(&current_status) {
             println!(
-                "Task '{}' reached status '{:?}' after {:.1}s",
+                "Task '{}' reached status '{}' after {:.1}s",
                 task_name,
                 current_status,
                 start.elapsed().as_secs_f64()
@@ -91,7 +91,7 @@ fn poll_status(
 
         if is_terminal_mismatch_multi(current_status, targets) {
             bail!(
-                "Task '{}' is in terminal state '{:?}', will not reach any of '{}'",
+                "Task '{}' is in terminal state '{}', will not reach any of '{}'",
                 task_name,
                 current_status,
                 until
@@ -102,20 +102,7 @@ fn poll_status(
 
 fn parse_statuses(s: &str) -> Result<Vec<TaskStatus>> {
     s.split(',')
-        .map(|part| {
-            match part.trim().to_lowercase().as_str() {
-                "pending" => Ok(TaskStatus::Pending),
-                "running" => Ok(TaskStatus::Running),
-                "waiting" => Ok(TaskStatus::Waiting),
-                "completed" => Ok(TaskStatus::Completed),
-                "failed" => Ok(TaskStatus::Failed),
-                "stopped" => Ok(TaskStatus::Stopped),
-                _ => bail!(
-                    "Invalid status '{}'. Valid values: pending, running, waiting, completed, failed, stopped",
-                    part.trim()
-                ),
-            }
-        })
+        .map(|part| part.trim().parse::<TaskStatus>().map_err(Into::into))
         .collect()
 }
 

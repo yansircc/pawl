@@ -1,8 +1,8 @@
-pub mod approve;
 pub mod capture;
 pub mod common;
 pub mod control;
 pub mod create;
+pub mod done;
 pub mod enter;
 pub mod events;
 pub mod init;
@@ -33,7 +33,7 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         }
         Command::Log { task, step, all, all_runs, jsonl } => log::run(&task, step, all, all_runs, jsonl),
         Command::Events { task, follow } => events::run(task.as_deref(), follow),
-        Command::Done { task, message } => approve::done(&task, message.as_deref()),
+        Command::Done { task, message } => done::done(&task, message.as_deref()),
         Command::Run { task, step } => run::run_in_viewport(&task, step),
     }
 }

@@ -15,7 +15,7 @@ extract_session_id() {
 }
 
 # Extract the most recent failure feedback from a task's JSONL log.
-# Looks for step_completed events with exit_code != 0 and extracts stderr.
+# Looks for step_finished events with success=false and extracts verify_output/stderr.
 # Usage: extract_feedback <jsonl_file> [step_index]
 # Returns empty string if no feedback found.
 extract_feedback() {
@@ -24,13 +24,13 @@ extract_feedback() {
     [ -f "$log_file" ] || { echo ""; return 0; }
 
     if [ -n "$step_idx" ]; then
-        { grep '"type":"step_completed"' "$log_file" || true; } \
+        { grep '"type":"step_finished"' "$log_file" || true; } \
             | grep "\"step\":${step_idx}" \
-            | jq -r 'select(.exit_code != 0) | .stderr // empty' 2>/dev/null \
+            | jq -r 'select(.success == false) | .verify_output // .stderr // empty' 2>/dev/null \
             | tail -1
     else
-        { grep '"type":"step_completed"' "$log_file" || true; } \
-            | jq -r 'select(.exit_code != 0) | .stderr // empty' 2>/dev/null \
+        { grep '"type":"step_finished"' "$log_file" || true; } \
+            | jq -r 'select(.success == false) | .verify_output // .stderr // empty' 2>/dev/null \
             | tail -1
     fi
 }

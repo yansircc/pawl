@@ -4,7 +4,7 @@ use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
 
 use super::common::Project;
-use super::start::continue_execution;
+use super::start::resume_workflow;
 
 /// Stop the current task
 pub fn stop(task_name: &str) -> Result<()> {
@@ -19,7 +19,7 @@ pub fn stop(task_name: &str) -> Result<()> {
     match state.status {
         TaskStatus::Running | TaskStatus::Waiting => {}
         _ => {
-            bail!("Task '{}' is not running (status: {:?}).", task_name, state.status);
+            bail!("Task '{}' is not running (status: {}).", task_name, state.status);
         }
     }
 
@@ -79,9 +79,8 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             auto: false,
         })?;
 
-        let step_name = project.config.workflow[step_idx].name.clone();
-        println!("Reset step {}: {}", step_idx + 1, step_name);
-        continue_execution(&project, &task_name)?;
+        println!("Reset step {}: {}", step_idx + 1, project.step_name(step_idx));
+        resume_workflow(&project, &task_name)?;
     } else {
         // Full task reset
         let is_running = state
@@ -101,7 +100,7 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
         println!("Task '{}' reset to initial state.", task_name);
 
         // Only show git cleanup hints if resources actually exist
-        let worktree_path = std::path::Path::new(&project.repo_root).join(&project.config.worktree_dir).join(&task_name);
+        let worktree_path = project.worktree_path(&task_name);
         let branch_name = format!("pawl/{}", task_name);
         let worktree_exists = worktree_path.exists();
         let branch_exists = crate::util::git::branch_exists(&branch_name);

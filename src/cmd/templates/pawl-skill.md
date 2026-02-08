@@ -140,9 +140,9 @@ Configured in config's `"on"` field. **Fire-and-forget async execution** (does n
 | Event | Extra Variables | Trigger |
 |-------|----------------|---------|
 | `task_started` | — | Task started |
-| `step_completed` | `${exit_code}`, `${duration}` | Step completed (success or failure) |
-| `step_waiting` | `${reason}` (gate/verify_human/on_fail_human) | Step paused for human input |
-| `step_approved` | — | `pawl done` approved |
+| `step_finished` | `${success}`, `${exit_code}`, `${duration}` | Step finished (success or failure) |
+| `step_yielded` | `${reason}` (gate/verify_human/on_fail_human) | Step yielded for human input |
+| `step_resumed` | — | `pawl done` resumed |
 | `viewport_launched` | — | in_viewport command sent to viewport |
 | `step_skipped` | — | Step skipped |
 | `step_reset` | `${auto}` (true=auto retry/false=manual) | Step reset |
@@ -156,10 +156,10 @@ All hooks also have access to standard variables (`${task}`, `${step}`, `${sessi
 
 ```jsonc
 // Write to log file (simplest)
-"on": { "step_completed": "echo '[${task}] ${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
+"on": { "step_finished": "echo '[${task}] ${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 
 // Notify Foreman TUI (concurrency-safe)
-"on": { "step_completed": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} done (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true" }
+"on": { "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true" }
 ```
 
 Foreman notification details: `mkdir` atomic mutex prevents concurrent interleaving; `-l` sends literal text; `C-Enter` submits to Claude Code TUI input; `sleep 0.3` ensures atomicity.
@@ -178,7 +178,7 @@ Foreman notification details: `mkdir` atomic mutex prevents concurrent interleav
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ],
-  "on": { "step_completed": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
+  "on": { "step_finished": "echo '[pawl] ${task}/${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
 }
 ```
 
@@ -231,8 +231,8 @@ Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Forema
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ],
   "on": {
-    "step_completed": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} done (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true",
-    "step_waiting": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task} waiting: ${reason}' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true"
+    "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true",
+    "step_yielded": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:foreman -l '[pawl] ${task} yielded: ${reason}' && tmux send-keys -t ${session}:foreman C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true"
   }
 }
 ```

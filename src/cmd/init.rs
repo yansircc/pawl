@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::util::git::get_repo_root;
 
-const PAWL_DIR: &str = ".pawl";
+use super::common::PAWL_DIR;
 const CONFIG_FILE: &str = "config.jsonc";
 const TASKS_DIR: &str = "tasks";
 const LIB_DIR: &str = "lib";

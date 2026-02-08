@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::util::git::{get_repo_root, validate_branch_name};
 
-const PAWL_DIR: &str = ".pawl";
+use super::common::PAWL_DIR;
 const TASKS_DIR: &str = "tasks";
 
 pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Result<()> {
