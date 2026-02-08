@@ -7,7 +7,7 @@ use crate::model::Event;
 use super::common::Project;
 
 /// Show task logs (JSONL output)
-pub fn run(task_name: &str, step: Option<usize>, all: bool, all_runs: bool) -> Result<()> {
+pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
@@ -30,7 +30,7 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, all_runs: bool) -> R
         return Ok(());
     }
 
-    // Read raw lines for JSONL output
+    // Read raw lines for JSONL output, filtered to current run
     let file = std::fs::File::open(&log_file)?;
     let reader = BufReader::new(file);
 
@@ -40,12 +40,7 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool, all_runs: bool) -> R
         .filter(|l| !l.trim().is_empty())
         .collect();
 
-    // Filter to current run unless --all-runs
-    let lines = if all_runs {
-        lines
-    } else {
-        current_run_lines(lines)
-    };
+    let lines = current_run_lines(lines);
 
     if all || step.is_some() {
         for line in &lines {

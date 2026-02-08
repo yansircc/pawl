@@ -1,38 +1,43 @@
 # Session Handoff
 
-## Current Session (S38): Decouple from git, add config.vars, reposition
+## Current Session (S39): E2E viewport tests, doc fix, log cleanup
 
 ### What changed
 
-**pawl 解耦 git — 从 "git worktree orchestrator" 变为通用步骤序列器**
+**E2E viewport 测试 — 从 0 到 32 个测试覆盖所有 in_viewport 路径**
 
-代码层:
-- `git.rs` → `project.rs`: `get_project_root()` 向上查找 `.pawl/`，`validate_task_name()` 纯文件系统检查
-- Config: 删 `worktree_dir`/`base_branch`，新增 `vars: IndexMap<String, String>`（insertion-order）
-- `context_for()`: 内置变量 + config.vars 按序展开（earlier available to later）
-- `var_owned(String, String)` on Context 支持动态 key
-- Project field `repo_root` → `project_root`
-- `pawl init` 用 cwd（不依赖 git），`.gitignore` 更新 best-effort
-- 删除: `branch_exists()`, `get_repo_root()`, `run_command_output()`, `run_command_with_options()` dir 参数, config worktree 警告, control.rs git 清理提示
-- Git worktree recipe 移至 orchestrate.md 的 `config.vars` 示例
+测试:
+- 新增 `tests/e2e-viewport.sh`: 32 个 viewport E2E 测试，并行执行 (~5s)
+- 新增 `tests/e2e.sh`: 72 个同步路径 E2E 测试（之前在 working dir 未提交）
+- 覆盖: 基本流程、done 外部完成、retry、viewport loss、capture、enter、stop、变量、连续 in_viewport exec 链、done -m、skip viewport 步骤、viewport hooks、verify fail + retry、task 索引解析、full reset with viewport、多 task 并发、events --follow、last_feedback 传递
+- Session 隔离: 每个测试用唯一 tmux session `pawl-e2e-vp-{name}`，trap EXIT 清理
 
-文档层 — 重新定位:
-- **README.md**: 从 "agent-friendly step sequencer" → "shell's missing yield"。开头用通用例子（build/test/deploy），Agent Orchestration 作为首要 showcase（自路由、递归 supervisor tree），git worktree 降为 recipe
-- **CLAUDE.md**: 开头从 "Agent-Friendly Resumable Step Sequencer" → "Durable Execution Primitive for Shell"
-- **orchestrate.md**: 新增 User Variables 章节 + `.env` secrets recipe + 更新 git worktree recipe 用 config.vars
+文档 — viewport_lost 语义澄清:
+- **CLAUDE.md**: `viewport_lost` 从 "viewport disappeared" 改为安全网语义；`_run` 加注韧性模型；`detect_viewport_loss` 加注被动前提
+- **orchestrate.md**: event hooks 列表内联安全网说明
+- **supervise.md**: viewport failure 两条路径模型（正常 path = `step_finished(128)`，安全网 = `viewport_lost`）
 
-Greenfield 自查:
-- `run_command_with_options` 死参数 `dir` 清理（内联到两个调用方）
-- 零 warning，38 tests，无禁止模式
+代码:
+- 删除 `pawl log --all-runs` flag（死代码，`pawl events` 已覆盖 cross-run 需求）
+- CLAUDE.md 中 log 命令描述同步更新
+
+关键发现:
+- `_run` 韧性（SIGHUP-immune, always settles）导致 viewport kill 的正常路径是 `step_finished(exit_code=128)` 而非 `viewport_lost`
+- `viewport_lost` 仅当 `_run` 本身被 SIGKILL/crash 时触发（安全网）
+- 这是文档缺失，不是设计缺陷——两条路径收敛到同一终态 `Failed`
 
 ---
 
 ## Previous Sessions (compressed)
 
+### S38: Decouple from git, add config.vars
+- `git.rs` → `project.rs`，`get_project_root()` 查找 `.pawl/`
+- Config: 删 `worktree_dir`/`base_branch`，新增 `vars: IndexMap`
+- `pawl init` 不依赖 git。Git worktree 降为 recipe
+
 ### S37: Skill Self-Containment + human→manual
 - Skill 文档 zero-jump 自完备
 - config.jsonc: 46→4 行（空画布）
-- CLI 8 个 `after_help` 全删
 - `"human"` → `"manual"` 跨 13 文件
 
 ### S36: Less-Is-More Audit
@@ -43,7 +48,7 @@ Greenfield 自查:
 - stdout=JSON, stderr=progress。exit codes 2-7。derive_routing() 自路由。
 
 ### S32 and earlier
-- S32: SKILL.md 249→29 行。Role-based skill architecture。
+- S32: Role-based skill architecture
 - S30: 解耦 Claude Code
 - S28: settle_step pipeline, Display+FromStr, context_for
 - S27: Viewport trait + TmuxViewport
@@ -82,3 +87,5 @@ None.
 | TaskState, TaskStatus, StepStatus | `src/model/state.rs` |
 | Templates (config + skill + references) | `src/cmd/templates/` |
 | Viewport trait + TmuxViewport | `src/viewport/` |
+| E2E tests (sync paths, 72 tests) | `tests/e2e.sh` |
+| E2E tests (viewport paths, 32 tests) | `tests/e2e-viewport.sh` |

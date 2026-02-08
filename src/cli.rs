@@ -97,9 +97,6 @@ pub enum Command {
         /// Show all events in the current run
         #[arg(short, long)]
         all: bool,
-        /// Show all events across all runs (including before resets)
-        #[arg(long)]
-        all_runs: bool,
     },
 
     /// Stream events from all (or specified) tasks in real-time

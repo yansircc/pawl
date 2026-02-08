@@ -42,7 +42,7 @@ while tasks remain incomplete:
 
 ## Key Constraints
 
-- **viewport_lost is passive**: only detected when `pawl status`/`pawl list`/`pawl wait` is called. Poll periodically to catch in_viewport failures.
+- **viewport failure has two paths**: (1) Normal: viewport killed → `_run` catches child exit → `step_finished(exit_code=128)` → Failed. (2) Safety net: `_run` itself crashed/SIGKILL'd → `viewport_lost` emitted passively by `pawl status`/`list`/`wait`. Most viewport failures are path 1. Poll periodically to catch path 2.
 - **pawl done dual semantics**: Waiting = approve (step advances); Running+in_viewport = mark done (triggers verify flow).
 - **Retry exhaustion**: after max_retries, status becomes Failed (not Waiting). Manual intervention required.
 - **Viewport debugging**: `pawl capture <task>` captures current viewport content as JSON.

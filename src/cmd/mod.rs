@@ -31,7 +31,7 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Wait { task, until, timeout, interval } => {
             wait::run(&task, &until, timeout, interval)
         }
-        Command::Log { task, step, all, all_runs } => log::run(&task, step, all, all_runs),
+        Command::Log { task, step, all } => log::run(&task, step, all),
         Command::Events { task, follow, event_type } => {
             events::run(task.as_deref(), follow, event_type.as_deref())
         }

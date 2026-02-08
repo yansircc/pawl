@@ -96,7 +96,7 @@ src/
 │   ├── wait.rs          # pawl wait (poll via Project API)
 │   ├── enter.rs         # pawl enter (attach to viewport)
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
-│   ├── log.rs           # pawl log (--step/--all/--all-runs, JSONL output)
+│   ├── log.rs           # pawl log (--step/--all, JSONL output)
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.jsonc           # Empty scaffold with vars hint
 │       ├── pawl-skill.md          # SKILL.md: orientation + role routing
@@ -214,7 +214,7 @@ Per-task event log: `.pawl/logs/{task}.jsonl`
 - `step_reset` — reset step to Running (auto=true for retry, auto=false for manual)
 - `task_stopped` — Stopped
 - `task_reset` — clears all state (replay restarts)
-- `viewport_lost` — viewport disappeared, auto-marked as Failed
+- `viewport_lost` — safety net: viewport gone AND `_run` didn't settle (crash/SIGKILL). Normal viewport kill → `_run` catches child exit → `step_finished(exit_code=128)`. Only fires via passive detection (`pawl status`/`wait`/`list`).
 
 Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
 
@@ -235,7 +235,7 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `pawl enter <task>` | Attach to viewport |
 | `pawl capture <task> [-l N]` | Capture tmux content (JSON to stdout) |
 | `pawl wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
-| `pawl log <task> [--step N] [--all] [--all-runs]` | View logs as JSONL (--all=current run, --all-runs=full history) |
+| `pawl log <task> [--step N] [--all]` | View logs as JSONL (default=last event, --all=current run) |
 | `pawl events [task] [--follow] [--type types]` | Unified event stream (--follow, --type filter) |
 | `pawl done <task> [-m msg]` | Mark step done / approve |
 
@@ -278,9 +278,13 @@ _run(task, step_idx)  [runs inside viewport as parent process]
   ├─ redirect stdout/stderr → /dev/null (pty may be gone)
   ├─ re-check state (pawl done may have already handled)
   └─ if still Running at step_idx → settle_step
+  Note: _run is resilient — SIGHUP-immune, always settles via step_finished.
+  Viewport kill → child signal death → _run catches → step_finished(exit_code=128).
+  viewport_lost only fires when _run itself is killed/crashed (safety net).
 
 detect_viewport_loss(task_name) → bool:
   └─ Running + in_viewport + viewport gone → emit ViewportLost, return false
+  Passive — only checked by status/wait/list. If _run already settled, state ≠ Running, no-op.
 ```
 
 ## File System Layout

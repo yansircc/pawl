@@ -59,7 +59,7 @@ Plus all user vars from `config.vars`.
 
 Top-level `"on"` field maps event type → shell command (fire-and-forget, async, silent on failure).
 
-Event types: `task_started`, `step_finished` (+`${success}` `${exit_code}` `${duration}`), `step_yielded` (+`${reason}`), `step_resumed`, `viewport_launched`, `step_skipped`, `step_reset` (+`${auto}`), `viewport_lost`, `task_stopped`, `task_reset`.
+Event types: `task_started`, `step_finished` (+`${success}` `${exit_code}` `${duration}`), `step_yielded` (+`${reason}`), `step_resumed`, `viewport_launched`, `step_skipped`, `step_reset` (+`${auto}`), `viewport_lost` (safety net — only fires when `_run` crashed; normal viewport kill → `step_finished(exit_code=128)`), `task_stopped`, `task_reset`.
 
 ```jsonc
 // Write to log file
