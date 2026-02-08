@@ -1,10 +1,8 @@
 use anyhow::{bail, Result};
 
-use crate::util::tmux;
-
 use super::common::Project;
 
-/// Enter the task's tmux window
+/// Enter the task's viewport
 pub fn run(task_name: &str) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
@@ -13,21 +11,20 @@ pub fn run(task_name: &str) -> Result<()> {
     let _task = project.load_task(&task_name)?;
 
     let session = project.session_name();
-    let window = &task_name;
 
-    // Check if window exists
-    if !tmux::window_exists(&session, window) {
+    // Check if viewport exists
+    if !project.viewport.exists(&task_name) {
         bail!(
-            "Window '{}:{}' does not exist. Task may not have been started.",
+            "Viewport '{}:{}' does not exist. Task may not have been started.",
             session,
-            window
+            task_name
         );
     }
 
-    // Select the window
-    tmux::select_window(&session, window)?;
+    // Attach to the viewport
+    project.viewport.attach(&task_name)?;
 
-    println!("Switched to {}:{}", session, window);
+    println!("Switched to {}:{}", session, task_name);
 
     Ok(())
 }

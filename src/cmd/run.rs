@@ -9,17 +9,17 @@ use crate::util::variable::Context;
 use super::common::Project;
 use super::start::{continue_execution, handle_step_completion, RunOutput};
 
-/// Internal: run a command in tmux window as the parent process.
+/// Internal: run a command in viewport as the parent process.
 /// Replaces the old runner-script + EXIT-trap + `pawl _on-exit` chain.
-pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
-    // 1. Ignore SIGHUP so we survive tmux kill-window
+pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
+    // 1. Ignore SIGHUP so we survive viewport close
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
     }
 
-    // 2. Mark that we're running inside a tmux window (for consecutive in_window steps)
+    // 2. Mark that we're running inside a viewport (for consecutive in_viewport steps)
     unsafe {
-        std::env::set_var("PAWL_RUNNING_IN_WINDOW", task_name);
+        std::env::set_var("PAWL_IN_VIEWPORT", task_name);
     }
 
     // 3. Load project, verify state
@@ -70,7 +70,7 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
         &ctx.repo_root
     };
 
-    // 5. Fork child process (bash -c), inherit stdio for tmux interactivity
+    // 5. Fork child process (bash -c), inherit stdio for viewport interactivity
     let mut child = unsafe {
         Command::new("bash")
             .arg("-c")
@@ -92,7 +92,7 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
     let status = child.wait()?;
     let exit_code = status.code().unwrap_or(128);
 
-    // 7. Redirect stdout/stderr to /dev/null (pty may be closed after kill-window)
+    // 7. Redirect stdout/stderr to /dev/null (pty may be closed after viewport close)
     redirect_to_devnull();
 
     // 8. Re-check state (pawl done may have already handled this step)
@@ -114,11 +114,10 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
         stderr: None,
     };
 
-    // Emit WindowLaunched → StepCompleted or handle_step_completion emits appropriate events
     match handle_step_completion(&project, task_name, step_idx, exit_code, &step, run_output)? {
         true => {
-            // Pipeline says continue — check if next step is also in_window
-            // If so, execute() will detect PAWL_RUNNING_IN_WINDOW and exec into next pawl _run
+            // Pipeline says continue — check if next step is also in_viewport
+            // If so, execute() will detect PAWL_IN_VIEWPORT and exec into next pawl _run
             continue_execution(&project, task_name)?;
         }
         false => {}
@@ -128,7 +127,7 @@ pub fn run_in_window(task_name: &str, step_idx: usize) -> Result<()> {
 }
 
 /// Redirect stdout and stderr to /dev/null.
-/// After tmux kill-window, the pty is gone and any write to stdout/stderr
+/// After viewport close, the pty is gone and any write to stdout/stderr
 /// would cause a broken pipe panic in Rust's println! macro.
 fn redirect_to_devnull() {
     unsafe {

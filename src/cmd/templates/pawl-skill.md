@@ -1,6 +1,6 @@
 # pawl — Resumable Step Sequencer
 
-pawl is a **resumable coroutine**: advance along a fixed step sequence, yield at decision points, rebuild state from an append-only log. Any repeatable multi-step process can be a pawl workflow — AI coding with git worktrees, testing pipelines, deployment automation, project bootstrapping. Steps support verify/retry/gate for human-in-the-loop control; tmux windows for long-running processes.
+pawl is a **resumable coroutine**: advance along a fixed step sequence, yield at decision points, rebuild state from an append-only log. Any repeatable multi-step process can be a pawl workflow — AI coding with git worktrees, testing pipelines, deployment automation, project bootstrapping. Steps support verify/retry/gate for human-in-the-loop control; viewports for long-running processes.
 
 ## CLI Commands
 
@@ -15,15 +15,15 @@ pawl is a **resumable coroutine**: advance along a fixed step sequence, yield at
 | `pawl reset <task>` | Fully reset a task |
 | `pawl reset --step <task>` | Retry current step |
 | `pawl done <task> [-m msg]` | Approve / mark done |
-| `pawl enter <task>` | Attach to tmux window |
-| `pawl capture <task> [-l N] [--json]` | Capture tmux window content |
+| `pawl enter <task>` | Attach to viewport |
+| `pawl capture <task> [-l N] [--json]` | Capture viewport content |
 | `pawl wait <task> --until <status> [-t sec]` | Wait for specified status |
 | `pawl log <task> [--step N] [--all] [--all-runs]` | View logs |
 | `pawl events [task] [--follow]` | Raw event stream |
 
 ## Step Model
 
-Each step has 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_window`
+Each step has 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_viewport`
 
 | Type | Config | Behavior |
 |------|--------|----------|
@@ -33,15 +33,15 @@ Each step has 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_window`
 | Auto verify | `"verify": "test.sh"` | Runs, then executes verify script (exit 0 passes) |
 | Auto retry | `"on_fail": "retry"` | Auto-retries on failure (max_retries, default 3) |
 | Human decision | `"on_fail": "human"` | Pauses on failure for human decision |
-| Window task | `"in_window": true` | Runs in tmux window, waits for `pawl done` |
+| Viewport task | `"in_viewport": true` | Runs in viewport, waits for `pawl done` |
 
 ### Config Design Rules
 
 When generating or modifying `.pawl/config.jsonc`, these rules are mandatory:
 
-1. **Every failable in_window step must define `on_fail`** ("retry" or "human"), otherwise failure is terminal
+1. **Every failable in_viewport step must define `on_fail`** ("retry" or "human"), otherwise failure is terminal
 2. **Every step with observable output must define `verify`**, otherwise `pawl done` trusts unconditionally
-3. **in_window step's `run` must `cd` to the working directory** (e.g. `cd ${worktree}`, `cd ~/projects/${task}`), otherwise worker runs in wrong directory
+3. **in_viewport step's `run` must `cd` to the working directory** (e.g. `cd ${worktree}`, `cd ~/projects/${task}`), otherwise worker runs in wrong directory
 
 Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail when terminal failure is acceptable — the operator investigates and resets manually.
 
@@ -50,9 +50,9 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
 | Config | Problem | Fix |
 |--------|---------|-----|
 | Gate + verify/on_fail | Gate has no run, verify/on_fail are ignored | Remove verify/on_fail, or add run |
-| in_window without verify | `pawl done` trusts unconditionally, can't detect errors | Add `verify` |
-| in_window with verify but no on_fail | Verify failure is terminal, can't retry | Add `on_fail` |
-| in_window run without cd | Worker runs in repo root | `cd ${worktree} &&` or `cd /path/${task} &&` |
+| in_viewport without verify | `pawl done` trusts unconditionally, can't detect errors | Add `verify` |
+| in_viewport with verify but no on_fail | Verify failure is terminal, can't retry | Add `on_fail` |
+| in_viewport run without cd | Worker runs in repo root | `cd ${worktree} &&` or `cd /path/${task} &&` |
 
 ### Verify Strategy
 
@@ -71,7 +71,7 @@ Exception: utility steps (git setup, merge, cleanup) may omit verify/on_fail whe
   "base_branch": "main",        // base branch (default)
   "claude_command": "claude",   // Claude CLI command (default: "claude", change to "ccc" etc. for aliases)
   "workflow": [                  // step sequence (required)
-    { "name": "step-name", "run": "cmd", "verify": "human|script", "on_fail": "retry|human", "in_window": true, "max_retries": 3 }
+    { "name": "step-name", "run": "cmd", "verify": "human|script", "on_fail": "retry|human", "in_viewport": true, "max_retries": 3 }
   ],
   "on": { "event_name": "shell command" }  // Event hooks (optional)
 }
@@ -113,7 +113,7 @@ All `run`/`verify`/hook commands support `${var}` expansion, subprocesses get `P
 |----------|-------|
 | `${task}` / `${branch}` | Task name / `pawl/{task}` |
 | `${worktree}` | `{repo_root}/{worktree_dir}/{task}` |
-| `${session}` / `${window}` | tmux session name / same as task name |
+| `${session}` | tmux session name |
 | `${repo_root}` | Repository root directory |
 | `${step}` / `${step_index}` | Current step name / index (0-based) |
 | `${base_branch}` | Base branch |
@@ -125,7 +125,7 @@ All `run`/`verify`/hook commands support `${var}` expansion, subprocesses get `P
 ```
 Pending → Running → Waiting    (awaits pawl done)
                   → Completed  (all steps done)
-                  → Failed     (step failed / window lost)
+                  → Failed     (step failed / viewport lost)
                   → Stopped    (pawl stop)
 ```
 
@@ -143,10 +143,10 @@ Configured in config's `"on"` field. **Fire-and-forget async execution** (does n
 | `step_completed` | `${exit_code}`, `${duration}` | Step completed (success or failure) |
 | `step_waiting` | `${reason}` (gate/verify_human/on_fail_human) | Step paused for human input |
 | `step_approved` | — | `pawl done` approved |
-| `window_launched` | — | in_window command sent to tmux |
+| `viewport_launched` | — | in_viewport command sent to viewport |
 | `step_skipped` | — | Step skipped |
 | `step_reset` | `${auto}` (true=auto retry/false=manual) | Step reset |
-| `window_lost` | — | tmux window disappeared |
+| `viewport_lost` | — | viewport disappeared |
 | `task_stopped` | — | `pawl stop` |
 | `task_reset` | — | `pawl reset` |
 
@@ -173,7 +173,7 @@ Foreman notification details: `mkdir` atomic mutex prevents concurrent interleav
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_window": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
+      "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -191,7 +191,7 @@ Notes: develop has verify+on_fail+cd worktree (satisfies all 3 rules); review is
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_window": true, "verify": "human", "on_fail": "human" },
+      "in_viewport": true, "verify": "human", "on_fail": "human" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
   ]
@@ -207,7 +207,7 @@ Notes: verify=human lets Foreman review output; on_fail=human lets Foreman decid
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_window": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
+      "in_viewport": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
     { "name": "final-review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -225,7 +225,7 @@ Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Forema
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_window": true, "verify": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 3 },
+      "in_viewport": true, "verify": "cd ${worktree} && make test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -237,7 +237,7 @@ Retry exhaustion behavior: after 3 failed retries, status becomes Failed. Forema
 }
 ```
 
-Start multiple tasks in parallel: `pawl start task-a && pawl start task-b && pawl start task-c`. Each task has independent JSONL/worktree/tmux window and does not interfere with others. Event hooks notify the Foreman window via tmux send-keys.
+Start multiple tasks in parallel: `pawl start task-a && pawl start task-b && pawl start task-c`. Each task has independent JSONL/worktree/viewport and does not interfere with others. Event hooks notify the Foreman viewport via tmux send-keys.
 
 ### Recipe 5: Pure Automation Flow (No AI)
 
@@ -254,7 +254,7 @@ Start multiple tasks in parallel: `pawl start task-a && pawl start task-b && paw
 }
 ```
 
-Notes: no in_window or ai-helpers.sh, pure synchronous commands. review is a gate + verify=human combo: first gate waits for pawl done, then verify_human waits for pawl done again.
+Notes: no in_viewport or ai-helpers.sh, pure synchronous commands. review is a gate + verify=human combo: first gate waits for pawl done, then verify_human waits for pawl done again.
 
 ### Recipe 6: Generic Pipeline (No Git Worktrees)
 
@@ -265,7 +265,7 @@ pawl is a generic step sequencer — git worktrees are one pattern, not a requir
   "workflow": [
     { "name": "prepare", "run": "mkdir -p ~/workspace/${task} && cd ~/workspace/${task} && ./init.sh" },
     { "name": "execute", "run": "cd ~/workspace/${task} && ./run.sh",
-      "in_window": true, "verify": "human", "on_fail": "human" },
+      "in_viewport": true, "verify": "human", "on_fail": "human" },
     { "name": "validate" },
     { "name": "teardown", "run": "rm -rf ~/workspace/${task}" }
   ]
@@ -284,10 +284,10 @@ Adds explicit plan approval step. AI creates a plan in read-only mode, foreman r
     { "name": "setup", "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "plan",
       "run": "cd ${worktree} && node ${repo_root}/.pawl/lib/plan-worker.mjs",
-      "in_window": true, "verify": "human", "on_fail": "human" },
+      "in_viewport": true, "verify": "human", "on_fail": "human" },
     { "name": "develop",
       "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_window": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
+      "in_viewport": true, "verify": "cd ${worktree} && cargo test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge", "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -313,7 +313,7 @@ while tasks remain incomplete:
     3. for each failed task:
        - pawl status --json for last_feedback + retry_count
        - fixable → pawl reset --step    unfixable → pawl start --reset or pawl stop
-    4. for each running + in_window task:
+    4. for each running + in_viewport task:
        - pawl capture to check progress   pawl enter if direct interaction needed
     5. sleep / wait for event hook notification
 ```
@@ -323,7 +323,7 @@ while tasks remain incomplete:
 | status | message | Action |
 |--------|---------|--------|
 | pending | — | `pawl start <task>` (check blocked_by first) |
-| running | — | No action needed (`pawl capture` to monitor in_window) |
+| running | — | No action needed (`pawl capture` to monitor in_viewport) |
 | waiting | gate | `pawl done <task>` (confirm gate conditions) |
 | waiting | verify_human | Review output → `pawl done` or `pawl reset --step` |
 | waiting | on_fail_human | Analyze feedback → `pawl done`(approve) / `reset --step`(retry) / `stop`(abandon) |
@@ -333,8 +333,8 @@ while tasks remain incomplete:
 
 ### Key Constraints
 
-- **window_lost is passive detection**: wf does not proactively notify when a tmux window disappears. Detection only happens when `pawl status`/`pawl list`/`pawl wait` is called. Periodically `pawl list` to check health of in_window steps.
-- **pawl done dual semantics**: For Waiting status = approve (step advances); for Running+in_window = mark done (triggers verify flow).
+- **viewport_lost is passive detection**: pawl does not proactively notify when a viewport disappears. Detection only happens when `pawl status`/`pawl list`/`pawl wait` is called. Periodically `pawl list` to check health of in_viewport steps.
+- **pawl done dual semantics**: For Waiting status = approve (step advances); for Running+in_viewport = mark done (triggers verify flow).
 - **Retry exhaustion**: After reaching max_retries, status becomes Failed (does not auto-transition to Waiting). Manual intervention required.
 
 ## AI Worker Integration (Coding Workflow Pattern)
@@ -363,14 +363,14 @@ Value of resumption: avoids re-understanding the codebase from scratch on each r
 | `--claude-cmd <cmd>` | `$PAWL_CLAUDE_COMMAND` or `claude` | Claude CLI command |
 | `--extra-args <args>` | (empty) | Extra arguments passed to claude |
 
-### Typical in_window Step Config
+### Typical in_viewport Step Config
 
 ```jsonc
 // Basic
-{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker", "in_window": true }
+{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker", "in_viewport": true }
 
 // Custom tools and model
-{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker --tools 'Bash,Read,Write,Edit' --extra-args '--model sonnet'", "in_window": true }
+{ "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker --tools 'Bash,Read,Write,Edit' --extra-args '--model sonnet'", "in_viewport": true }
 ```
 
 ### Custom Wrapper
@@ -432,13 +432,13 @@ Adds `description`, `depends`, `workflow` fields:
 {
   "workflow": [
     { "index": 0, "name": "setup", "status": "success" },
-    { "index": 1, "name": "develop", "step_type": "in_window", "status": "current" },
+    { "index": 1, "name": "develop", "step_type": "in_viewport", "status": "current" },
     { "index": 2, "name": "review", "step_type": "gate", "status": "pending" }
   ]
 }
 ```
 
-Field notes: `retry_count` only counts auto retries (auto=true); `last_feedback` searches backwards, stops at TaskReset; optional fields are omitted when null. `step_type`: `"gate"` / `"in_window"` / omitted. `status`: `success` / `failed` / `skipped` / `current` / `pending`.
+Field notes: `retry_count` only counts auto retries (auto=true); `last_feedback` searches backwards, stops at TaskReset; optional fields are omitted when null. `step_type`: `"gate"` / `"in_viewport"` / omitted. `status`: `success` / `failed` / `skipped` / `current` / `pending`.
 
 ## Troubleshooting
 
@@ -447,7 +447,7 @@ Field notes: `retry_count` only counts auto retries (auto=true); `last_feedback`
 | tmux session not found | Session doesn't exist | `tmux new-session -d -s <session>` |
 | "Task already running" | Another pawl start is running | `pawl stop <task> && pawl start <task>` |
 | Worktree already exists | Leftover from previous run | `git worktree remove .pawl/worktrees/<task> --force && git branch -D pawl/<task>` then `pawl reset` |
-| window_lost but process alive | tmux window name conflict | `tmux list-windows -t <session>` to inspect |
+| viewport_lost but process alive | viewport name conflict | `tmux list-windows -t <session>` to inspect |
 | Dependency blocked | Prerequisite task not completed | `pawl list` to check blocking source |
 | `-r session_id` fails | cwd mismatch | Must run in same worktree directory |
 | JSONL corrupted | Write interrupted | `tail -1 .pawl/logs/<task>.jsonl` to check; `pawl reset` to reset |

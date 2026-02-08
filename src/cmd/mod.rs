@@ -34,6 +34,6 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Log { task, step, all, all_runs, jsonl } => log::run(&task, step, all, all_runs, jsonl),
         Command::Events { task, follow } => events::run(task.as_deref(), follow),
         Command::Done { task, message } => approve::done(&task, message.as_deref()),
-        Command::Run { task, step } => run::run_in_window(&task, step),
+        Command::Run { task, step } => run::run_in_viewport(&task, step),
     }
 }

@@ -126,7 +126,7 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
         let name = &task_def.name;
         let blocking = project.check_dependencies(task_def)?;
 
-        project.check_window_health(name)?;
+        project.check_viewport_health(name)?;
         let summary = if let Some(state) = project.replay_task(name)? {
             let step_name = if state.current_step < workflow_len {
                 project.config.workflow[state.current_step].name.clone()
@@ -178,7 +178,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
 
-    project.check_window_health(task_name)?;
+    project.check_viewport_health(task_name)?;
     let state = project.replay_task(task_name)?;
     let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
 
@@ -186,8 +186,8 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
     for (i, step) in workflow.iter().enumerate() {
         let step_type = if step.is_gate() {
             Some("gate".to_string())
-        } else if step.in_window {
-            Some("in_window".to_string())
+        } else if step.in_viewport {
+            Some("in_viewport".to_string())
         } else {
             None
         };
@@ -265,7 +265,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
     for task_def in &tasks {
         let name = &task_def.name;
 
-        project.check_window_health(name)?;
+        project.check_viewport_health(name)?;
         let (step_str, status_str, info) = if let Some(state) = project.replay_task(name)? {
             let step_name = if state.current_step < workflow_len {
                 project.config.workflow[state.current_step].name.clone()
@@ -341,7 +341,7 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
         println!("Dependencies: {}", task_def.depends.join(", "));
     }
 
-    project.check_window_health(task_name)?;
+    project.check_viewport_health(task_name)?;
     let state = project.replay_task(task_name)?;
 
     if let Some(state) = &state {
@@ -393,8 +393,8 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
 
         let step_type = if step.is_gate() {
             "(gate)"
-        } else if step.in_window {
-            "(in_window)"
+        } else if step.in_viewport {
+            "(in_viewport)"
         } else {
             ""
         };

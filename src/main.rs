@@ -2,6 +2,7 @@ mod cli;
 mod cmd;
 mod model;
 mod util;
+mod viewport;
 
 use anyhow::Result;
 use clap::Parser;

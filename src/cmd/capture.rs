@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::util::tmux::{self, CaptureResult};
+use crate::viewport::tmux::TmuxViewport;
 
 use super::common::Project;
 
@@ -9,8 +9,7 @@ use super::common::Project;
 struct CaptureOutput {
     task: String,
     session: String,
-    window: String,
-    window_exists: bool,
+    viewport_exists: bool,
     process_active: bool,
     status: String,
     current_step: usize,
@@ -19,7 +18,7 @@ struct CaptureOutput {
     content: String,
 }
 
-/// Capture tmux window content for a task
+/// Capture viewport content for a task
 pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
@@ -28,10 +27,9 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let _task = project.load_task(&task_name)?;
 
     let session = project.session_name();
-    let window = &task_name;
 
-    // Get task status via replay (auto-repairs window-lost)
-    project.check_window_health(&task_name)?;
+    // Get task status via replay (auto-repairs viewport-lost)
+    project.check_viewport_health(&task_name)?;
     let state = project.replay_task(&task_name)?;
     let (status, current_step, step_name) = if let Some(state) = &state {
         let step_name = if state.current_step < project.config.workflow.len() {
@@ -48,16 +46,19 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         ("pending".to_string(), 0, "--".to_string())
     };
 
-    // Capture content (also checks if window exists)
-    let capture_result = tmux::capture_pane(&session, window, lines)?;
+    // Capture content (also checks if viewport exists)
+    let content_opt = project.viewport.read(&task_name, lines)?;
 
-    let (window_exists, content) = match &capture_result {
-        CaptureResult::Content(c) => (true, c.clone()),
-        CaptureResult::WindowGone => (false, String::new()),
-    };
+    let viewport_exists = content_opt.is_some();
+    let content = content_opt.unwrap_or_default();
 
-    let process_active = if window_exists {
-        tmux::pane_is_active(&session, window)
+    // pane_is_active is TmuxViewport-specific; downcast to check
+    let process_active = if viewport_exists {
+        if let Some(tmux_vp) = project.viewport.as_any().downcast_ref::<TmuxViewport>() {
+            tmux_vp.pane_is_active(&task_name)
+        } else {
+            false
+        }
     } else {
         false
     };
@@ -66,8 +67,7 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         let output = CaptureOutput {
             task: task_name.clone(),
             session: session.clone(),
-            window: window.clone(),
-            window_exists,
+            viewport_exists,
             process_active,
             status,
             current_step,
@@ -78,23 +78,23 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("Task: {}", task_name);
-        println!("Window: {}:{}", session, window);
+        println!("Viewport: {}:{}", session, task_name);
         println!("Status: {} (step {}: {})", status, current_step, step_name);
         println!(
-            "Window: {} | Process: {}",
-            if window_exists { "exists" } else { "not found" },
+            "Viewport: {} | Process: {}",
+            if viewport_exists { "exists" } else { "not found" },
             if process_active { "active" } else { "idle" }
         );
         println!("{}", "=".repeat(60));
 
-        if window_exists {
+        if viewport_exists {
             if content.is_empty() {
                 println!("(no content)");
             } else {
                 print!("{}", content);
             }
         } else {
-            println!("Window does not exist. Task may not have started an in_window step yet.");
+            println!("Viewport does not exist. Task may not have started an in_viewport step yet.");
         }
     }
 

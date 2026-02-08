@@ -220,9 +220,9 @@ fn print_event(event: &Event, project: &Project) {
             println!("=== Step {}: {} (approved) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
-        Event::WindowLaunched { ts, step } => {
+        Event::ViewportLaunched { ts, step } => {
             let name = step_name(project, *step);
-            println!("=== Step {}: {} (window launched) ===", step + 1, name);
+            println!("=== Step {}: {} (viewport launched) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
         Event::StepSkipped { ts, step } => {
@@ -244,11 +244,11 @@ fn print_event(event: &Event, project: &Project) {
             println!("=== Task Reset ===");
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
         }
-        Event::WindowLost { ts, step } => {
+        Event::ViewportLost { ts, step } => {
             let name = step_name(project, *step);
-            println!("=== Step {}: {} (window lost) ===", step + 1, name);
+            println!("=== Step {}: {} (viewport lost) ===", step + 1, name);
             println!("Time: {}", ts.format("%Y-%m-%d %H:%M:%S"));
-            println!("tmux window disappeared — auto-marked as failed.");
+            println!("Viewport disappeared — auto-marked as failed.");
         }
     }
 }

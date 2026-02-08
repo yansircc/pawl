@@ -1,6 +1,6 @@
 # pawl
 
-An orchestrator for AI coding agents. Each agent gets its own git worktree, its own tmux window, and a configurable pipeline — from branch creation to merge. You define the pipeline once, then launch as many agents as you want.
+An orchestrator for AI coding agents. Each agent gets its own git worktree, its own viewport, and a configurable pipeline — from branch creation to merge. You define the pipeline once, then launch as many agents as you want.
 
 ```
                ┌─ setup ─── develop ─── verify ─── merge ─── cleanup
@@ -49,7 +49,7 @@ You define a workflow in `.pawl/config.jsonc` — a list of steps that run for e
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     { "name": "develop", "run": "source ${repo_root}/.pawl/lib/ai-helpers.sh && cd ${worktree} && run_ai_worker",
-      "in_window": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
+      "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry", "max_retries": 3 },
     { "name": "review" },
     { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge from pawl'" },
     { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
@@ -64,7 +64,7 @@ You define a workflow in `.pawl/config.jsonc` — a list of steps that run for e
 |------|--------|----------|
 | **Command** | `{ "run": "..." }` | Runs synchronously. Fails on non-zero exit. |
 | **Gate** | `{ "name": "..." }` | No `run` — pauses until `pawl done`. |
-| **Agent** | `{ "run": "...", "in_window": true }` | Runs in tmux. Waits for `pawl done`. |
+| **Agent** | `{ "run": "...", "in_viewport": true }` | Runs in viewport. Waits for `pawl done`. |
 | **Verified** | `{ "run": "...", "verify": "human" }` | Runs, then waits for human approval. |
 
 ### Step Properties
@@ -72,7 +72,7 @@ You define a workflow in `.pawl/config.jsonc` — a list of steps that run for e
 | Property | Values | Description |
 |----------|--------|-------------|
 | `run` | shell command | Command to execute (omit for gate step) |
-| `in_window` | `true`/`false` | Run in tmux window instead of sync |
+| `in_viewport` | `true`/`false` | Run in viewport instead of sync |
 | `verify` | `"human"` or shell command | Post-step verification |
 | `on_fail` | `"retry"` or `"human"` | Failure strategy |
 | `max_retries` | number (default: 3) | Max auto-retries when `on_fail="retry"` |
@@ -106,7 +106,7 @@ pawl start <task>          # Start workflow execution
 ### Flow Control
 
 ```bash
-pawl done <task>           # Approve waiting step / mark in_window step done
+pawl done <task>           # Approve waiting step / mark in_viewport step done
 pawl stop <task>           # Stop running task
 pawl reset <task>          # Reset to initial state
 pawl reset --step <task>   # Retry current step
@@ -120,9 +120,9 @@ pawl list                  # List all tasks
 pawl log <task> --all      # View execution logs
 pawl log <task> --step 3   # View specific step log
 pawl events [task] [--follow]  # Unified event stream
-pawl capture <task>        # Capture tmux window content
-pawl wait <task> --until completed  # Wait for status (with window health check)
-pawl enter <task>          # Attach to tmux window
+pawl capture <task>        # Capture viewport content
+pawl wait <task> --until completed  # Wait for status
+pawl enter <task>          # Attach to viewport
 ```
 
 ## Task Files

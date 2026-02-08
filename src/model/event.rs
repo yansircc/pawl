@@ -30,7 +30,7 @@ pub enum Event {
         ts: DateTime<Utc>,
         step: usize,
     },
-    WindowLaunched {
+    ViewportLaunched {
         ts: DateTime<Utc>,
         step: usize,
     },
@@ -50,7 +50,7 @@ pub enum Event {
     TaskReset {
         ts: DateTime<Utc>,
     },
-    WindowLost {
+    ViewportLost {
         ts: DateTime<Utc>,
         step: usize,
     },
@@ -68,12 +68,12 @@ impl Event {
             Event::StepCompleted { .. } => "step_completed",
             Event::StepWaiting { .. } => "step_waiting",
             Event::StepApproved { .. } => "step_approved",
-            Event::WindowLaunched { .. } => "window_launched",
+            Event::ViewportLaunched { .. } => "viewport_launched",
             Event::StepSkipped { .. } => "step_skipped",
             Event::StepReset { .. } => "step_reset",
             Event::TaskStopped { .. } => "task_stopped",
             Event::TaskReset { .. } => "task_reset",
-            Event::WindowLost { .. } => "window_lost",
+            Event::ViewportLost { .. } => "viewport_lost",
         }
     }
 
@@ -84,11 +84,11 @@ impl Event {
             Event::StepCompleted { step, .. }
             | Event::StepWaiting { step, .. }
             | Event::StepApproved { step, .. }
-            | Event::WindowLaunched { step, .. }
+            | Event::ViewportLaunched { step, .. }
             | Event::StepSkipped { step, .. }
             | Event::StepReset { step, .. }
             | Event::TaskStopped { step, .. }
-            | Event::WindowLost { step, .. } => Some(*step),
+            | Event::ViewportLost { step, .. } => Some(*step),
         }
     }
 
@@ -167,7 +167,7 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 s.current_step = step + 1;
                 s.status = TaskStatus::Running;
             }
-            Event::WindowLaunched { ts, .. } => {
+            Event::ViewportLaunched { ts, .. } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.status = TaskStatus::Running;
@@ -192,12 +192,12 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 s.updated_at = Some(*ts);
                 s.status = TaskStatus::Stopped;
             }
-            Event::WindowLost { ts, step } => {
+            Event::ViewportLost { ts, step } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.step_status.insert(*step, StepStatus::Failed);
                 s.status = TaskStatus::Failed;
-                s.message = Some("tmux window lost".to_string());
+                s.message = Some("viewport lost".to_string());
             }
         }
     }
@@ -300,8 +300,6 @@ mod tests {
 
     #[test]
     fn test_step_waiting_after_completed_resets_current_step() {
-        // Regression: StepCompleted(exit_code=0) advances current_step to step+1,
-        // then StepWaiting (verify:human) must pull it back to the waiting step.
         let events = vec![
             Event::TaskStarted { ts: ts() },
             Event::StepCompleted {
@@ -316,13 +314,11 @@ mod tests {
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Waiting);
-        assert_eq!(state.current_step, 0); // must point to the waiting step, not 1
+        assert_eq!(state.current_step, 0);
     }
 
     #[test]
     fn test_verify_failure_as_step_completed() {
-        // Verify failure is now represented as StepCompleted(exit_code!=0)
-        // — no separate VerifyFailed event needed
         let events = vec![
             Event::TaskStarted { ts: ts() },
             Event::StepCompleted {
@@ -336,14 +332,13 @@ mod tests {
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Failed);
-        assert_eq!(state.current_step, 0); // does NOT advance
+        assert_eq!(state.current_step, 0);
         assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
         assert_eq!(state.message.as_deref(), Some("Exit code: 1"));
     }
 
     #[test]
     fn test_verify_failure_then_retry() {
-        // StepCompleted(exit!=0) → StepReset(auto) → Running at same step
         let events = vec![
             Event::TaskStarted { ts: ts() },
             Event::StepCompleted {
@@ -491,16 +486,16 @@ mod tests {
     }
 
     #[test]
-    fn test_window_lost() {
+    fn test_viewport_lost() {
         let events = vec![
             Event::TaskStarted { ts: ts() },
-            Event::WindowLaunched { ts: ts(), step: 0 },
-            Event::WindowLost { ts: ts(), step: 0 },
+            Event::ViewportLaunched { ts: ts(), step: 0 },
+            Event::ViewportLost { ts: ts(), step: 0 },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Failed);
         assert_eq!(state.step_status.get(&0), Some(&StepStatus::Failed));
-        assert_eq!(state.message.as_deref(), Some("tmux window lost"));
+        assert_eq!(state.message.as_deref(), Some("viewport lost"));
     }
 
     #[test]

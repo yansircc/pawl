@@ -2,7 +2,6 @@ use anyhow::{bail, Result};
 
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
-use crate::util::tmux;
 
 use super::common::Project;
 use super::start::continue_execution;
@@ -24,13 +23,12 @@ pub fn stop(task_name: &str) -> Result<()> {
         }
     }
 
-    // Send Ctrl+C to the tmux window (if running)
+    // Send Ctrl+C to the viewport (if running)
     let session = project.session_name();
-    let window = &task_name;
 
-    if tmux::window_exists(&session, window) {
-        println!("Sending interrupt to {}:{}...", session, window);
-        tmux::send_interrupt(&session, window)?;
+    if project.viewport.exists(&task_name) {
+        println!("Sending interrupt to {}:{}...", session, task_name);
+        project.viewport.send(&task_name, "\x03")?;
     }
 
     project.append_event(&task_name, &Event::TaskStopped {
@@ -92,10 +90,9 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             .unwrap_or(false);
 
         if is_running {
-            let session = project.session_name();
-            if tmux::window_exists(&session, &task_name) {
-                println!("Stopping task window...");
-                tmux::send_interrupt(&session, &task_name)?;
+            if project.viewport.exists(&task_name) {
+                println!("Stopping task viewport...");
+                project.viewport.send(&task_name, "\x03")?;
             }
         }
 

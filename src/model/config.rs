@@ -11,9 +11,9 @@ pub struct Config {
     #[serde(default)]
     pub session: Option<String>,
 
-    /// Terminal multiplexer (default: "tmux")
-    #[serde(default = "default_multiplexer")]
-    pub multiplexer: String,
+    /// Viewport backend (default: "tmux")
+    #[serde(default = "default_viewport")]
+    pub viewport: String,
 
     /// Claude CLI command path (default: "claude")
     #[serde(default = "default_claude_command")]
@@ -31,12 +31,12 @@ pub struct Config {
     pub workflow: Vec<Step>,
 
     /// Event hooks: event type (snake_case) -> shell command
-    /// Keys match Event enum serde tags: task_started, command_executed, agent_reported, etc.
+    /// Keys match Event enum serde tags: task_started, step_completed, etc.
     #[serde(default)]
     pub on: HashMap<String, String>,
 }
 
-fn default_multiplexer() -> String {
+fn default_viewport() -> String {
     "tmux".to_string()
 }
 
@@ -61,9 +61,9 @@ pub struct Step {
     #[serde(default)]
     pub run: Option<String>,
 
-    /// Whether to run in a tmux window
+    /// Whether to run in a viewport
     #[serde(default)]
-    pub in_window: bool,
+    pub in_viewport: bool,
 
     /// Verifier: a shell command (must exit 0) or "human" for manual approval
     #[serde(default)]
@@ -122,24 +122,24 @@ impl Config {
                     step.name
                 );
             }
-            if step.in_window {
+            if step.in_viewport {
                 if step.verify.is_none() {
                     eprintln!(
-                        "Warning: step '{}' (in_window) has no verify — `pawl done` will assume success unconditionally.",
+                        "Warning: step '{}' (in_viewport) has no verify — `pawl done` will assume success unconditionally.",
                         step.name
                     );
                 }
                 if let Some(ref run) = step.run {
                     if !run.contains("${worktree}") && !run.contains("$PAWL_WORKTREE") && !run.contains("worktree") {
                         eprintln!(
-                            "Warning: step '{}' (in_window) run doesn't reference worktree — worker may execute in wrong directory.",
+                            "Warning: step '{}' (in_viewport) run doesn't reference worktree — worker may execute in wrong directory.",
                             step.name
                         );
                     }
                 }
                 if step.verify.is_some() && step.on_fail.is_none() {
                     eprintln!(
-                        "Warning: step '{}' (in_window) has verify but no on_fail — verify failure is terminal.",
+                        "Warning: step '{}' (in_viewport) has verify but no on_fail — verify failure is terminal.",
                         step.name
                     );
                 }

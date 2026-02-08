@@ -17,7 +17,7 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
     let resolved_name = project.resolve_task_name(task_name)?;
 
     // Check initial status
-    project.check_window_health(&resolved_name)?;
+    project.check_viewport_health(&resolved_name)?;
     let current_status = project
         .replay_task(&resolved_name)?
         .map(|s| s.status)
@@ -72,7 +72,7 @@ fn poll_status(
         }
 
         // Health check: unified through Project API
-        project.check_window_health(task_name)?;
+        project.check_viewport_health(task_name)?;
 
         let current_status = project
             .replay_task(task_name)?

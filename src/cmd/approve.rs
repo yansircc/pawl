@@ -2,13 +2,12 @@ use anyhow::{bail, Result};
 
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
-use crate::util::tmux;
 
 use super::common::Project;
 use super::start;
 use super::start::{continue_execution, RunOutput};
 
-/// Mark current step as done (approve waiting step, or complete in_window step)
+/// Mark current step as done (approve waiting step, or complete in_viewport step)
 pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
@@ -22,9 +21,8 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
 
     match state.status {
         TaskStatus::Running => {
-            // Agent in tmux window reporting done — go through unified pipeline
+            // Agent in viewport reporting done — go through unified pipeline
             let step = &project.config.workflow[step_idx];
-            let session = project.session_name();
 
             let run_output = RunOutput {
                 duration: None,
@@ -43,13 +41,13 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
                 continue_execution(&project, &task_name)?;
             }
 
-            // Cleanup tmux window — but not if retrying (apply_on_fail re-sent command)
+            // Cleanup viewport — but not if retrying (apply_on_fail re-sent command)
             let new_state = project.replay_task(&task_name)?;
             let retrying = matches!(&new_state,
                 Some(s) if s.status == TaskStatus::Running && s.current_step == step_idx
             );
             if !retrying {
-                let _ = tmux::kill_window(&session, &task_name);
+                let _ = project.viewport.close(&task_name);
             }
         }
         TaskStatus::Waiting => {

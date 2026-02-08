@@ -6,7 +6,6 @@ use crate::model::config::Step;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
 use crate::util::shell::run_command_with_env;
-use crate::util::tmux;
 use crate::util::variable::Context;
 
 use super::common::Project;
@@ -148,14 +147,14 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         let command = step.run.as_ref().unwrap();
         let expanded = ctx.expand(command);
 
-        if step.in_window {
-            // in_window step: emit WindowLaunched and send to tmux
-            project.append_event(task_name, &Event::WindowLaunched {
+        if step.in_viewport {
+            // in_viewport step: emit ViewportLaunched and send to viewport
+            project.append_event(task_name, &Event::ViewportLaunched {
                 ts: event_timestamp(),
                 step: step_idx,
             })?;
 
-            execute_in_window(project, task_name, &ctx, step_idx)?;
+            execute_in_viewport(project, task_name, &ctx, step_idx)?;
             return Ok(());
         } else {
             // Normal step: execute synchronously
@@ -367,7 +366,7 @@ fn emit_step_completed_for_failure(
 }
 
 /// Unified pipeline: handles verify + on_fail after any step completion.
-/// Called from execute_step, run_in_window, and done.
+/// Called from execute_step, run_in_viewport, and done.
 /// StepCompleted is emitted INSIDE this function (after verify is resolved).
 pub fn handle_step_completion(
     project: &Project,
@@ -408,9 +407,9 @@ fn emit_waiting(project: &Project, task_name: &str, step_idx: usize, reason: &st
     Ok(false)
 }
 
-/// Execute an in_window step (send to tmux)
-fn execute_in_window(
-    _project: &Project,
+/// Execute an in_viewport step (send to viewport)
+fn execute_in_viewport(
+    project: &Project,
     task_name: &str,
     ctx: &Context,
     step_idx: usize,
@@ -418,10 +417,10 @@ fn execute_in_window(
     let wf_bin = std::env::current_exe()?.to_string_lossy().to_string();
     let run_cmd = format!("{} _run {} {}", wf_bin, task_name, step_idx);
 
-    // If already running inside a tmux window (consecutive in_window steps),
-    // exec directly instead of send_keys
-    if std::env::var("PAWL_RUNNING_IN_WINDOW").ok().as_deref() == Some(task_name) {
-        println!("  → exec into next in_window step");
+    // If already running inside a viewport (consecutive in_viewport steps),
+    // exec directly instead of sending via viewport
+    if std::env::var("PAWL_IN_VIEWPORT").ok().as_deref() == Some(task_name) {
+        println!("  → exec into next in_viewport step");
         let err = std::process::Command::new(&wf_bin)
             .args(["_run", task_name, &step_idx.to_string()])
             .exec();
@@ -429,22 +428,13 @@ fn execute_in_window(
     }
 
     let session = &ctx.session;
-    let window = &ctx.window;
 
-    if !tmux::session_exists(session) {
-        println!("  Creating session {}...", session);
-        tmux::create_session(session, Some(&ctx.repo_root))?;
-    }
+    project.viewport.open(task_name, &ctx.repo_root)?;
 
-    if !tmux::window_exists(session, window) {
-        println!("  Creating window {}:{}...", session, window);
-        tmux::create_window(session, window, Some(&ctx.repo_root))?;
-    }
-
-    println!("  → Sending to {}:{}", session, window);
+    println!("  → Sending to {}:{}", session, task_name);
     println!("  → Waiting for 'pawl done {}'", task_name);
 
-    tmux::send_keys(session, window, &run_cmd)?;
+    project.viewport.send(task_name, &run_cmd)?;
 
     Ok(())
 }
@@ -559,4 +549,3 @@ mod tests {
         );
     }
 }
-

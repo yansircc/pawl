@@ -59,13 +59,13 @@ pub enum Command {
         step: bool,
     },
 
-    /// Enter task window
+    /// Enter task viewport
     Enter {
         /// Task name
         task: String,
     },
 
-    /// Capture tmux window content
+    /// Capture viewport content
     Capture {
         /// Task name
         task: String,
@@ -128,7 +128,7 @@ pub enum Command {
         message: Option<String>,
     },
 
-    /// Internal: run command in tmux window as parent process
+    /// Internal: run command in viewport as parent process
     #[command(name = "_run", hide = true)]
     Run {
         /// Task name

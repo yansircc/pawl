@@ -8,8 +8,8 @@ use crate::model::event::{event_timestamp, replay, Event};
 use crate::model::{Config, TaskDefinition, TaskState, TaskStatus};
 use crate::util::git::get_repo_root;
 use crate::util::shell::spawn_background;
-use crate::util::tmux;
 use crate::util::variable::Context;
+use crate::viewport::{self, Viewport};
 
 const PAWL_DIR: &str = ".pawl";
 
@@ -18,6 +18,7 @@ pub struct Project {
     pub repo_root: String,
     pub pawl_dir: PathBuf,
     pub config: Config,
+    pub viewport: Box<dyn Viewport>,
 }
 
 impl Project {
@@ -31,11 +32,14 @@ impl Project {
         }
 
         let config = Config::load(&pawl_dir)?;
+        let session = config.session_name(&repo_root);
+        let vp = viewport::create_viewport(&config.viewport, &session)?;
 
         Ok(Self {
             repo_root,
             pawl_dir,
             config,
+            viewport: vp,
         })
     }
 
@@ -154,21 +158,21 @@ impl Project {
         Ok(replay(&events, workflow_len))
     }
 
-    /// Check window health. If a Running in_window step's tmux window is gone, emit WindowLost.
-    /// Returns true = healthy (or not applicable), false = WindowLost emitted.
-    pub fn check_window_health(&self, task_name: &str) -> Result<bool> {
+    /// Check viewport health. If a Running in_viewport step's viewport is gone, emit ViewportLost.
+    /// Returns true = healthy (or not applicable), false = ViewportLost emitted.
+    pub fn check_viewport_health(&self, task_name: &str) -> Result<bool> {
         let state = self.replay_task(task_name)?;
 
         if let Some(ref s) = state {
             if s.status == TaskStatus::Running {
                 let step_idx = s.current_step;
                 if step_idx < self.config.workflow.len()
-                    && self.config.workflow[step_idx].in_window
-                    && !tmux::window_exists(&self.session_name(), task_name)
+                    && self.config.workflow[step_idx].in_viewport
+                    && !self.viewport.exists(task_name)
                 {
                     self.append_event(
                         task_name,
-                        &Event::WindowLost {
+                        &Event::ViewportLost {
                             ts: event_timestamp(),
                             step: step_idx,
                         },

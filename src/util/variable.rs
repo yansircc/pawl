@@ -6,7 +6,6 @@ pub struct Context {
     pub task: String,
     pub branch: String,
     pub worktree: String,
-    pub window: String,
     pub session: String,
     pub repo_root: String,
     pub step: String,
@@ -41,7 +40,6 @@ impl Context {
             task: task.to_string(),
             branch: format!("pawl/{}", task),
             worktree,
-            window: task.to_string(),
             session: session.to_string(),
             repo_root: repo_root.to_string(),
             step: step.to_string(),
@@ -59,7 +57,6 @@ impl Context {
             .replace("${task}", &self.task)
             .replace("${branch}", &self.branch)
             .replace("${worktree}", &self.worktree)
-            .replace("${window}", &self.window)
             .replace("${session}", &self.session)
             .replace("${repo_root}", &self.repo_root)
             .replace("${step}", &self.step)
@@ -86,7 +83,6 @@ impl Context {
         env.insert("PAWL_TASK".to_string(), self.task.clone());
         env.insert("PAWL_BRANCH".to_string(), self.branch.clone());
         env.insert("PAWL_WORKTREE".to_string(), self.worktree.clone());
-        env.insert("PAWL_WINDOW".to_string(), self.window.clone());
         env.insert("PAWL_SESSION".to_string(), self.session.clone());
         env.insert("PAWL_REPO_ROOT".to_string(), self.repo_root.clone());
         env.insert("PAWL_STEP".to_string(), self.step.clone());
