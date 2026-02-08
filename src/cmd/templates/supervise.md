@@ -53,7 +53,6 @@ while tasks remain incomplete:
 |---------|-------|----------|
 | tmux session not found | Session doesn't exist | `tmux new-session -d -s <session>` |
 | "Task already running" | Another pawl start is running | `pawl stop <task> && pawl start <task>` |
-| Worktree already exists | Leftover from previous run | `git worktree remove .pawl/worktrees/<task> --force && git branch -D pawl/<task>` then `pawl reset` |
 | viewport_lost but process alive | viewport name conflict | `tmux list-windows -t <session>` to inspect |
 | Dependency blocked | Prerequisite task not completed | `pawl list` to check blocking source |
 | JSONL corrupted | Write interrupted | `tail -1 .pawl/logs/<task>.jsonl` to check; `pawl reset` to reset |

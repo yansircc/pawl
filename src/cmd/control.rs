@@ -129,21 +129,6 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
         project.append_event(&task_name, &Event::TaskReset { ts: event_timestamp() })?;
 
         eprintln!("Task '{}' reset to initial state.", task_name);
-
-        // Only show git cleanup hints if resources actually exist
-        let worktree_path = project.worktree_path(&task_name);
-        let branch_name = format!("pawl/{}", task_name);
-        let worktree_exists = worktree_path.exists();
-        let branch_exists = crate::util::git::branch_exists(&branch_name);
-        if worktree_exists || branch_exists {
-            eprintln!("Note: Git resources are NOT automatically cleaned. Clean up manually:");
-            if worktree_exists {
-                eprintln!("  git worktree remove {} --force", worktree_path.display());
-            }
-            if branch_exists {
-                eprintln!("  git branch -D {}", branch_name);
-            }
-        }
     }
 
     // Output final state as JSON

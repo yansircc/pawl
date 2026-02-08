@@ -391,7 +391,7 @@ fn launch_in_viewport(
 
     let session = ctx.get("session").unwrap();
 
-    project.viewport.open(task_name, ctx.get("repo_root").unwrap())?;
+    project.viewport.open(task_name, &project.project_root)?;
 
     eprintln!("  → Sending to {}:{}", session, task_name);
     eprintln!("  → Waiting for 'pawl done {}'", task_name);

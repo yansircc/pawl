@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::error::PawlError;
 use crate::model::event::{event_timestamp, replay, Event};
 use crate::model::{Config, TaskDefinition, TaskState, TaskStatus};
-use crate::util::git::get_repo_root;
+use crate::util::project::get_project_root;
 use crate::util::shell::spawn_background;
 use crate::util::variable::Context;
 use crate::viewport::{self, Viewport};
@@ -51,7 +51,7 @@ pub const PAWL_DIR: &str = ".pawl";
 
 /// Project context with loaded config
 pub struct Project {
-    pub repo_root: String,
+    pub project_root: String,
     pub pawl_dir: PathBuf,
     pub config: Config,
     pub viewport: Box<dyn Viewport>,
@@ -60,21 +60,15 @@ pub struct Project {
 impl Project {
     /// Load project from current directory
     pub fn load() -> Result<Self> {
-        let repo_root = get_repo_root()?;
-        let pawl_dir = PathBuf::from(&repo_root).join(PAWL_DIR);
-
-        if !pawl_dir.exists() {
-            return Err(PawlError::NotFound {
-                message: "Not a pawl project. Run 'pawl init' first.".into(),
-            }.into());
-        }
+        let project_root = get_project_root()?;
+        let pawl_dir = PathBuf::from(&project_root).join(PAWL_DIR);
 
         let config = Config::load(&pawl_dir)?;
-        let session = config.session_name(&repo_root);
+        let session = config.session_name(&project_root);
         let vp = viewport::create_viewport(&config.viewport, &session)?;
 
         Ok(Self {
-            repo_root,
+            project_root,
             pawl_dir,
             config,
             viewport: vp,
@@ -82,24 +76,30 @@ impl Project {
     }
 
     /// Build a Context for variable expansion / env vars.
+    /// Intrinsic vars first, then user vars from config.vars (expanded in order).
     pub fn context_for(&self, task_name: &str, step_idx: Option<usize>, run_id: &str) -> Context {
         let step_name = step_idx
             .and_then(|i| self.config.workflow.get(i))
             .map(|s| s.name.as_str())
             .unwrap_or("");
 
-        Context::build()
+        let mut ctx = Context::build()
             .var("task", task_name)
-            .var("branch", format!("pawl/{}", task_name))
-            .var("worktree", self.worktree_path(task_name).to_string_lossy())
             .var("session", self.session_name())
-            .var("repo_root", &self.repo_root)
+            .var("project_root", &self.project_root)
             .var("step", step_name)
-            .var("base_branch", &self.config.base_branch)
             .var("step_index", step_idx.map(|i| i.to_string()).unwrap_or_default())
             .var("log_file", self.log_file(task_name).to_string_lossy())
             .var("task_file", self.task_file(task_name).to_string_lossy())
-            .var("run_id", run_id)
+            .var("run_id", run_id);
+
+        // Expand user vars in definition order (earlier vars available to later)
+        for (key, value) in &self.config.vars {
+            let expanded = ctx.expand(value);
+            ctx = ctx.var_owned(key.clone(), expanded);
+        }
+
+        ctx
     }
 
     /// Get step name by index, returns "done" if past end.
@@ -109,14 +109,9 @@ impl Project {
             .unwrap_or("done")
     }
 
-    /// Get the worktree path for a task.
-    pub fn worktree_path(&self, task_name: &str) -> PathBuf {
-        PathBuf::from(&self.repo_root).join(&self.config.worktree_dir).join(task_name)
-    }
-
     /// Get session name
     pub fn session_name(&self) -> String {
-        self.config.session_name(&self.repo_root)
+        self.config.session_name(&self.project_root)
     }
 
     /// Load a task definition by name

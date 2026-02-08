@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -15,13 +16,9 @@ pub struct Config {
     #[serde(default = "default_viewport")]
     pub viewport: String,
 
-    /// Worktree directory relative to repo root (default: ".pawl/worktrees")
-    #[serde(default = "default_worktree_dir")]
-    pub worktree_dir: String,
-
-    /// Base branch for creating task branches (default: "main")
-    #[serde(default = "default_base_branch")]
-    pub base_branch: String,
+    /// User-defined variables (expanded in definition order)
+    #[serde(default)]
+    pub vars: IndexMap<String, String>,
 
     /// Workflow steps
     pub workflow: Vec<Step>,
@@ -34,14 +31,6 @@ pub struct Config {
 
 fn default_viewport() -> String {
     "tmux".to_string()
-}
-
-fn default_worktree_dir() -> String {
-    ".pawl/worktrees".to_string()
-}
-
-fn default_base_branch() -> String {
-    "main".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,14 +109,6 @@ impl Config {
                         "Warning: step '{}' (in_viewport) has no verify — `pawl done` will assume success unconditionally.",
                         step.name
                     );
-                }
-                if let Some(ref run) = step.run {
-                    if !run.contains("${worktree}") && !run.contains("$PAWL_WORKTREE") && !run.contains("worktree") {
-                        eprintln!(
-                            "Warning: step '{}' (in_viewport) run doesn't reference worktree — worker may execute in wrong directory.",
-                            step.name
-                        );
-                    }
                 }
                 if step.verify.is_some() && step.on_fail.is_none() {
                     eprintln!(

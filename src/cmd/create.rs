@@ -3,18 +3,18 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::PawlError;
-use crate::util::git::{get_repo_root, validate_branch_name};
+use crate::util::project::{get_project_root, validate_task_name};
 
 use super::common::PAWL_DIR;
 const TASKS_DIR: &str = "tasks";
 
 pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Result<()> {
     // Validate task name
-    validate_branch_name(name)?;
+    validate_task_name(name)?;
 
-    // Get repo root and check .pawl exists
-    let repo_root = get_repo_root()?;
-    let pawl_dir = Path::new(&repo_root).join(PAWL_DIR);
+    // Get project root and check .pawl exists
+    let project_root = get_project_root()?;
+    let pawl_dir = Path::new(&project_root).join(PAWL_DIR);
 
     if !pawl_dir.exists() {
         return Err(PawlError::NotFound {
@@ -37,7 +37,7 @@ pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Resu
 
     // Validate depends (check they are valid names, don't need to exist yet)
     for dep in &depends_list {
-        validate_branch_name(dep)
+        validate_task_name(dep)
             .with_context(|| format!("Invalid dependency name: {}", dep))?;
     }
 

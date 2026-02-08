@@ -1,6 +1,6 @@
-# pawl — Agent-Friendly Resumable Step Sequencer
+# pawl — Durable Execution Primitive for Shell
 
-A resumable coroutine whose consumer is **agents, not humans**. pawl advances along a fixed step sequence, yields when unable to self-decide, and rebuilds from log after crash. CLI output is JSON stdout + plain text stderr. `pawl status` provides routing hints (suggest/prompt) so agents know what to do next. Humans interact through agents; pawl speaks to agents directly.
+Shell's missing `yield`. A single binary that turns any shell pipeline into a resumable coroutine with failure routing. Define a step sequence, run it for any task — pawl yields when it needs judgment, retries on failure, and rebuilds state from log after crash. The consumer is agents (AI or script), not humans. CLI output is JSON stdout + plain text stderr. `pawl status` provides self-routing hints (suggest/prompt) so agents know what to do next without understanding pawl's internals.
 
 ## Design Philosophy
 
@@ -78,7 +78,7 @@ src/
 ├── cli.rs               # clap CLI (14 subcommands)
 ├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
-│   ├── config.rs        # Config + Step structs, JSONC loader
+│   ├── config.rs        # Config + Step structs, JSONC loader, vars (IndexMap)
 │   ├── event.rs         # Event enum (10 variants), replay(), count_auto_retries()
 │   ├── state.rs         # TaskState, TaskStatus (Display+FromStr), StepStatus (Display)
 │   └── task.rs          # TaskDefinition + YAML frontmatter parser (with skip)
@@ -98,7 +98,7 @@ src/
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all/--all-runs, JSONL output)
 │   └── templates/       # Template files embedded via include_str!
-│       ├── config.jsonc           # Empty workflow scaffold (orchestrate.md has design guide)
+│       ├── config.jsonc           # Empty scaffold with vars hint
 │       ├── pawl-skill.md          # SKILL.md: orientation + role routing
 │       ├── author.md              # Role: task authoring guide
 │       ├── orchestrate.md         # Role: workflow design, recipes, Claude CLI
@@ -107,9 +107,9 @@ src/
 │   ├── mod.rs           # Viewport trait (open/execute/read/exists/is_active/close/attach)
 │   └── tmux.rs          # TmuxViewport implementation
 └── util/
-    ├── git.rs           # get_repo_root, validate_branch_name, branch_exists
+    ├── project.rs       # get_project_root (.pawl/ walk-up), validate_task_name
     ├── shell.rs         # run_command variants, CommandResult
-    └── variable.rs      # Context (builder pattern), expand(), to_env_vars(), get()
+    └── variable.rs      # Context (builder pattern), expand(), to_env_vars(), get(), var_owned()
 ```
 
 ## Core Concepts
@@ -127,8 +127,7 @@ src/
 {
   session?: string,         // tmux session name (default: project dir name)
   viewport?: string,        // default: "tmux"
-  worktree_dir?: string,    // default: ".pawl/worktrees"
-  base_branch?: string,     // default: "main"
+  vars?: Record<string, string>,  // user-defined variables (expanded in order)
   workflow: Step[],         // required
   on?: Record<string, string>     // event hooks (key = Event serde tag)
 }
@@ -160,23 +159,36 @@ Task description in markdown.
 
 ## Variables
 
-All variables are available as `${var}` in config and as `PAWL_VAR` env vars in subprocesses.
+### Intrinsic Variables
+
+Built-in, always available as `${var}` in config and as `PAWL_VAR` env vars in subprocesses.
 
 | Variable | Env Var | Value |
 |----------|---------|-------|
 | `${task}` | `PAWL_TASK` | Task name |
-| `${branch}` | `PAWL_BRANCH` | `pawl/{task}` |
-| `${worktree}` | `PAWL_WORKTREE` | `{repo_root}/{worktree_dir}/{task}` |
 | `${session}` | `PAWL_SESSION` | Tmux session name |
-| `${repo_root}` | `PAWL_REPO_ROOT` | Git repository root |
+| `${project_root}` | `PAWL_PROJECT_ROOT` | `.pawl/` parent directory |
 | `${step}` | `PAWL_STEP` | Current step name |
-| `${base_branch}` | `PAWL_BASE_BRANCH` | Config base_branch value |
+| `${step_index}` | `PAWL_STEP_INDEX` | Current step index (0-based) |
 | `${log_file}` | `PAWL_LOG_FILE` | `.pawl/logs/{task}.jsonl` |
 | `${task_file}` | `PAWL_TASK_FILE` | `.pawl/tasks/{task}.md` |
-| `${step_index}` | `PAWL_STEP_INDEX` | Current step index (0-based) |
 | `${run_id}` | `PAWL_RUN_ID` | UUID v4 for current run |
 | `${retry_count}` | `PAWL_RETRY_COUNT` | Auto-retry count for current step |
 | `${last_verify_output}` | `PAWL_LAST_VERIFY_OUTPUT` | Last failure output (verify/stdout/stderr) |
+
+### User Variables (`config.vars`)
+
+Defined in `config.vars`, expanded in definition order. Later vars can reference earlier vars and intrinsics. Example for git worktree workflows:
+
+```jsonc
+"vars": {
+  "base_branch": "main",
+  "branch": "pawl/${task}",
+  "worktree": "${project_root}/.pawl/worktrees/${task}"
+}
+```
+
+Two-layer model: `${var}` expanded by pawl (static), `$ENV_VAR` expanded by shell (dynamic).
 
 ## State Machine
 
@@ -251,6 +263,11 @@ decide(outcome, policy) → Verdict (pure function, 6 rules):
   ├─ Failure + Manual → Yield("on_fail_manual")
   └─ Failure + Terminal → Fail
 
+context_for(task, step, run_id):
+  1. Build intrinsic vars (task, session, project_root, step, ...)
+  2. Expand config.vars in definition order (earlier vars available to later)
+  3. Return unified Context
+
 done(task)
   ├─ Running: settle_step (emits StepFinished inside)
   │   └─ retry? keep viewport : kill viewport
@@ -270,19 +287,17 @@ detect_viewport_loss(task_name) → bool:
 
 ```
 .pawl/
-├── config.jsonc              # Workflow configuration (self-documented)
+├── config.jsonc              # Workflow configuration (with vars)
 ├── tasks/                    # Task definitions (markdown + YAML frontmatter)
 │   └── {task}.md
 ├── logs/                     # Event logs (JSONL) — single source of truth
 │   └── {task}.jsonl
-├── skills/pawl/              # Skill reference (pawl init generates)
-│   ├── SKILL.md              # Orientation + role routing
-│   └── references/           # Role-specific guides (progressive disclosure)
-│       ├── author.md         # Writing effective tasks
-│       ├── orchestrate.md    # Designing workflows + Claude Code CLI
-│       └── supervise.md      # Polling and troubleshooting
-└── worktrees/                # Git worktrees (one per task)
-    └── {task}/
+└── skills/pawl/              # Skill reference (pawl init generates)
+    ├── SKILL.md              # Orientation + role routing
+    └── references/           # Role-specific guides (progressive disclosure)
+        ├── author.md         # Writing effective tasks
+        ├── orchestrate.md    # Designing workflows + Claude Code CLI
+        └── supervise.md      # Polling and troubleshooting
 ```
 
 ## Dev Commands

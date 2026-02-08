@@ -3,7 +3,6 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::PawlError;
-use crate::util::git::get_repo_root;
 
 use super::common::PAWL_DIR;
 
@@ -22,8 +21,12 @@ const GITIGNORE_ENTRIES: &str = r#"
 "#;
 
 pub fn run() -> Result<()> {
-    let repo_root = get_repo_root()?;
-    let pawl_dir = Path::new(&repo_root).join(PAWL_DIR);
+    // Use cwd as project root (.pawl/ doesn't exist yet, can't walk up)
+    let project_root = std::env::current_dir()
+        .context("Failed to get current directory")?
+        .to_string_lossy()
+        .to_string();
+    let pawl_dir = Path::new(&project_root).join(PAWL_DIR);
 
     if pawl_dir.exists() {
         return Err(PawlError::AlreadyExists {
@@ -31,7 +34,7 @@ pub fn run() -> Result<()> {
         }.into());
     }
 
-    eprintln!("Initializing pawl in {}...", repo_root);
+    eprintln!("Initializing pawl in {}...", project_root);
 
     fs::create_dir_all(pawl_dir.join("tasks"))
         .context("Failed to create .pawl/tasks/ directory")?;
@@ -59,7 +62,7 @@ pub fn run() -> Result<()> {
         eprintln!("  Created {}", path.display());
     }
 
-    update_gitignore(&repo_root)?;
+    update_gitignore(&project_root);
 
     eprintln!("\nInitialization complete!");
     eprintln!("\nNext steps:");
@@ -82,8 +85,9 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn update_gitignore(repo_root: &str) -> Result<()> {
-    let gitignore_path = Path::new(repo_root).join(".gitignore");
+/// Best-effort .gitignore update (for git users)
+fn update_gitignore(project_root: &str) {
+    let gitignore_path = Path::new(project_root).join(".gitignore");
 
     let current_content = if gitignore_path.exists() {
         fs::read_to_string(&gitignore_path).unwrap_or_default()
@@ -93,7 +97,7 @@ fn update_gitignore(repo_root: &str) -> Result<()> {
 
     if current_content.contains(".pawl/") {
         eprintln!("  .gitignore already contains pawl entries");
-        return Ok(());
+        return;
     }
 
     let new_content = if current_content.is_empty() {
@@ -104,9 +108,8 @@ fn update_gitignore(repo_root: &str) -> Result<()> {
         format!("{}\n{}", current_content, GITIGNORE_ENTRIES)
     };
 
-    fs::write(&gitignore_path, new_content)
-        .context("Failed to update .gitignore")?;
-    eprintln!("  Updated .gitignore");
-
-    Ok(())
+    match fs::write(&gitignore_path, new_content) {
+        Ok(()) => eprintln!("  Updated .gitignore"),
+        Err(_) => {} // Best-effort: silently skip if can't write
+    }
 }

@@ -1,21 +1,16 @@
 # pawl
 
-An agent-friendly resumable step sequencer. Define a pipeline once, run it for any task. Each task gets its own git worktree, its own viewport, and a cursor that survives crashes. Every output is machine-readable: JSON stdout, structured errors, self-routing hints.
+Shell can pipe, chain, trap, and cron — but it can't **pause, wait for a decision, resume after a crash, or route failures**. pawl adds these missing primitives: a single binary that turns any shell pipeline into a resumable coroutine with failure routing.
 
 ```
-               ┌─ setup ─── develop ─── verify ─── merge ─── cleanup
-  pawl start A ──┤
-  pawl start B ──┤  Each task: own worktree, own viewport,
-  pawl start C ──┘  own append-only event log.
+  pawl start task-a     build ── test ─╳ (fail)
+                                       └─ retry ── test ─── deploy ── gate ── verify
+                                                                        ↑
+  Close laptop. Fly across the world.                            pawl done task-a
+  Reboot. pawl start task-a. Continues from gate.
 ```
 
-## Design
-
-Three ideas, everything else follows:
-
-1. **`state = replay(log)`** — No database, no status file. JSONL is the single source of truth. Crash, reboot, replay, resume.
-2. **Separate what from where** — Recording (what happened) and routing (what to do next) never mix. The decision function is pure: `decide(Outcome, FailPolicy) → Verdict`.
-3. **Trust the substrate** — File system, exit codes, `grep`, tmux. Build only what Unix can't: coroutine semantics, failure routing, viewport abstraction.
+One invariant: `state = replay(log)`. Append-only JSONL, no database, no status file.
 
 ## Install
 
@@ -23,15 +18,15 @@ Three ideas, everything else follows:
 cargo install pawl
 ```
 
-Requires: Rust, tmux, git.
+Requires: Rust, tmux.
 
-## Quick Start
+## 30 Seconds
 
 ```bash
 pawl init                    # scaffold .pawl/
-pawl create auth-login       # create a task
-vim .pawl/tasks/auth-login.md
-pawl start auth-login        # run the pipeline
+# edit .pawl/config.jsonc    # define workflow
+pawl create my-task          # create a task
+pawl start my-task           # run the pipeline
 ```
 
 ## How It Works
@@ -41,117 +36,174 @@ Define a workflow in `.pawl/config.jsonc`:
 ```jsonc
 {
   "workflow": [
-    { "name": "setup",   "run": "git worktree add ${worktree} -b ${branch} ${base_branch}" },
-    { "name": "work",    "run": "cd ${worktree} && ./run-worker.sh",
+    { "name": "build",   "run": "npm run build" },
+    { "name": "test",    "run": "npm test", "on_fail": "retry" },
+    { "name": "deploy",  "run": "npm run deploy" },
+    { "name": "verify",  "verify": "manual" }
+  ]
+}
+```
+
+Four primitives compose into any workflow:
+
+| Primitive | Config | What happens |
+|-----------|--------|-------------|
+| **Run** | `"run": "..."` | Execute. Non-zero exit = failure. |
+| **Gate** | no `run` | Pause until `pawl done`. |
+| **Retry** | `"on_fail": "retry"` | Auto-retry on failure (default: 3x). |
+| **Yield** | `"verify": "manual"` or `"on_fail": "manual"` | Pause for human/agent judgment. |
+
+Add `"in_viewport": true` to run in an interactive terminal (tmux).
+
+## Agent Orchestration
+
+pawl's strongest emergent property: **durable execution for AI agent swarms**.
+
+Agent teams (Claude Code, multi-agent frameworks) coordinate agents in memory — if the process dies, the state is gone. pawl adds the missing durability layer: crash-recoverable state, self-routing hints, and recursive supervision.
+
+### Self-Routing Protocol
+
+`pawl status` returns machine-readable routing hints. Agents don't need to understand pawl — pawl tells them what to do:
+
+```bash
+pawl status task-a | jq '{suggest, prompt}'
+# suggest: ["pawl reset --step task-a"]     ← execute directly
+# prompt:  ["verify test results, then: pawl done task-a"]  ← requires judgment
+```
+
+### Single Agent with Retry Loop
+
+```jsonc
+{
+  "workflow": [
+    { "name": "implement", "run": "cat ${task_file} | claude -p --session-id $PAWL_RUN_ID",
+      "in_viewport": true, "verify": "npm test", "on_fail": "retry" }
+  ]
+}
+```
+
+Agent implements → tests verify → fail? pawl auto-retries with `$PAWL_LAST_VERIFY_OUTPUT` as feedback. `$PAWL_RUN_ID` is stable across retries — session context survives.
+
+### Recursive Supervision
+
+Each level of an agent hierarchy can have its own pawl — supervisor trees for shell:
+
+```
+Leader (pawl: spawn → gate → synthesize)
+  ├─ Worker A (pawl: plan → implement → test)
+  ├─ Worker B (pawl: plan → implement → test)
+  └─ Worker C (pawl: plan → implement → test)
+```
+
+Leader's pawl spawns workers, each worker has its own pawl workflow. Worker B fails step 2? Its pawl retries 3x, then yields. Leader's event hook notices, routes the decision. Everything is in JSONL — crash the whole machine, reboot, every workflow resumes from where it was.
+
+### Event Hooks for Coordination
+
+```jsonc
+"on": {
+  "step_finished": "if [ '${success}' = 'true' ] && [ '${step}' = 'test' ]; then notify-leader; fi"
+}
+```
+
+Fire-and-forget shell commands on any event. Cascade across pawl instances, notify external systems, trigger downstream workflows.
+
+## More Recipes
+
+### Release Engineering
+
+```jsonc
+{
+  "workflow": [
+    { "name": "bump",    "run": "npm version patch" },
+    { "name": "build",   "run": "npm run build", "on_fail": "retry" },
+    { "name": "staging", "run": "kubectl apply -f staging.yaml" },
+    { "name": "smoke" },
+    { "name": "prod",    "run": "kubectl apply -f prod.yaml" },
+    { "name": "verify",  "run": "curl -f https://prod/health", "on_fail": "retry" }
+  ]
+}
+```
+
+Deploy to staging → `pawl done` after manual smoke test → deploy to prod → auto-verify.
+
+### Infra with Approval Gate
+
+```jsonc
+{
+  "vars": { "env": "set -a && source ${project_root}/.env.local && set +a" },
+  "workflow": [
+    { "name": "plan",   "run": "${env} && terraform plan -out=tfplan" },
+    { "name": "review" },
+    { "name": "apply",  "run": "${env} && terraform apply tfplan", "on_fail": "manual" },
+    { "name": "verify", "run": "${env} && ./smoke-test.sh", "on_fail": "retry" }
+  ]
+}
+```
+
+### Git Worktree Workflow
+
+```jsonc
+{
+  "vars": {
+    "base_branch": "main",
+    "branch": "pawl/${task}",
+    "worktree": "${project_root}/.pawl/worktrees/${task}"
+  },
+  "workflow": [
+    { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
+    { "name": "work",    "run": "cd ${worktree} && cat ${task_file} | claude -p",
       "in_viewport": true, "verify": "cd ${worktree} && npm test", "on_fail": "retry" },
     { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch}" },
+    { "name": "merge",   "run": "cd ${project_root} && git merge --squash ${branch}" },
     { "name": "cleanup", "run": "git worktree remove ${worktree} --force; true" }
   ]
 }
 ```
 
-### Step Types
+## Variables
 
-| Pattern | What happens |
-|---------|-------------|
-| `{ "run": "..." }` | Run sync. Non-zero exit = failure. |
-| `{ "name": "..." }` | Gate — pause until `pawl done`. |
-| `{ "run": "...", "in_viewport": true }` | Run in viewport, wait for `pawl done`. |
-| `{ "verify": "manual" }` | Run, then wait for manual approval. |
-| `{ "on_fail": "retry" }` | Auto-retry on failure (default: 3×). |
-| `{ "on_fail": "manual" }` | Yield for manual decision on failure. |
+`${var}` in config → expanded before execution. `PAWL_VAR` env vars in subprocesses.
 
-### Variables
+**Intrinsic**: `task` `session` `project_root` `step` `step_index` `log_file` `task_file` `run_id` `retry_count` `last_verify_output`
 
-`${var}` in config → expanded before execution. Also available as `PAWL_VAR` env vars.
-
-| Variable | Value |
-|----------|-------|
-| `${task}` | Task name |
-| `${branch}` | `pawl/{task}` |
-| `${worktree}` | `{repo_root}/.pawl/worktrees/{task}` |
-| `${step}` | Current step name |
-| `${step_index}` | Current step index (0-based) |
-| `${repo_root}` | Git repository root |
-| `${base_branch}` | Config base branch |
-| `${session}` | Viewport session name |
-| `${task_file}` | `.pawl/tasks/{task}.md` |
-| `${log_file}` | `.pawl/logs/{task}.jsonl` |
-| `${run_id}` | UUID v4 for current run |
-| `${retry_count}` | Auto-retry count for current step |
-| `${last_verify_output}` | Last failure output |
+**User-defined** (`config.vars`): expanded in definition order, can reference earlier vars and intrinsics. Two-layer model: `${var}` expanded by pawl (static, visible in logs), `$ENV_VAR` expanded by shell (dynamic, secrets).
 
 ## Output
 
-stdout = JSON (write commands) or JSONL (log/events). stderr = progress + structured errors. Designed for agent consumption; pipe to `jq` for human reading.
+stdout = JSON, stderr = progress. No `--json` flag — JSON is the only format.
 
 ```bash
-pawl status task-a | jq .          # JSON with suggest/prompt routing hints
+pawl status task-a | jq .          # routing hints (suggest/prompt)
 pawl log task-a --all | jq .       # JSONL event stream
-pawl start task-a 2>/dev/null      # JSON only, no progress
-pawl start running-task 2>&1 | jq .suggest  # error recovery commands
+pawl events --follow | jq .        # real-time events
 ```
-
-**Self-routing**: Status and errors include `suggest` (mechanical commands — execute directly) and `prompt` (requires judgment — evaluate then decide). `pawl done` never appears in suggest.
 
 ## Commands
 
 ```bash
-# Lifecycle
 pawl init                          # Initialize project
 pawl create <name>                 # Create task
-pawl start <task> [--reset]        # Start pipeline
-
-# Flow control
+pawl start <task> [--reset]        # Start pipeline (--reset = restart)
 pawl done <task> [-m msg]          # Approve / mark done
 pawl stop <task>                   # Stop
-pawl reset <task>                  # Reset task
+pawl reset <task>                  # Full reset
 pawl reset --step <task>           # Retry current step
-
-# Observe
 pawl status [task]                 # Status (JSON)
-pawl list                          # List tasks (JSON array)
-pawl log <task> [--all] [--step N] # Logs (JSONL)
-pawl events [task] [--follow]      # Event stream (JSONL)
-pawl capture <task> [-l N]         # Viewport content (JSON)
-pawl wait <task> --until <status>  # Poll (exit code semantic)
+pawl list                          # All tasks (JSON)
+pawl log <task> [--all]            # Logs (JSONL)
+pawl events [task] [--follow]      # Event stream
+pawl capture <task>                # Viewport content
+pawl wait <task> --until <status>  # Block until status
 pawl enter <task>                  # Attach to viewport
 ```
 
-## Task Files
+## Design
 
-`.pawl/tasks/{name}.md` — YAML frontmatter + markdown body:
+Three ideas, everything else follows:
 
-```markdown
----
-name: auth-login
-depends:
-  - database-setup
-skip:
-  - cleanup
----
-
-Implement login with email/password. Return JWT. Rate limit 5/min.
-```
-
-## Project Layout
-
-```
-.pawl/
-├── config.jsonc              # Workflow definition (self-documented)
-├── tasks/*.md                # Task specs
-├── logs/*.jsonl              # Event logs (single source of truth)
-├── skills/pawl/              # Skill reference
-│   ├── SKILL.md              # Orientation + role routing
-│   └── references/           # Role-specific guides
-│       ├── author.md         # Writing tasks
-│       ├── orchestrate.md    # Designing workflows
-│       └── supervise.md      # Polling and troubleshooting
-└── worktrees/*/              # Git worktrees (one per task)
-```
-
-State = `replay(logs/*.jsonl)`. No status file.
+1. **`state = replay(log)`** — Append-only JSONL is the single source of truth. Crash, reboot, replay, resume.
+2. **Separate what from where** — Recording (what happened) and routing (what to do next) never mix. `decide(Outcome, FailPolicy) → Verdict` is pure.
+3. **Trust the substrate** — File system, exit codes, tmux, `grep`. Build only what Unix can't.
 
 ## License
 

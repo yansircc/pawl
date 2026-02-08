@@ -54,13 +54,8 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
     let expanded = ctx.expand(&command);
     let env = ctx.to_env_vars();
 
-    let worktree = ctx.get("worktree").unwrap();
-    let repo_root = ctx.get("repo_root").unwrap();
-    let work_dir = if std::path::Path::new(worktree).exists() {
-        worktree
-    } else {
-        repo_root
-    };
+    // Use project_root as working directory; user vars can override via command `cd ${worktree} && ...`
+    let work_dir = &project.project_root;
 
     // 5. Fork child process (bash -c), inherit stdio for viewport interactivity
     let start_time = Instant::now();

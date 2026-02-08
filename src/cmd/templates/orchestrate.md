@@ -2,7 +2,28 @@
 
 ## Top-Level Options
 
-All optional: `session` (tmux session name, default: dir name), `viewport` (default: `"tmux"`), `worktree_dir` (default: `".pawl/worktrees"`), `base_branch` (default: `"main"`).
+All optional: `session` (tmux session name, default: dir name), `viewport` (default: `"tmux"`), `vars` (user-defined variables, expanded in definition order).
+
+## User Variables (`vars`)
+
+Define project-specific variables that are expanded as `${var}` in commands and available as `PAWL_*` env vars. Later vars can reference earlier vars and intrinsic vars:
+
+```jsonc
+"vars": {
+  "base_branch": "main",
+  "branch": "pawl/${task}",
+  "worktree": "${project_root}/.pawl/worktrees/${task}"
+}
+```
+
+Two-layer model: `${var}` expanded by pawl (static, visible in logs), `$ENV_VAR` expanded by shell (dynamic, computed at runtime).
+
+Secrets from `.env` files belong in the shell layer — use a vars prefix to avoid repetition:
+
+```jsonc
+"vars": { "env": "set -a && source ${project_root}/.env.local && set +a" }
+// then in steps: "run": "${env} && npm run build"
+```
 
 ## Step Properties
 
@@ -15,13 +36,15 @@ All optional: `session` (tmux session name, default: dir name), `viewport` (defa
 | `on_fail` | `"retry"` or `"manual"` | — |
 | `max_retries` | retry limit when on_fail=retry | `3` |
 
-Rules: `in_viewport` run MUST `cd ${worktree} && ...`. Failable `in_viewport` → add `on_fail` (otherwise terminal). Observable output → add `verify` (otherwise `pawl done` trusts blindly). Gate step (no `run`) → `verify`/`on_fail` ignored.
+Rules: Failable `in_viewport` → add `on_fail` (otherwise terminal). Observable output → add `verify` (otherwise `pawl done` trusts blindly). Gate step (no `run`) → `verify`/`on_fail` ignored.
 
-## Variables
+## Intrinsic Variables
 
 Available as `${var}` in config commands, `PAWL_*` env vars in subprocesses:
 
-`task` `branch` `worktree` `session` `repo_root` `step` `step_index` `base_branch` `log_file` `task_file` `run_id` `retry_count` `last_verify_output`
+`task` `session` `project_root` `step` `step_index` `log_file` `task_file` `run_id` `retry_count` `last_verify_output`
+
+Plus all user vars from `config.vars`.
 
 ## Verify Strategy
 
@@ -40,7 +63,7 @@ Event types: `task_started`, `step_finished` (+`${success}` `${exit_code}` `${du
 
 ```jsonc
 // Write to log file
-"on": { "step_finished": "echo '[${task}] ${step} exit=${exit_code}' >> ${repo_root}/.pawl/hook.log" }
+"on": { "step_finished": "echo '[${task}] ${step} exit=${exit_code}' >> ${project_root}/.pawl/hook.log" }
 
 // Notify a supervisor via tmux (concurrency-safe)
 "on": { "step_finished": "mkdir /tmp/pawl-notify.lock 2>/dev/null && tmux send-keys -t ${session}:supervisor -l '[pawl] ${task}/${step} finished (exit=${exit_code})' && tmux send-keys -t ${session}:supervisor C-Enter && sleep 0.3 && rmdir /tmp/pawl-notify.lock; true" }
@@ -50,25 +73,30 @@ Event types: `task_started`, `step_finished` (+`${success}` `${exit_code}` `${du
 
 ### Git Worktree Skeleton
 
-Replace `⟨work⟩` with work steps below. Omit `review` gate if work step already has `"verify": "manual"`.
+Define git vars in `config.vars`, then use them in workflow steps. Replace `⟨work⟩` with work steps below. Omit `review` gate if work step already has `"verify": "manual"`.
 
 ```jsonc
 {
+  "vars": {
+    "base_branch": "main",
+    "branch": "pawl/${task}",
+    "worktree": "${project_root}/.pawl/worktrees/${task}"
+  },
   "workflow": [
     { "name": "setup",   "run": "git branch ${branch} ${base_branch} 2>/dev/null; git worktree add ${worktree} ${branch}" },
     ⟨work step(s)⟩,
     { "name": "review" },
-    { "name": "merge",   "run": "cd ${repo_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
-    { "name": "cleanup", "run": "git -C ${repo_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${repo_root} branch -D ${branch} 2>/dev/null; true" }
+    { "name": "merge",   "run": "cd ${project_root} && git merge --squash ${branch} && git commit -m 'feat(${task}): merge'" },
+    { "name": "cleanup", "run": "git -C ${project_root} worktree remove ${worktree} --force 2>/dev/null; git -C ${project_root} branch -D ${branch} 2>/dev/null; true" }
   ]
 }
 ```
 
-Multi-task: `pawl start task-a && pawl start task-b` — each gets independent JSONL/worktree/viewport. Non-git: replace setup/merge/cleanup with your own init/teardown.
+Multi-task: `pawl start task-a && pawl start task-b` — each gets independent JSONL/worktree/viewport. Non-git: omit `vars` and setup/merge/cleanup; use your own init/teardown.
 
 ### Work Steps: 2 Dimensions
 
-All work steps start with `"run": "cd ${worktree} && <command>"`. Two orthogonal choices:
+All work steps with git worktree start with `"run": "cd ${worktree} && <command>"`. Two orthogonal choices:
 
 | | auto verify | manual verify |
 |---|---|---|
