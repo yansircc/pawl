@@ -1,59 +1,54 @@
 # Session Handoff
 
-## Current Session (S41): Agent E2E tests
+## Current Session (S42): Skill doc stress test + viewport close bug fix
 
 ### What changed
 
-**Agent E2E 测试 — 9 个真实 haiku agent 与 pawl 交互的测试**
+**1. `done.rs` viewport close 时序 bug fix**
 
-新增 `tests/e2e-agent.sh`: 9 个 agent E2E 测试，并行执行 (~60s, ~$0.05/run)
+当 `pawl done` 把一个 in_viewport 步骤推进到下一个 in_viewport 步骤时，旧代码先调 `resume_workflow()`（为新步骤打开 viewport），再调 `viewport.close()`（杀掉 viewport）。结果把刚打开的新步骤 viewport 杀了，导致 viewport_lost。
 
-三组测试:
-- **Supervisor 路由 (4)**: gate→done, verify_manual→done, on_fail→reset --step, multi-step loop — agent 读 `pawl status` 路由提示，执行正确命令
-- **Worker + Verifier (3)**: viewport agent 创建文件, verifier pass, verifier fail→retry→pass — agent 作为 viewport worker 和 structured output verifier
-- **反馈循环 (2)**: worker 写 INITIAL → verifier reject → worker 读 `$PAWL_LAST_VERIFY_OUTPUT` → 写 CORRECTED → pass; multi-task done
+修复：viewport close 移到 resume_workflow 之前。单元测试通过，E2E viewport 测试待跑。
 
-三种 agent 角色:
-| 角色 | `--tools` | 用途 |
-|------|-----------|------|
-| Supervisor | `"Bash"` | 跑 `pawl status`/`done`/`reset` |
-| Worker | `"Bash"` | 在 viewport 中执行任务 |
-| Verifier | `"Bash"` + `--json-schema` | 检查产出，返回 `{pass: bool}` |
+**2. `supervise.md` Monitoring 重排**
 
-关键发现:
-- ccc Bash tool **会重置 cwd** → prompt 必须包含 `cd <project_dir>`
-- macOS 无 `timeout` → `run_with_timeout()` (background + watchdog kill)
-- 不能从 Claude Code Bash tool 嵌套调用 ccc（会挂住），必须独立脚本
-- 所有 agent 调用: `--output-format stream-json --verbose --max-budget-usd 0.02`
+原文档把 Poll 排第一标 "(default)"，导致 agent 锚定到 sleep+list 模式。重排为：
+- Wait (preferred) — 多任务并行 `pawl wait & wait` 模式，带完整示例
+- Events (real-time) — `pawl events --follow --type` 作为 live dashboard
+- Poll (fallback) — 明确标注仅在 wait/events 不可行时使用
+
+**3. Skill 文档质量压测**
+
+用 pawl 编排工作流，5 个不同主题（C/Go/Python/Web/Infra）的 agent 并行，仅凭 skill 文档冷启动产出 config.jsonc + tasks。结果：
+- 5/5 config 格式正确，能被 pawl list 解析
+- 5/5 都用了 git worktree skeleton recipe（锚定效应过强）
+- verify 策略按领域自适应（C→make, Go→build+vet, Python→pytest, Infra/Web→manual）
+- 一个质量 bug：Python config 的 verify 写了 `|| true` 导致永远通过
 
 ---
 
 ## Previous Sessions (compressed)
 
+### S41: Agent E2E tests
+- `tests/e2e-agent.sh`: 9 个 agent E2E 测试（真实 haiku agent 与 pawl 交互）
+- 3 种 agent 角色: supervisor, worker, verifier
+
 ### S39: E2E viewport tests, doc fix, log cleanup
 - `tests/e2e-viewport.sh`: 32 viewport E2E (并行)
 - `tests/e2e.sh`: 72 sync E2E
 - `viewport_lost` 安全网语义文档修正
-- 删除 `pawl log --all-runs`
 
 ### S38: Decouple from git, add config.vars
 - `git.rs` → `project.rs`，`get_project_root()` 查找 `.pawl/`
 - Config: 删 `worktree_dir`/`base_branch`，新增 `vars: IndexMap`
-- `pawl init` 不依赖 git。Git worktree 降为 recipe
 
 ### S37: Skill Self-Containment + human→manual
 - Skill 文档 zero-jump 自完备
-- config.jsonc: 46→4 行（空画布）
 - `"human"` → `"manual"` 跨 13 文件
 
-### S36: Less-Is-More Audit
-- 三生成元 + less-is-more 停机条件
-- PawlError 精简。derive_routing() 移到 status.rs
-
-### S33-S35: Agent-First Interface
-- stdout=JSON, stderr=progress。exit codes 2-7。derive_routing() 自路由。
-
-### S32 and earlier
+### S36 and earlier
+- S36: Less-Is-More Audit
+- S33-S35: Agent-First Interface (stdout=JSON, exit codes, derive_routing)
 - S32: Role-based skill architecture
 - S30: 解耦 Claude Code
 - S28: settle_step pipeline, Display+FromStr, context_for
@@ -63,7 +58,8 @@
 
 ## Pending Work
 
-None.
+- **E2E viewport 测试验证 done.rs 修复**：`tests/e2e-viewport.sh` 需要跑一次确认无回归
+- **orchestrate.md Plain Workflow recipe**：当前只有 git worktree skeleton，导致 5/5 agent 锚定到 worktree 模式。需要在 worktree recipe 之前加一个无 git 的 Plain 模式 recipe + 决策指引
 
 ## Known Issues
 

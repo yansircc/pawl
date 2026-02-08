@@ -45,17 +45,18 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
                 &project, &task_name, step_idx, step, record
             )?;
 
-            if should_continue {
-                resume_workflow(&project, &task_name)?;
-            }
-
-            // Cleanup viewport — but not if retrying
+            // Cleanup viewport — but not if retrying (must happen before resume_workflow
+            // which may open a new viewport for the next step with the same name)
             let new_state = project.replay_task(&task_name)?;
             let retrying = matches!(&new_state,
                 Some(s) if s.status == TaskStatus::Running && s.current_step == step_idx
             );
             if !retrying {
                 let _ = project.viewport.close(&task_name);
+            }
+
+            if should_continue {
+                resume_workflow(&project, &task_name)?;
             }
         }
         TaskStatus::Waiting => {

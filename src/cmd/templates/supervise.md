@@ -23,22 +23,36 @@ Pending → Running → Waiting / Completed / Failed / Stopped
 
 ## Monitoring
 
-### Poll (multi-task, default)
+### Wait (preferred)
+
+`pawl wait <task> --until <status>[,status2] [-t sec]` blocks until target status. Run multiple in parallel for multi-task:
+
+```bash
+# Wait for all tasks to reach review gate (or fail)
+pawl wait task-a --until waiting,completed,failed &
+pawl wait task-b --until waiting,completed,failed &
+pawl wait task-c --until waiting,completed,failed &
+wait
+# All settled — review and approve
+pawl list
+```
+
+### Events (real-time)
+
+`pawl events --follow [task]` tails JSONL events as they arrive. Use as a live dashboard — see every step_finished, step_yielded, step_reset the moment it happens. Filter with `--type`:
+
+```bash
+pawl events --follow --type step_yielded,step_finished
+```
+
+### Poll (fallback)
+
+`pawl list` for a one-shot status check. Only use repeated polling when wait/events are impractical:
 
 ```
-while tasks remain incomplete:
-    1. pawl list                              # JSON array with suggest/prompt
-    2. for each task: follow suggest / evaluate prompt
-    3. sleep / wait for event hook notification
+pawl list                              # JSON array with suggest/prompt
+for each task: follow suggest / evaluate prompt
 ```
-
-### Event-driven (real-time)
-
-`pawl events --follow [task]` — tails JSONL events as they arrive. More efficient for long-running tasks than polling.
-
-### Blocking (single-task)
-
-`pawl wait <task> --until waiting,failed` — blocks until target status reached. Simplest for single-task scripts.
 
 ## Key Constraints
 
