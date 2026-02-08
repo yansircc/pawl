@@ -21,3 +21,4 @@ json_comments = "0.2"
 fs2 = "0.4"
 libc = "0.2"
 notify = "7"
+uuid = { version = "1", features = ["v4"] }

@@ -50,12 +50,16 @@ All work steps start with `"run": "cd ${worktree} && <command>"`. Two orthogonal
 
 ### Retry Feedback Loop
 
-On retry, extract last failure's `verify_output` and inject into next attempt:
+On retry, `$PAWL_RETRY_COUNT` and `$PAWL_LAST_VERIFY_OUTPUT` are automatically available:
 
 ```bash
-FB=$(grep '"step_finished"' $PAWL_LOG_FILE | grep '"success":false' | tail -1 | jq -r '.verify_output // empty' 2>/dev/null)
-# Use: <agent-cli> "Fix: $FB"
-# Session resume (tool-specific): claude -r $(cat .session-id), etc.
+# In step run command:
+if [ -n "$PAWL_LAST_VERIFY_OUTPUT" ]; then
+  <agent-cli> "Fix: $PAWL_LAST_VERIFY_OUTPUT"
+else
+  <agent-cli> "$(cat $PAWL_TASK_FILE)"
+fi
+# Session resume: claude -r $PAWL_RUN_ID (run_id is stable across retries within a run)
 ```
 
 ### AI Worker Pattern
@@ -102,30 +106,29 @@ Workflow-essential flags (full reference: `claude --help`):
 
 ### Instantiation: Worker with Session Resume
 
-Compose the generic AI Worker Pattern + Retry Feedback Loop with Claude Code:
+Compose the generic AI Worker Pattern + Retry Feedback Loop with Claude Code.
+`$PAWL_RUN_ID` (UUID v4) is stable across retries within a run — use it directly as session ID:
 
 ```bash
 # pawl work step run command:
-cd ${worktree} && SF=.claude-session && \
-FB=$(grep '"step_finished"' $PAWL_LOG_FILE | grep '"success":false' | tail -1 | jq -r '.verify_output // empty' 2>/dev/null) && \
-if [ -f $SF ] && [ -n "$FB" ]; then
-  claude -p "Fix: $FB" -r $(cat $SF)
+cd ${worktree} && \
+if [ -n "$PAWL_LAST_VERIFY_OUTPUT" ]; then
+  claude -p "Fix: $PAWL_LAST_VERIFY_OUTPUT" -r $PAWL_RUN_ID
 else
-  SID=$(uuidgen) && echo $SID > $SF && \
-  cat $PAWL_TASK_FILE | claude -p --session-id $SID
+  cat $PAWL_TASK_FILE | claude -p --session-id $PAWL_RUN_ID
 fi
 ```
 
-- First run: pre-generates UUID via `--session-id`, saves to file (no output parsing needed)
-- Retry: `-r $(cat $SF)` resumes session context, injects `verify_output` as feedback
-- Session file (`$SF`) is per-worktree, survives across retries
+- First run: `--session-id $PAWL_RUN_ID` starts a session keyed to this pawl run
+- Retry: `-r $PAWL_RUN_ID` resumes session context, `$PAWL_LAST_VERIFY_OUTPUT` has failure output
+- No file management needed — pawl provides the stable handle
 
 ### Instantiation: Plan-Then-Execute
 
 ```jsonc
-{ "name": "plan",    "run": "cd ${worktree} && SID=$(uuidgen) && echo $SID > .claude-session && cat ${task_file} | claude -p --session-id $SID --permission-mode plan",
+{ "name": "plan",    "run": "cd ${worktree} && cat ${task_file} | claude -p --session-id $PAWL_RUN_ID --permission-mode plan",
   "in_viewport": true, "verify": "human", "on_fail": "human" },
-{ "name": "develop", "run": "cd ${worktree} && claude -p 'Execute the approved plan.' -r $(cat .claude-session) --dangerously-skip-permissions",
+{ "name": "develop", "run": "cd ${worktree} && claude -p 'Execute the approved plan.' -r $PAWL_RUN_ID --dangerously-skip-permissions",
   "in_viewport": true, "verify": "cd ${worktree} && <test>", "on_fail": "retry" }
 ```
 

@@ -33,7 +33,7 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
                 stderr: None,
             };
 
-            println!("Step {} marked as done.", step_idx + 1);
+            eprintln!("Step {} marked as done.", step_idx + 1);
 
             // Unified pipeline: combine → decide → split
             let should_continue = start::settle_step(
@@ -60,7 +60,7 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
                 step: step_idx,
             })?;
 
-            println!("Step {} approved.", step_idx + 1);
+            eprintln!("Step {} approved.", step_idx + 1);
             resume_workflow(&project, &task_name)?;
         }
         _ => {
@@ -71,6 +71,9 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             );
         }
     }
+
+    // Output final state as JSON
+    project.output_task_state(&task_name)?;
 
     Ok(())
 }

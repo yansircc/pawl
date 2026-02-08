@@ -21,17 +21,17 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Create { name, description, depends } => {
             create::run(&name, description.as_deref(), depends.as_deref())
         }
-        Command::List => status::list(false),
+        Command::List => status::list(),
         Command::Start { task, reset } => start::run(&task, reset),
-        Command::Status { task, json } => status::run(task.as_deref(), json),
+        Command::Status { task } => status::run(task.as_deref()),
         Command::Stop { task } => control::stop(&task),
         Command::Reset { task, step } => control::reset(&task, step),
         Command::Enter { task } => enter::run(&task),
-        Command::Capture { task, lines, json } => capture::run(&task, lines, json),
+        Command::Capture { task, lines } => capture::run(&task, lines),
         Command::Wait { task, until, timeout, interval } => {
             wait::run(&task, &until, timeout, interval)
         }
-        Command::Log { task, step, all, all_runs, jsonl } => log::run(&task, step, all, all_runs, jsonl),
+        Command::Log { task, step, all, all_runs } => log::run(&task, step, all, all_runs),
         Command::Events { task, follow } => events::run(task.as_deref(), follow),
         Command::Done { task, message } => done::done(&task, message.as_deref()),
         Command::Run { task, step } => run::run_in_viewport(&task, step),

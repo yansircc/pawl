@@ -11,6 +11,41 @@ use crate::util::shell::spawn_background;
 use crate::util::variable::Context;
 use crate::viewport::{self, Viewport};
 
+/// Extract retry_count and last_feedback for the current step from events.
+pub fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<String>) {
+    let retry_count = crate::model::event::count_auto_retries(events, step_idx);
+    let mut last_feedback: Option<String> = None;
+
+    for event in events.iter().rev() {
+        match event {
+            Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
+            Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
+            Event::StepFinished { step, success, stdout, stderr, verify_output, .. }
+                if *step == step_idx && !*success =>
+            {
+                if last_feedback.is_none() {
+                    let mut parts = Vec::new();
+                    if let Some(vo) = verify_output {
+                        if !vo.is_empty() { parts.push(vo.as_str()); }
+                    }
+                    if let Some(out) = stdout {
+                        if !out.is_empty() { parts.push(out.as_str()); }
+                    }
+                    if let Some(err) = stderr {
+                        if !err.is_empty() { parts.push(err.as_str()); }
+                    }
+                    if !parts.is_empty() {
+                        last_feedback = Some(parts.join("\n"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (retry_count, last_feedback)
+}
+
 pub const PAWL_DIR: &str = ".pawl";
 
 /// Project context with loaded config
@@ -44,7 +79,7 @@ impl Project {
     }
 
     /// Build a Context for variable expansion / env vars.
-    pub fn context_for(&self, task_name: &str, step_idx: Option<usize>) -> Context {
+    pub fn context_for(&self, task_name: &str, step_idx: Option<usize>, run_id: &str) -> Context {
         let step_name = step_idx
             .and_then(|i| self.config.workflow.get(i))
             .map(|s| s.name.as_str())
@@ -61,6 +96,7 @@ impl Project {
             .var("step_index", step_idx.map(|i| i.to_string()).unwrap_or_default())
             .var("log_file", self.log_file(task_name).to_string_lossy())
             .var("task_file", self.task_file(task_name).to_string_lossy())
+            .var("run_id", run_id)
     }
 
     /// Get step name by index, returns "done" if past end.
@@ -226,7 +262,22 @@ impl Project {
         };
 
         let step_idx = event.step_index();
-        let mut ctx = self.context_for(task_name, step_idx);
+        let run_id = self.replay_task(task_name)
+            .ok()
+            .flatten()
+            .map(|s| s.run_id)
+            .unwrap_or_default();
+        let mut ctx = self.context_for(task_name, step_idx, &run_id);
+
+        // Inject retry context variables
+        if let Some(si) = step_idx {
+            let events = self.read_events(task_name).unwrap_or_default();
+            let (retry_count, last_feedback) = extract_step_context(&events, si);
+            ctx = ctx.var("retry_count", retry_count.to_string());
+            if let Some(fb) = &last_feedback {
+                ctx = ctx.var("last_verify_output", fb);
+            }
+        }
 
         // Extend with event-specific variables (${exit_code}, ${duration}, etc.)
         ctx.extend(event.extra_vars());
@@ -236,5 +287,35 @@ impl Project {
         if let Err(e) = spawn_background(&expanded) {
             eprintln!("Warning: hook '{}' failed: {}", event_type, e);
         }
+    }
+
+    /// Output task state as JSON to stdout — unified output point for all write commands.
+    pub fn output_task_state(&self, task_name: &str) -> Result<()> {
+        self.detect_viewport_loss(task_name)?;
+        let state = self.replay_task(task_name)?;
+        let events = self.read_events(task_name)?;
+        let workflow_len = self.config.workflow.len();
+
+        let (current_step, status, run_id, message) = if let Some(s) = &state {
+            (s.current_step, s.status.to_string(), s.run_id.clone(), s.message.clone())
+        } else {
+            (0, "pending".to_string(), String::new(), None)
+        };
+
+        let (retry_count, last_feedback) = extract_step_context(&events, current_step);
+
+        let json = serde_json::json!({
+            "task": task_name,
+            "status": status,
+            "run_id": run_id,
+            "current_step": current_step,
+            "step_name": self.step_name(current_step),
+            "total_steps": workflow_len,
+            "message": message,
+            "retry_count": retry_count,
+            "last_feedback": last_feedback,
+        });
+        println!("{}", json);
+        Ok(())
     }
 }

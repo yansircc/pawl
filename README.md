@@ -72,12 +72,25 @@ Define a workflow in `.pawl/config.jsonc`:
 | `${branch}` | `pawl/{task}` |
 | `${worktree}` | `{repo_root}/.pawl/worktrees/{task}` |
 | `${step}` | Current step name |
+| `${step_index}` | Current step index (0-based) |
 | `${repo_root}` | Git repository root |
 | `${base_branch}` | Config base branch |
 | `${session}` | Viewport session name |
 | `${task_file}` | `.pawl/tasks/{task}.md` |
 | `${log_file}` | `.pawl/logs/{task}.jsonl` |
-| `${step_index}` | Current step index (0-based) |
+| `${run_id}` | UUID v4 for current run |
+| `${retry_count}` | Auto-retry count for current step |
+| `${last_verify_output}` | Last failure output |
+
+## Output
+
+stdout = JSON (write commands) or JSONL (log/events). stderr = progress. Pipe to `jq` for human reading.
+
+```bash
+pawl status task-a | jq .          # pretty-print JSON
+pawl log task-a --all | jq .       # pretty-print JSONL events
+pawl start task-a 2>/dev/null      # JSON only, no progress
+```
 
 ## Commands
 
@@ -94,12 +107,12 @@ pawl reset <task>                  # Reset task
 pawl reset --step <task>           # Retry current step
 
 # Observe
-pawl status [task] [--json]        # Status
-pawl list                          # List tasks
-pawl log <task> [--all] [--step N] # Logs
-pawl events [task] [--follow]      # Event stream
-pawl capture <task> [-l N]         # Viewport content
-pawl wait <task> --until <status>  # Poll
+pawl status [task]                 # Status (JSON)
+pawl list                          # List tasks (JSON array)
+pawl log <task> [--all] [--step N] # Logs (JSONL)
+pawl events [task] [--follow]      # Event stream (JSONL)
+pawl capture <task> [-l N]         # Viewport content (JSON)
+pawl wait <task> --until <status>  # Poll (exit code semantic)
 pawl enter <task>                  # Attach to viewport
 ```
 

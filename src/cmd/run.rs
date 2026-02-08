@@ -43,7 +43,13 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
     };
 
     // 4. Build context, expand command, prepare env vars
-    let ctx = project.context_for(task_name, Some(step_idx));
+    let mut ctx = project.context_for(task_name, Some(step_idx), &state.run_id);
+    let events = project.read_events(task_name)?;
+    let (retry_count, last_feedback) = super::common::extract_step_context(&events, step_idx);
+    ctx = ctx.var("retry_count", retry_count.to_string());
+    if let Some(fb) = &last_feedback {
+        ctx = ctx.var("last_verify_output", fb);
+    }
 
     let expanded = ctx.expand(&command);
     let env = ctx.to_env_vars();

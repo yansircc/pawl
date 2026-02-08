@@ -1,16 +1,14 @@
 use anyhow::Result;
-use chrono::Utc;
 use serde::Serialize;
 
-use crate::model::{Event, StepStatus, TaskStatus};
-
-use super::common::Project;
+use super::common::{extract_step_context, Project};
 
 /// JSON output structure for task summary
 #[derive(Serialize)]
 struct TaskSummary {
     name: String,
     status: String,
+    run_id: String,
     current_step: usize,
     total_steps: usize,
     step_name: String,
@@ -34,6 +32,7 @@ struct TaskDetail {
     description: Option<String>,
     depends: Vec<String>,
     status: String,
+    run_id: String,
     current_step: usize,
     total_steps: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,68 +57,25 @@ struct StepInfo {
 }
 
 /// Show status of all tasks or a specific task
-pub fn run(task_name: Option<&str>, json: bool) -> Result<()> {
+pub fn run(task_name: Option<&str>) -> Result<()> {
     let project = Project::load()?;
 
     if let Some(name) = task_name {
         let name = project.resolve_task_name(name)?;
-        if json {
-            show_task_detail_json(&project, &name)?;
-        } else {
-            show_task_detail(&project, &name)?;
-        }
+        show_task_detail(&project, &name)?;
     } else {
-        if json {
-            show_all_tasks_json(&project)?;
-        } else {
-            show_all_tasks(&project)?;
-        }
+        show_all_tasks(&project)?;
     }
 
     Ok(())
 }
 
 /// List all tasks (alias for status without arguments)
-pub fn list(json: bool) -> Result<()> {
-    run(None, json)
+pub fn list() -> Result<()> {
+    run(None)
 }
 
-/// Extract retry_count and last_feedback for the current step from events.
-fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option<String>) {
-    let retry_count = crate::model::event::count_auto_retries(events, step_idx);
-    let mut last_feedback: Option<String> = None;
-
-    for event in events.iter().rev() {
-        match event {
-            Event::TaskStarted { .. } | Event::TaskReset { .. } => break,
-            Event::StepReset { step, auto: false, .. } if *step == step_idx => break,
-            Event::StepFinished { step, success, stdout, stderr, verify_output, .. }
-                if *step == step_idx && !*success =>
-            {
-                if last_feedback.is_none() {
-                    let mut parts = Vec::new();
-                    if let Some(vo) = verify_output {
-                        if !vo.is_empty() { parts.push(vo.as_str()); }
-                    }
-                    if let Some(out) = stdout {
-                        if !out.is_empty() { parts.push(out.as_str()); }
-                    }
-                    if let Some(err) = stderr {
-                        if !err.is_empty() { parts.push(err.as_str()); }
-                    }
-                    if !parts.is_empty() {
-                        last_feedback = Some(parts.join("\n"));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    (retry_count, last_feedback)
-}
-
-fn show_all_tasks_json(project: &Project) -> Result<()> {
+fn show_all_tasks(project: &Project) -> Result<()> {
     let tasks = project.load_all_tasks()?;
     let workflow_len = project.config.workflow.len();
 
@@ -138,6 +94,7 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
             TaskSummary {
                 name: name.clone(),
                 status: state.status.to_string(),
+                run_id: state.run_id,
                 current_step: state.current_step,
                 total_steps: workflow_len,
                 step_name,
@@ -152,6 +109,7 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
             TaskSummary {
                 name: name.clone(),
                 status: "pending".to_string(),
+                run_id: String::new(),
                 current_step: 0,
                 total_steps: workflow_len,
                 step_name: "--".to_string(),
@@ -167,11 +125,11 @@ fn show_all_tasks_json(project: &Project) -> Result<()> {
         summaries.push(summary);
     }
 
-    println!("{}", serde_json::to_string_pretty(&summaries)?);
+    println!("{}", serde_json::to_string(&summaries)?);
     Ok(())
 }
 
-fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
+fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
     let task_def = project.load_task(task_name)?;
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
@@ -229,6 +187,7 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
             .as_ref()
             .map(|s| s.status.to_string())
             .unwrap_or_else(|| "pending".to_string()),
+        run_id: state.as_ref().map(|s| s.run_id.clone()).unwrap_or_default(),
         current_step,
         total_steps: workflow_len,
         message: state.as_ref().and_then(|s| s.message.clone()),
@@ -239,199 +198,6 @@ fn show_task_detail_json(project: &Project, task_name: &str) -> Result<()> {
         workflow: steps,
     };
 
-    println!("{}", serde_json::to_string_pretty(&detail)?);
+    println!("{}", serde_json::to_string(&detail)?);
     Ok(())
-}
-
-fn show_all_tasks(project: &Project) -> Result<()> {
-    let tasks = project.load_all_tasks()?;
-
-    if tasks.is_empty() {
-        println!("No tasks found. Create one with: pawl create <name>");
-        return Ok(());
-    }
-
-    let workflow_len = project.config.workflow.len();
-
-    // Header
-    println!(
-        "{:<15} {:<25} {:<12} {}",
-        "NAME", "STEP", "STATUS", "INFO"
-    );
-    println!("{}", "-".repeat(70));
-
-    for task_def in &tasks {
-        let name = &task_def.name;
-
-        project.detect_viewport_loss(name)?;
-        let (step_str, status_str, info) = if let Some(state) = project.replay_task(name)? {
-            let step_name = project.step_name(state.current_step).to_string();
-            let display_step = if state.status == TaskStatus::Completed {
-                workflow_len
-            } else {
-                state.current_step + 1
-            };
-            let step_str = format!("[{}/{}] {}", display_step, workflow_len, step_name);
-
-            let status_str = state.status.to_string();
-
-            let info = match state.status {
-                TaskStatus::Running => {
-                    format_duration(state.started_at)
-                }
-                TaskStatus::Waiting => {
-                    // Show waiting reason for foreman visibility
-                    if let Some(msg) = &state.message {
-                        format_waiting_reason(msg)
-                    } else {
-                        format_duration(state.started_at)
-                    }
-                }
-                TaskStatus::Failed => {
-                    state.message.clone().unwrap_or_default()
-                }
-                TaskStatus::Pending => {
-                    let blocking = project.check_dependencies(task_def)?;
-                    if !blocking.is_empty() {
-                        format!("waiting: {}", blocking.join(", "))
-                    } else {
-                        String::new()
-                    }
-                }
-                _ => String::new(),
-            };
-
-            (step_str, status_str, info)
-        } else {
-            let blocking = project.check_dependencies(task_def)?;
-            let info = if !blocking.is_empty() {
-                format!("waiting: {}", blocking.join(", "))
-            } else {
-                String::new()
-            };
-            ("--".to_string(), "pending".to_string(), info)
-        };
-
-        println!(
-            "{:<15} {:<25} {:<12} {}",
-            truncate(name, 14),
-            truncate(&step_str, 24),
-            status_str,
-            truncate(&info, 25)
-        );
-    }
-
-    Ok(())
-}
-
-fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
-    let task_def = project.load_task(task_name)?;
-    let workflow = &project.config.workflow;
-
-    println!("Task: {}", task_name);
-    println!();
-
-    if !task_def.depends.is_empty() {
-        println!("Dependencies: {}", task_def.depends.join(", "));
-    }
-
-    project.detect_viewport_loss(task_name)?;
-    let state = project.replay_task(task_name)?;
-
-    if let Some(state) = &state {
-        println!("Status: {}", state.status.to_string());
-        let display_step = if state.status == TaskStatus::Completed {
-            workflow.len()
-        } else {
-            state.current_step + 1
-        };
-        println!("Step: {}/{}", display_step, workflow.len());
-
-        if let Some(started) = state.started_at {
-            println!("Started: {}", started.format("%Y-%m-%d %H:%M:%S"));
-        }
-
-        if let Some(msg) = &state.message {
-            println!("Message: {}", msg);
-        }
-
-        println!();
-    } else {
-        println!("Status: not started");
-        println!();
-    }
-
-    println!("Workflow:");
-    for (i, step) in workflow.iter().enumerate() {
-        let current = state.as_ref().map(|s| s.current_step).unwrap_or(0);
-
-        let marker = if let Some(state) = &state {
-            if i < current {
-                if let Some(status) = state.step_status.get(&i) {
-                    match status {
-                        StepStatus::Success => "✓",
-                        StepStatus::Failed => "✗",
-                        StepStatus::Skipped => "○",
-                    }
-                } else {
-                    "✓"
-                }
-            } else if i == current {
-                "→"
-            } else {
-                " "
-            }
-        } else {
-            " "
-        };
-
-        let step_type = if step.is_gate() {
-            "(gate)"
-        } else if step.in_viewport {
-            "(in_viewport)"
-        } else {
-            ""
-        };
-
-        println!("  {} {}. {} {}", marker, i + 1, step.name, step_type);
-    }
-
-    Ok(())
-}
-
-fn format_waiting_reason(reason: &str) -> String {
-    match reason {
-        "gate" => "gate".to_string(),
-        "verify_human" => "needs review".to_string(),
-        "on_fail_human" => "needs decision".to_string(),
-        other => other.to_string(),
-    }
-}
-
-fn format_duration(started_at: Option<chrono::DateTime<Utc>>) -> String {
-    let Some(started) = started_at else {
-        return String::new();
-    };
-
-    let duration = Utc::now().signed_duration_since(started);
-    let minutes = duration.num_minutes();
-    let hours = duration.num_hours();
-
-    if hours > 0 {
-        format!("{}h {}m", hours, minutes % 60)
-    } else if minutes > 0 {
-        format!("{}m", minutes)
-    } else {
-        "< 1m".to_string()
-    }
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max_len {
-        s.to_string()
-    } else {
-        let truncated: String = chars[..max_len - 3].iter().collect();
-        format!("{}...", truncated)
-    }
 }

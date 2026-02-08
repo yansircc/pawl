@@ -19,7 +19,7 @@ struct CaptureOutput {
 }
 
 /// Capture viewport content for a task
-pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
+pub fn run(task_name: &str, lines: usize) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
@@ -34,7 +34,7 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
     let (status, current_step, step_name) = if let Some(state) = &state {
         (
             state.status.to_string(),
-            state.current_step + 1,
+            state.current_step,
             project.step_name(state.current_step).to_string(),
         )
     } else {
@@ -58,40 +58,18 @@ pub fn run(task_name: &str, lines: usize, json: bool) -> Result<()> {
         false
     };
 
-    if json {
-        let output = CaptureOutput {
-            task: task_name.clone(),
-            session: session.clone(),
-            viewport_exists,
-            process_active,
-            status,
-            current_step,
-            step_name,
-            lines,
-            content,
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        println!("Task: {}", task_name);
-        println!("Viewport: {}:{}", session, task_name);
-        println!("Status: {} (step {}: {})", status, current_step, step_name);
-        println!(
-            "Viewport: {} | Process: {}",
-            if viewport_exists { "exists" } else { "not found" },
-            if process_active { "active" } else { "idle" }
-        );
-        println!("{}", "=".repeat(60));
-
-        if viewport_exists {
-            if content.is_empty() {
-                println!("(no content)");
-            } else {
-                print!("{}", content);
-            }
-        } else {
-            println!("Viewport does not exist. Task may not have started an in_viewport step yet.");
-        }
-    }
+    let output = CaptureOutput {
+        task: task_name.clone(),
+        session: session.clone(),
+        viewport_exists,
+        process_active,
+        status,
+        current_step,
+        step_name,
+        lines,
+        content,
+    };
+    println!("{}", serde_json::to_string(&output)?);
 
     Ok(())
 }

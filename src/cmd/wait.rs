@@ -24,7 +24,7 @@ pub fn run(task_name: &str, until: &str, timeout_secs: u64, interval_ms: u64) ->
         .unwrap_or(TaskStatus::Pending);
 
     if targets.contains(&current_status) {
-        println!(
+        eprintln!(
             "Task '{}' reached status '{}' after {:.1}s",
             resolved_name,
             current_status,
@@ -80,7 +80,7 @@ fn poll_status(
             .unwrap_or(TaskStatus::Pending);
 
         if targets.contains(&current_status) {
-            println!(
+            eprintln!(
                 "Task '{}' reached status '{}' after {:.1}s",
                 task_name,
                 current_status,

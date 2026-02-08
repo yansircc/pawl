@@ -43,13 +43,15 @@ pub fn run(name: &str, description: Option<&str>, depends: Option<&str>) -> Resu
     fs::write(&task_path, content)
         .with_context(|| format!("Failed to write task file: {}", task_path.display()))?;
 
-    println!("Created task: {}", task_path.display());
+    eprintln!("Created task: {}", task_path.display());
 
-    if !depends_list.is_empty() {
-        println!("  Dependencies: {}", depends_list.join(", "));
-    }
-
-    println!("\nNext: pawl start {}", name);
+    // Output JSON
+    let json = serde_json::json!({
+        "task": name,
+        "task_file": task_path.to_string_lossy(),
+        "depends": depends_list,
+    });
+    println!("{}", json);
 
     Ok(())
 }

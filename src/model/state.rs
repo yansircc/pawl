@@ -27,6 +27,9 @@ pub struct TaskState {
     /// Optional message (e.g., failure reason)
     #[serde(default)]
     pub message: Option<String>,
+
+    /// Run ID (UUID v4) for this execution instance
+    pub run_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

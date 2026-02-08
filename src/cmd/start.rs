@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use std::os::unix::process::CommandExt as _;
 use std::time::Instant;
+use uuid::Uuid;
 
 use crate::model::config::Step;
 use crate::model::event::event_timestamp;
@@ -22,7 +23,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
         } else {
             match state.status {
                 TaskStatus::Running => {
-                    bail!("Task '{}' is already running at step {}", task_name, state.current_step + 1);
+                    bail!("Task '{}' is already running at step {}", task_name, state.current_step);
                 }
                 TaskStatus::Completed => {
                     bail!("Task '{}' is already completed. Use 'pawl reset {}' to restart or 'pawl start --reset {}'.", task_name, task_name, task_name);
@@ -32,7 +33,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
                     let reason = state.message.as_deref().unwrap_or("approval");
                     bail!(
                         "Task '{}' is waiting at step {} ({}) for {}. Use 'pawl done {}' to continue.",
-                        task_name, state.current_step + 1, step_name, reason, task_name
+                        task_name, state.current_step, step_name, reason, task_name
                     );
                 }
                 _ => {}
@@ -50,13 +51,20 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
         );
     }
 
-    // Emit TaskStarted event
-    project.append_event(&task_name, &Event::TaskStarted { ts: event_timestamp() })?;
+    // Emit TaskStarted event with run_id
+    let run_id = Uuid::new_v4().to_string();
+    project.append_event(&task_name, &Event::TaskStarted {
+        ts: event_timestamp(),
+        run_id,
+    })?;
 
-    println!("Starting task: {}", task_name);
+    eprintln!("Starting task: {}", task_name);
 
     // Execute the workflow
     execute(&project, &task_name)?;
+
+    // Output final state as JSON
+    project.output_task_state(&task_name)?;
 
     Ok(())
 }
@@ -80,11 +88,12 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
 
         // Check if we've completed all steps
         if step_idx >= workflow_len {
-            println!("Task '{}' completed!", task_name);
+            eprintln!("Task '{}' completed!", task_name);
             return Ok(());
         }
 
         let step = &project.config.workflow[step_idx];
+        let run_id = &state.run_id;
 
         // Check if this step should be skipped for this task
         if task_def.skip.contains(&step.name) {
@@ -92,7 +101,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
                 ts: event_timestamp(),
                 step: step_idx,
             })?;
-            println!(
+            eprintln!(
                 "[{}/{}] {} (skipped)",
                 step_idx + 1,
                 workflow_len,
@@ -101,9 +110,15 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             continue;
         }
 
-        let ctx = project.context_for(task_name, Some(step_idx));
+        let mut ctx = project.context_for(task_name, Some(step_idx), run_id);
+        let events = project.read_events(task_name)?;
+        let (retry_count, last_feedback) = super::common::extract_step_context(&events, step_idx);
+        ctx = ctx.var("retry_count", retry_count.to_string());
+        if let Some(fb) = &last_feedback {
+            ctx = ctx.var("last_verify_output", fb);
+        }
 
-        println!(
+        eprintln!(
             "[{}/{}] {}",
             step_idx + 1,
             workflow_len,
@@ -118,7 +133,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
                 step: step_idx,
                 reason: "gate".to_string(),
             })?;
-            println!("  → Waiting for approval. Use 'pawl done {}' to continue.", task_name);
+            eprintln!("  → Waiting for approval. Use 'pawl done {}' to continue.", task_name);
             return Ok(());
         }
 
@@ -179,12 +194,12 @@ fn execute_step(
     };
 
     if result.success {
-        println!("  ✓ Done");
+        eprintln!("  ✓ Done");
     } else {
-        println!("  ✗ Failed (exit code {})", result.exit_code);
+        eprintln!("  ✗ Failed (exit code {})", result.exit_code);
         if !result.stderr.is_empty() {
             for line in result.stderr.lines().take(5) {
-                println!("    {}", line);
+                eprintln!("    {}", line);
             }
         }
     }
@@ -270,7 +285,7 @@ fn apply_verdict(
         Verdict::Advance => {
             let new_state = project.replay_task(task_name)?.expect("Task state missing");
             if new_state.status == TaskStatus::Completed {
-                println!("Task '{}' completed!", task_name);
+                eprintln!("Task '{}' completed!", task_name);
                 return Ok(false);
             }
             Ok(true)
@@ -283,11 +298,11 @@ fn apply_verdict(
             })?;
             match *reason {
                 "verify_human" => {
-                    println!("  → Waiting for human verification. Use 'pawl done {}' to approve.", task_name);
+                    eprintln!("  → Waiting for human verification. Use 'pawl done {}' to approve.", task_name);
                 }
                 "on_fail_human" => {
-                    println!("  Verify failed. Waiting for human decision.");
-                    println!("  Use 'pawl done {}' to approve or 'pawl reset --step {}' to retry.", task_name, task_name);
+                    eprintln!("  Verify failed. Waiting for human decision.");
+                    eprintln!("  Use 'pawl done {}' to approve or 'pawl reset --step {}' to retry.", task_name, task_name);
                 }
                 _ => {}
             }
@@ -296,7 +311,7 @@ fn apply_verdict(
         Verdict::Retry => {
             let events = project.read_events(task_name)?;
             let retry_count = crate::model::event::count_auto_retries(&events, step_idx);
-            println!("  Verify failed (attempt {}/{}). Auto-retrying...",
+            eprintln!("  Verify failed (attempt {}/{}). Auto-retrying...",
                      retry_count + 1, step.effective_max_retries());
             project.append_event(task_name, &Event::StepReset {
                 ts: event_timestamp(),
@@ -307,7 +322,7 @@ fn apply_verdict(
             Ok(false)
         }
         Verdict::Fail => {
-            println!("  ✗ Failed.");
+            eprintln!("  ✗ Failed.");
             Ok(false)
         }
     }
@@ -359,7 +374,7 @@ fn launch_in_viewport(
     // If already running inside a viewport (consecutive in_viewport steps),
     // exec directly instead of sending via viewport
     if std::env::var("PAWL_IN_VIEWPORT").ok().as_deref() == Some(task_name) {
-        println!("  → exec into next in_viewport step");
+        eprintln!("  → exec into next in_viewport step");
         let err = std::process::Command::new(&wf_bin)
             .args(["_run", task_name, &step_idx.to_string()])
             .exec();
@@ -370,8 +385,8 @@ fn launch_in_viewport(
 
     project.viewport.open(task_name, ctx.get("repo_root").unwrap())?;
 
-    println!("  → Sending to {}:{}", session, task_name);
-    println!("  → Waiting for 'pawl done {}'", task_name);
+    eprintln!("  → Sending to {}:{}", session, task_name);
+    eprintln!("  → Waiting for 'pawl done {}'", task_name);
 
     project.viewport.send(task_name, &run_cmd)?;
 
@@ -393,7 +408,18 @@ fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) 
         None => Ok(VerifyResult::Passed),
         Some(v) if v == "human" => Ok(VerifyResult::HumanNeeded),
         Some(cmd) => {
-            let ctx = project.context_for(task_name, Some(step_idx));
+            let run_id = project.replay_task(task_name)
+                .ok()
+                .flatten()
+                .map(|s| s.run_id)
+                .unwrap_or_default();
+            let mut ctx = project.context_for(task_name, Some(step_idx), &run_id);
+            let events = project.read_events(task_name)?;
+            let (retry_count, last_feedback) = super::common::extract_step_context(&events, step_idx);
+            ctx = ctx.var("retry_count", retry_count.to_string());
+            if let Some(fb) = &last_feedback {
+                ctx = ctx.var("last_verify_output", fb);
+            }
             let expanded = ctx.expand(cmd);
             let env = ctx.to_env_vars();
             let result = run_command_with_env(&expanded, &env)?;

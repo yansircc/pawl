@@ -28,7 +28,7 @@ pub fn run() -> Result<()> {
         bail!(".pawl/ directory already exists. Use 'pawl reset' to reinitialize.");
     }
 
-    println!("Initializing pawl in {}...", repo_root);
+    eprintln!("Initializing pawl in {}...", repo_root);
 
     fs::create_dir_all(pawl_dir.join("tasks"))
         .context("Failed to create .pawl/tasks/ directory")?;
@@ -36,7 +36,7 @@ pub fn run() -> Result<()> {
     let config_path = pawl_dir.join("config.jsonc");
     fs::write(&config_path, DEFAULT_CONFIG)
         .context("Failed to write config.jsonc")?;
-    println!("  Created {}", config_path.display());
+    eprintln!("  Created {}", config_path.display());
 
     let skill_dir = pawl_dir.join("skills/pawl");
     let refs_dir = skill_dir.join("references");
@@ -45,7 +45,7 @@ pub fn run() -> Result<()> {
     let skill_path = skill_dir.join("SKILL.md");
     fs::write(&skill_path, PAWL_SKILL)
         .context("Failed to write SKILL.md")?;
-    println!("  Created {}", skill_path.display());
+    eprintln!("  Created {}", skill_path.display());
     for (name, content) in [
         ("author.md", SKILL_AUTHOR),
         ("orchestrate.md", SKILL_ORCHESTRATE),
@@ -53,21 +53,28 @@ pub fn run() -> Result<()> {
     ] {
         let path = refs_dir.join(name);
         fs::write(&path, content).with_context(|| format!("Failed to write {}", name))?;
-        println!("  Created {}", path.display());
+        eprintln!("  Created {}", path.display());
     }
 
     update_gitignore(&repo_root)?;
 
-    println!("\nInitialization complete!");
-    println!("\nNext steps:");
-    println!("  1. Edit .pawl/config.jsonc to customize your workflow");
-    println!("  2. Create a task: pawl create <name> [description]");
-    println!("  3. Start the task: pawl start <name>");
-    println!();
-    println!("  To use with Claude Code:");
-    println!("    mkdir -p .claude && mv .pawl/skills .claude/");
-    println!("  To use with other AI tools:");
-    println!("    Move .pawl/skills/* to your tool's skills directory");
+    eprintln!("\nInitialization complete!");
+    eprintln!("\nNext steps:");
+    eprintln!("  1. Edit .pawl/config.jsonc to customize your workflow");
+    eprintln!("  2. Create a task: pawl create <name> [description]");
+    eprintln!("  3. Start the task: pawl start <name>");
+    eprintln!();
+    eprintln!("  To use with Claude Code:");
+    eprintln!("    mkdir -p .claude && mv .pawl/skills .claude/");
+    eprintln!("  To use with other AI tools:");
+    eprintln!("    Move .pawl/skills/* to your tool's skills directory");
+
+    // Output JSON
+    let json = serde_json::json!({
+        "pawl_dir": pawl_dir.to_string_lossy(),
+        "config": config_path.to_string_lossy(),
+    });
+    println!("{}", json);
 
     Ok(())
 }
@@ -82,7 +89,7 @@ fn update_gitignore(repo_root: &str) -> Result<()> {
     };
 
     if current_content.contains(".pawl/") {
-        println!("  .gitignore already contains pawl entries");
+        eprintln!("  .gitignore already contains pawl entries");
         return Ok(());
     }
 
@@ -96,7 +103,7 @@ fn update_gitignore(repo_root: &str) -> Result<()> {
 
     fs::write(&gitignore_path, new_content)
         .context("Failed to update .gitignore")?;
-    println!("  Updated .gitignore");
+    eprintln!("  Updated .gitignore");
 
     Ok(())
 }

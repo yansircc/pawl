@@ -18,6 +18,7 @@
   // Variables (in commands and as PAWL_* env vars):
   //   ${task}  ${branch}  ${worktree}  ${session}  ${repo_root}
   //   ${step}  ${step_index}  ${base_branch}  ${log_file}  ${task_file}
+  //   ${run_id}  ${retry_count}  ${last_verify_output}
   //
   // Design rules:
   //   - in_viewport run MUST cd to working dir (cd ${worktree} && ...)

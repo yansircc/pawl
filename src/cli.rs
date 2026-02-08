@@ -10,11 +10,14 @@ use clap::{Parser, Subcommand};
 
 STATES: Pending → Running → Waiting / Completed / Failed / Stopped
 
+OUTPUT: stdout = JSON (write cmds) or JSONL (log/events). stderr = progress.
+
 VARIABLES (${var} in config, PAWL_VAR in subprocesses):
   task, branch (pawl/{task}), worktree, session, repo_root,
-  step, step_index (0-based), base_branch, log_file, task_file
+  step, step_index (0-based), base_branch, log_file, task_file, run_id,
+  retry_count (auto retries for current step), last_verify_output (last failure output)
 
-INDEXING: 0-based in programmatic interfaces. 1-based in human-readable output.
+INDEXING: 0-based in all programmatic output. 1-based only in stderr progress.
 
 FILES:
   .pawl/config.jsonc      Workflow config (pawl init)
@@ -60,7 +63,7 @@ ON RETRY: append fix guidance to end of task file (don't overwrite — preserves
     },
 
     /// Show task status
-    #[command(after_help = r#"--json fields: name, status, current_step (0-based), total_steps,
+    #[command(after_help = r#"Fields: name, status, current_step (0-based), total_steps,
 step_name, message, blocked_by, retry_count, last_feedback.
 With task arg: adds description, depends, workflow[{index, name, status, step_type}].
 retry_count = auto retries only. last_feedback stops at task_reset.
@@ -68,9 +71,6 @@ step_type: "gate" / "in_viewport" / omitted. Optional fields omitted when null."
     Status {
         /// Task name (optional, shows all if omitted)
         task: Option<String>,
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
     },
 
     /// Stop a running task
@@ -102,9 +102,6 @@ step_type: "gate" / "in_viewport" / omitted. Optional fields omitted when null."
         /// Number of lines to capture (default: 50)
         #[arg(short, long, default_value = "50")]
         lines: usize,
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
     },
 
     /// Wait for task to reach a specific status
@@ -123,8 +120,8 @@ step_type: "gate" / "in_viewport" / omitted. Optional fields omitted when null."
         interval: u64,
     },
 
-    /// Show task logs
-    #[command(after_help = "--all: current run events. --all-runs: full history.\n--step N: specific step (0-based). --jsonl: raw JSONL (pipe to jq).")]
+    /// Show task logs (JSONL output)
+    #[command(after_help = "--all: current run events. --all-runs: full history.\n--step N: specific step (0-based). Output is JSONL (pipe to jq).")]
     Log {
         /// Task name
         task: String,
@@ -137,9 +134,6 @@ step_type: "gate" / "in_viewport" / omitted. Optional fields omitted when null."
         /// Show all events across all runs (including before resets)
         #[arg(long)]
         all_runs: bool,
-        /// Output raw JSONL (pipe to jq for queries)
-        #[arg(long)]
-        jsonl: bool,
     },
 
     /// Stream events from all (or specified) tasks in real-time

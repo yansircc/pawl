@@ -24,7 +24,7 @@ pub fn run(task_name: &str) -> Result<()> {
     // Attach to the viewport
     project.viewport.attach(&task_name)?;
 
-    println!("Switched to {}:{}", session, task_name);
+    eprintln!("Switched to {}:{}", session, task_name);
 
     Ok(())
 }

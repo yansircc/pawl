@@ -27,7 +27,7 @@ pub fn stop(task_name: &str) -> Result<()> {
     let session = project.session_name();
 
     if project.viewport.exists(&task_name) {
-        println!("Sending interrupt to {}:{}...", session, task_name);
+        eprintln!("Sending interrupt to {}:{}...", session, task_name);
         project.viewport.send(&task_name, "\x03")?;
     }
 
@@ -36,8 +36,10 @@ pub fn stop(task_name: &str) -> Result<()> {
         step: state.current_step,
     })?;
 
-    println!("Task '{}' stopped.", task_name);
-    println!("Use 'pawl reset --step {}' to retry or 'pawl reset {}' to restart.", task_name, task_name);
+    eprintln!("Task '{}' stopped.", task_name);
+
+    // Output final state as JSON
+    project.output_task_state(&task_name)?;
 
     Ok(())
 }
@@ -79,7 +81,7 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             auto: false,
         })?;
 
-        println!("Reset step {}: {}", step_idx + 1, project.step_name(step_idx));
+        eprintln!("Reset step {}: {}", step_idx + 1, project.step_name(step_idx));
         resume_workflow(&project, &task_name)?;
     } else {
         // Full task reset
@@ -90,14 +92,14 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
 
         if is_running {
             if project.viewport.exists(&task_name) {
-                println!("Stopping task viewport...");
+                eprintln!("Stopping task viewport...");
                 project.viewport.send(&task_name, "\x03")?;
             }
         }
 
         project.append_event(&task_name, &Event::TaskReset { ts: event_timestamp() })?;
 
-        println!("Task '{}' reset to initial state.", task_name);
+        eprintln!("Task '{}' reset to initial state.", task_name);
 
         // Only show git cleanup hints if resources actually exist
         let worktree_path = project.worktree_path(&task_name);
@@ -105,15 +107,18 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
         let worktree_exists = worktree_path.exists();
         let branch_exists = crate::util::git::branch_exists(&branch_name);
         if worktree_exists || branch_exists {
-            println!("Note: Git resources are NOT automatically cleaned. Clean up manually:");
+            eprintln!("Note: Git resources are NOT automatically cleaned. Clean up manually:");
             if worktree_exists {
-                println!("  git worktree remove {} --force", worktree_path.display());
+                eprintln!("  git worktree remove {} --force", worktree_path.display());
             }
             if branch_exists {
-                println!("  git branch -D {}", branch_name);
+                eprintln!("  git branch -D {}", branch_name);
             }
         }
     }
+
+    // Output final state as JSON
+    project.output_task_state(&task_name)?;
 
     Ok(())
 }
