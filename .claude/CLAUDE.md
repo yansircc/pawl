@@ -10,62 +10,35 @@ Shell's missing `yield`. A single binary that turns any shell pipeline into a re
 state = replay(log)
 ```
 
-Everything else derives from this. Append-only JSONL is the only truth. No caches, no `status.json`, no separate state. Break this and nothing works; hold this and everything follows.
+Append-only JSONL is the only truth. No caches, no `status.json`, no separate state. Break this and nothing works; hold this and everything follows.
 
 ### Three Generative Principles
 
-Pawl's design rules aren't a checklist — they share three generators. Each generator eliminates a class of bugs, not an instance.
+1. **Separate what from where** — Recording (what happened) and routing (what to do next) are orthogonal. Each event type has exactly one emission point — two code paths emitting the same event means one is wrong.
+2. **Derive, don't write** — If two artifacts must stay in sync, they're one artifact. If you change one and must remember to change another, delete one. The best refactoring deletes code.
+3. **Trust the substrate** — File system, JSONL, Unix exit codes, tmux — don't rebuild what already works. Build only coroutine semantics, viewport abstraction, failure routing algebra.
 
-**1. Separate what from where** — Observe first, then route. Never mix.
-
-Recording (what happened) and routing (what to do next) are orthogonal. `settle_step()` embodies this: combine → `decide()` → `apply_verdict()`. The `decide()` function is pure — 2 params, 6 rules, zero IO. Recording is unconditional; routing is the only branch.
-
-Corollary: each event type has exactly one emission point. If you find two code paths emitting the same event, one is wrong.
-
-**2. Derive, don't write** — If two artifacts must stay in sync, they're one artifact.
-
-`Display`/`FromStr` replace hand-written format/parse pairs. `Project::context_for()` replaces 4 × 15-line Context constructions. `Project::step_name()` replaces 6+ inline boundary checks. The rule: if you change one and must remember to change another, delete one.
-
-Corollary: the best refactoring deletes code. Every intermediate layer is a decision you're making for the caller — and you make it worse than they would.
-
-**3. Trust the substrate** — Don't build what already works.
-
-The file system is already a database. JSONL is already a state machine. Unix exit codes are already a verdict protocol. `grep` is 50 years old and still sufficient. Build only what the substrate can't do: the coroutine resume semantics, the viewport abstraction, the failure routing algebra. Everything else, delegate.
-
-Corollary: the right abstraction is discovered by deletion, not designed by addition.
-
-**Stop condition: less-is-more** — The generators produce structure; this constrains it.
-
-Every mechanism must justify itself by current usage, not design aesthetics. The generators can always find another separation, derivation, or substrate to trust — each locally coherent, globally accumulating complexity. Less-is-more is the discriminator: if no code path consumes a structure, delete it. Elegance that serves no current user is complexity.
-
-Two operational rules:
-- **Dedup benefit ∝ change frequency**. Stable facts (step properties, frontmatter fields) belong inline at consumption points. Only volatile facts (CLI syntax, external tool flags) justify pointers.
-- **Each mechanism exists only in its responsibility scope**. Errors report. Status routes. Write commands confirm. When a mechanism crosses its scope boundary, it creates redundant emission points.
+**Stop condition: less-is-more** — If no code path consumes a structure, delete it. Each mechanism exists only in its responsibility scope: errors report, status routes, write commands confirm. Crossing scope boundaries creates redundant emission points.
 
 ### Invariant Rules
 
-From the three generators, five operational rules follow:
-
-1. **Memory = append-only log**. `state = replay(log)`, no separate storage. *(from: trust the substrate)*
-2. **Cursor moves forward monotonically**. `current_step` only increases, except on explicit Reset. *(from: separate what from where)*
-3. **Verdict before advance**. Cursor advances only after success/failure is determined. *(from: separate what from where)*
-4. **Two authorities per decision point**. Machine (exit code) or manual (`pawl done`), never both. *(from: derive, don't write — one source of truth per decision)*
-5. **Failure is routable**. Failure → retry | yield | terminate. *(from: trust the substrate — exit codes + routing algebra)*
+1. **Memory = append-only log**. No separate storage.
+2. **Cursor moves forward monotonically**. Except on explicit Reset.
+3. **Verdict before advance**. Cursor advances only after success/failure is determined.
+4. **Two authorities per decision point**. Machine (exit code) or manual (`pawl done`), never both.
+5. **Failure is routable**. Failure → retry | yield | terminate.
 
 ### Agent-First Interface
 
-pawl is a coroutine, not a daemon — it yields and waits for external resumption. The consumer is always an agent (AI or script), never a human reading terminal output. Three layers make the CLI self-describing:
-
-1. **Structured output**: stdout = JSON/JSONL, stderr = progress. No `--json` flags — JSON is the only format, not an option.
-2. **Typed errors**: `PawlError` → plain text stderr + exit codes 2-7. Agents read the message; exit codes provide machine-readable signal.
-3. **Status-driven routing**: `pawl status` includes `suggest` (mechanical commands) and `prompt` (requires judgment). Routing lives only in status output — errors report, they don't route.
-4. **Agent UX ≠ Human UX**: Agents consume pre-loaded context (SKILL.md), not interactive help (`-h`). Progressive disclosure is a human pattern — agents want flat, complete, searchable. Each role reference is self-contained for its core facts.
+1. **Structured output**: stdout = JSON/JSONL, stderr = progress. JSON is the only format, not an option.
+2. **Typed errors**: `PawlError` → plain text stderr + exit codes 2-7 (StateConflict=2, Precondition=3, NotFound=4, AlreadyExists=5, Validation=6, Timeout=7). Internal errors remain anyhow (exit 1).
+3. **Status-driven routing**: `pawl status` includes `suggest` (mechanical) and `prompt` (requires judgment). Routing lives only in status — errors report, they don't route.
+4. **Agent UX ≠ Human UX**: Agents consume SKILL.md, not `-h`.
 
 ### Coding Conventions
 
 - **Step indexing**: 0-based in all programmatic interfaces. 1-based only in stderr progress.
-- **stdout = JSON, stderr = progress**. Write commands output `output_task_state()` JSON. Read commands output JSON/JSONL directly. Task identifier field is `"name"` (not `"task"`).
-- **Typed errors**: `PawlError` → plain text stderr + exit codes 2-7 (StateConflict=2, Precondition=3, NotFound=4, AlreadyExists=5, Validation=6, Timeout=7). Internal errors remain anyhow (exit 1). Routing (suggest/prompt) only in `pawl status` output via `derive_routing()` in status.rs.
+- **stdout = JSON, stderr = progress**. Task identifier field is `"name"` (not `"task"`).
 - **Zero warnings**. Dead code is deleted, not suppressed.
 - **`cargo install --path .` after build**. PATH uses the installed binary.
 - **Tests cover decision logic**: Pure functions (`decide()`) get unit tests. IO is verified via E2E.
@@ -90,7 +63,7 @@ src/
 │   ├── start.rs         # pawl start (execution engine, settle_step pipeline)
 │   ├── status.rs        # pawl status / pawl list (+ derive_routing for suggest/prompt)
 │   ├── control.rs       # pawl stop/reset
-│   ├── run.rs           # pawl _run (in_viewport parent process, replaces runner script + trap)
+│   ├── run.rs           # pawl _run (in_viewport parent process)
 │   ├── done.rs          # pawl done (approve waiting step or complete in_viewport step)
 │   ├── wait.rs          # pawl wait (poll via Project API)
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
@@ -99,7 +72,7 @@ src/
 │       ├── config.jsonc           # Empty scaffold with vars hint
 │       ├── pawl-skill.md          # SKILL.md: orientation + role routing
 │       ├── author.md              # Role: task authoring guide
-│       ├── orchestrate.md         # Role: workflow design, recipes, Claude CLI
+│       ├── orchestrate.md         # Role: workflow design, recipes
 │       ├── supervise.md           # Role: polling and troubleshooting
 │       └── claude-driver.sh       # Claude Code adapter (start + read)
 ├── viewport/
@@ -108,7 +81,7 @@ src/
 └── util/
     ├── project.rs       # get_project_root (.pawl/ walk-up), validate_task_name
     ├── shell.rs         # run_command variants, CommandResult
-    └── variable.rs      # Context (builder pattern), expand(), to_env_vars(), get(), var_owned()
+    └── variable.rs      # Context (builder pattern), expand(), to_env_vars()
 ```
 
 ## Core Concepts
@@ -120,192 +93,42 @@ src/
 - **on_fail**: `"retry"` for auto-retry (up to max_retries), `"manual"` to wait for decision
 - **skip** (per-task): Task frontmatter `skip: [step_name, ...]` auto-skips listed steps
 
-## Config (`.pawl/config.jsonc`)
-
-```typescript
-{
-  session?: string,         // tmux session name (default: project dir name)
-  viewport?: string,        // default: "tmux"
-  vars?: Record<string, string>,  // user-defined variables (expanded in order)
-  workflow: Step[],         // required
-  on?: Record<string, string>     // event hooks (key = Event serde tag)
-}
-
-// Step
-{
-  name: string,             // required
-  run?: string,             // shell command (omit for gate step)
-  in_viewport?: boolean,    // default: false
-  verify?: string,          // "manual" or shell command (must exit 0)
-  on_fail?: string,         // "retry" or "manual"
-  max_retries?: number      // default: 3 (when on_fail="retry")
-}
-```
-
-## Task Definition (`.pawl/tasks/{task}.md`)
-
-```yaml
----
-name: my-task
-depends:
-  - other-task
-skip:
-  - cleanup        # skip this workflow step for this task
----
-
-Task description in markdown.
-```
-
-## Variables
-
-### Intrinsic Variables
-
-Built-in, always available as `${var}` in config and as `PAWL_VAR` env vars in subprocesses.
-
-| Variable | Env Var | Value |
-|----------|---------|-------|
-| `${task}` | `PAWL_TASK` | Task name |
-| `${session}` | `PAWL_SESSION` | Tmux session name |
-| `${project_root}` | `PAWL_PROJECT_ROOT` | `.pawl/` parent directory |
-| `${step}` | `PAWL_STEP` | Current step name |
-| `${step_index}` | `PAWL_STEP_INDEX` | Current step index (0-based) |
-| `${log_file}` | `PAWL_LOG_FILE` | `.pawl/logs/{task}.jsonl` |
-| `${task_file}` | `PAWL_TASK_FILE` | `.pawl/tasks/{task}.md` |
-| `${run_id}` | `PAWL_RUN_ID` | UUID v4 for current run |
-| `${retry_count}` | `PAWL_RETRY_COUNT` | Auto-retry count for current step |
-| `${last_verify_output}` | `PAWL_LAST_VERIFY_OUTPUT` | Last failure output (verify/stdout/stderr) |
-
-### User Variables (`config.vars`)
-
-Defined in `config.vars`, expanded in definition order. Later vars can reference earlier vars and intrinsics. Example for git worktree workflows:
-
-```jsonc
-"vars": {
-  "base_branch": "main",
-  "branch": "pawl/${task}",
-  "worktree": "${project_root}/.pawl/worktrees/${task}"
-}
-```
-
-Two-layer model: `${var}` expanded by pawl (static), `$ENV_VAR` expanded by shell (dynamic).
-
 ## State Machine
 
 **TaskStatus**: `Pending` → `Running` → `Waiting` / `Completed` / `Failed` / `Stopped`
 
 **StepStatus**: `Success` | `Failed` | `Skipped`
 
-**Step indexing**: All programmatic interfaces use **0-based** step indices (JSONL events, JSON output, `--step` filter, env vars). 1-based only in stderr progress messages (`[1/5] build`).
-
 ## Event Sourcing
 
-JSONL is the **single source of truth** — no `status.json`. State is reconstructed via `replay()`.
+JSONL per-task log (`.pawl/logs/{task}.jsonl`) is the **single source of truth**. State is reconstructed via `replay()`.
 
-Per-task event log: `.pawl/logs/{task}.jsonl`
+10 event types: `task_started`, `step_finished`, `step_yielded`, `step_resumed`, `viewport_launched`, `step_skipped`, `step_reset`, `task_stopped`, `task_reset`, `viewport_lost`.
 
-10 event types:
-- `task_started` — initializes Running, step=0
-- `step_finished` — success=true ? Success+advance : Failed (unified: sync, _run, done, verify failure). Includes `verify_output` for verify failures.
-- `step_yielded` — step paused, waiting for approval (reason: "gate"/"verify_manual"/"on_fail_manual")
-- `step_resumed` — approval granted, advance step. Includes `message` from `pawl done -m`.
-- `viewport_launched` — Running (in_viewport step sent to tmux)
-- `step_skipped` — Skipped+advance
-- `step_reset` — reset step to Running (auto=true for retry, auto=false for manual)
-- `task_stopped` — Stopped
-- `task_reset` — clears all state (replay restarts)
-- `viewport_lost` — safety net: viewport gone AND `_run` didn't settle (crash/SIGKILL). Normal viewport kill → `_run` catches child exit → `step_finished(exit_code=128)`. Only fires via passive detection (`pawl status`/`wait`/`list`).
+Auto-completion: `current_step >= workflow_len` → replay derives `Completed`. Event hooks: `config.on` maps event type names to shell commands, auto-fired in `append_event()`.
 
-Auto-completion: when `current_step >= workflow_len`, replay derives `Completed`.
-
-Event hooks: `config.on` maps event type names to shell commands. Hooks are auto-fired in `append_event()` — no manual trigger needed. Event-specific variables (`${success}`, `${exit_code}`, `${duration}`, `${auto}`, `${reason}`) are injected alongside standard context variables.
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `pawl init` | Initialize project |
-| `pawl create <name> [desc] [--depends a,b]` | Create task |
-| `pawl list` | List all tasks |
-| `pawl start <task> [--reset]` | Start task execution (--reset auto-resets first) |
-| `pawl status [task]` | Show status (JSON to stdout) |
-| `pawl stop <task>` | Stop task (Running or Waiting) |
-| `pawl reset <task>` | Reset to initial state |
-| `pawl reset --step <task>` | Retry current step |
-| `pawl wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
-| `pawl log <task> [--step N] [--all]` | View logs as JSONL (default=last event, --all=current run) |
-| `pawl events [task] [--follow] [--type types]` | Unified event stream (--follow, --type filter) |
-| `pawl done <task> [-m msg]` | Mark step done / approve |
-
-## Execution Flow
-
-```
-start(task)
-  └─ execute loop:
-     ├─ Skip check (task.skip contains step.name) → StepSkipped, continue
-     ├─ Gate step (no run) → StepYielded, return (wait for pawl done)
-     ├─ Normal step → run sync → settle_step
-     └─ in_viewport step → send `pawl _run task step` to tmux → return (wait for pawl done/_run completion)
-
-settle_step(record, step):
-  1. combine: (exit_code, verify) → Outcome (Success/ManualNeeded/Failure)
-  2. derive_fail_policy: Step config + retry state → FailPolicy
-  3. decide(outcome, policy) → Verdict (pure function, 6 rules)
-  4. apply_verdict: unconditionally record StepFinished, then route (Advance/Yield/Retry/Fail)
-
-decide(outcome, policy) → Verdict (pure function, 6 rules):
-  ├─ Success → Advance
-  ├─ ManualNeeded → Yield("verify_manual")
-  ├─ Failure + Retry(can_retry) → Retry
-  ├─ Failure + Retry(!can_retry) → Fail
-  ├─ Failure + Manual → Yield("on_fail_manual")
-  └─ Failure + Terminal → Fail
-
-context_for(task, step, run_id):
-  1. Build intrinsic vars (task, session, project_root, step, ...)
-  2. Expand config.vars in definition order (earlier vars available to later)
-  3. Return unified Context
-
-done(task)
-  ├─ Running: settle_step (emits StepFinished inside)
-  │   └─ retry? keep viewport : kill viewport
-  └─ Waiting: emit StepResumed → resume_workflow
-
-_run(task, step_idx)  [runs inside viewport as parent process]
-  ├─ ignore SIGHUP, fork child (bash -c command), waitpid
-  ├─ redirect stdout/stderr → /dev/null (pty may be gone)
-  ├─ re-check state (pawl done may have already handled)
-  └─ if still Running at step_idx → settle_step
-  Note: _run is resilient — SIGHUP-immune, always settles via step_finished.
-  Viewport kill → child signal death → _run catches → step_finished(exit_code=128).
-  viewport_lost only fires when _run itself is killed/crashed (safety net).
-
-detect_viewport_loss(task_name) → bool:
-  └─ Running + in_viewport + viewport gone → emit ViewportLost, return false
-  Passive — only checked by status/wait/list. If _run already settled, state ≠ Running, no-op.
-```
-
-## File System Layout
-
-```
-.pawl/
-├── config.jsonc              # Workflow configuration (with vars)
-├── tasks/                    # Task definitions (markdown + YAML frontmatter)
-│   └── {task}.md
-├── logs/                     # Event logs (JSONL) — single source of truth
-│   └── {task}.jsonl
-└── skills/pawl/              # Skill reference (pawl init generates)
-    ├── SKILL.md              # Orientation + role routing
-    └── references/           # Role-specific guides + agent driver
-        ├── author.md         # Writing effective tasks
-        ├── orchestrate.md    # Designing workflows + Claude Code CLI
-        ├── supervise.md      # Polling and troubleshooting
-        └── claude-driver.sh  # Agent driver: Claude Code launch script
-```
-
-## Dev Commands
+## Dev & Test
 
 ```bash
-cargo build               # Build
-cargo install --path .     # Install to ~/.cargo/bin
-cargo test                 # Run tests
+cargo build && cargo install --path .    # Build + install
+cargo test                               # Unit tests (decide() logic)
 ```
+
+E2E tests (require tmux):
+
+| Script | Tests | What | Cost |
+|--------|-------|------|------|
+| `tests/e2e.sh` | 72 | Sync workflows | Free |
+| `tests/e2e-viewport.sh` | 27 | Viewport lifecycle | Free |
+| `tests/e2e-agent.sh` | 9 | Real haiku agents | ~$0.05 |
+
+## Session Start
+
+1. Read `.claude/HANDOFF.md` — 上次 session 做了什么、pending 问题、key file index
+2. Read `MEMORY.md` — 实战教训和陷阱（viewport 时序、pipe 退出码、测试踩坑等）
+3. `git status` + `git log --oneline -5` — 当前状态
+
+## Common Traps
+
+- **类比推理**：不要因为 A 做了 X 就假设 B 也该做 X。先问 A **为什么**做 X，再看 B 是否有相同的 why。
+- **职责越界**：每个机制只在自己的 scope 内操作。当你想在 A 里加 B 的逻辑时，问"这是 A 的职责吗？"
