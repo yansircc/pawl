@@ -11,6 +11,7 @@ const PAWL_SKILL: &str = include_str!("templates/pawl-skill.md");
 const SKILL_AUTHOR: &str = include_str!("templates/author.md");
 const SKILL_ORCHESTRATE: &str = include_str!("templates/orchestrate.md");
 const SKILL_SUPERVISE: &str = include_str!("templates/supervise.md");
+const SKILL_CLAUDE_DRIVER: &str = include_str!("templates/claude-driver.sh");
 
 const GITIGNORE_ENTRIES: &str = r#"
 # pawl - Resumable Step Sequencer
@@ -56,9 +57,17 @@ pub fn run() -> Result<()> {
         ("author.md", SKILL_AUTHOR),
         ("orchestrate.md", SKILL_ORCHESTRATE),
         ("supervise.md", SKILL_SUPERVISE),
+        ("claude-driver.sh", SKILL_CLAUDE_DRIVER),
     ] {
         let path = refs_dir.join(name);
         fs::write(&path, content).with_context(|| format!("Failed to write {}", name))?;
+        #[cfg(unix)]
+        if name.ends_with(".sh") {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&path)?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms)?;
+        }
         eprintln!("  Created {}", path.display());
     }
 

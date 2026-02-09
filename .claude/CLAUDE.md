@@ -102,7 +102,8 @@ src/
 │       ├── pawl-skill.md          # SKILL.md: orientation + role routing
 │       ├── author.md              # Role: task authoring guide
 │       ├── orchestrate.md         # Role: workflow design, recipes, Claude CLI
-│       └── supervise.md           # Role: polling and troubleshooting
+│       ├── supervise.md           # Role: polling and troubleshooting
+│       └── claude-driver.sh       # Agent driver: Claude Code launch script
 ├── viewport/
 │   ├── mod.rs           # Viewport trait (open/execute/read/exists/is_active/close/attach)
 │   └── tmux.rs          # TmuxViewport implementation
@@ -298,10 +299,11 @@ detect_viewport_loss(task_name) → bool:
 │   └── {task}.jsonl
 └── skills/pawl/              # Skill reference (pawl init generates)
     ├── SKILL.md              # Orientation + role routing
-    └── references/           # Role-specific guides (progressive disclosure)
+    └── references/           # Role-specific guides + agent driver
         ├── author.md         # Writing effective tasks
         ├── orchestrate.md    # Designing workflows + Claude Code CLI
-        └── supervise.md      # Polling and troubleshooting
+        ├── supervise.md      # Polling and troubleshooting
+        └── claude-driver.sh  # Agent driver: Claude Code launch script
 ```
 
 ## Dev Commands

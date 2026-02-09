@@ -71,9 +71,94 @@ Event types: `task_started`, `step_finished` (+`${success}` `${exit_code}` `${du
 
 ## Config Recipes
 
+### Plain Workflow
+
+The simplest config — steps run in project root. No vars, no git, no isolation.
+
+```jsonc
+{
+  "workflow": [
+    { "name": "build",  "run": "npm run build", "on_fail": "retry" },
+    { "name": "review" },
+    { "name": "deploy", "run": "npm run deploy" }
+  ]
+}
+```
+
+Add `vars` when paths repeat, `in_viewport` for long-running commands, `verify` for automated checks. Each is orthogonal — compose as needed.
+
+### Work Steps: 2 Dimensions
+
+Two orthogonal choices:
+
+| | auto verify | manual verify |
+|---|---|---|
+| **viewport** | `"in_viewport": true, "verify": "<test>", "on_fail": "retry"` | `"in_viewport": true, "verify": "manual", "on_fail": "manual"` |
+| **sync** | `"on_fail": "retry"` | `"verify": "manual"` |
+
+### Agent Driver
+
+A driver is a shell script that bridges pawl with an agent CLI. Four operations:
+
+- **start**: Launch agent. Prompt via stdin, retry feedback via `$PAWL_LAST_VERIFY_OUTPUT`.
+- **send**: Send instruction to running agent (tmux send-keys).
+- **stop**: Terminate running agent.
+- **read**: Read agent output/logs.
+
+```jsonc
+{ "name": "develop", "run": "cat $PAWL_TASK_FILE | .pawl/drivers/my-agent.sh start",
+  "in_viewport": true, "verify": "<test>", "on_fail": "retry" }
+```
+
+```bash
+#!/usr/bin/env bash
+# .pawl/drivers/my-agent.sh — start/send/stop/read
+set -euo pipefail
+case "${1:?Usage: $0 start|send|stop|read}" in
+  start)
+    if [ "${PAWL_RETRY_COUNT:-0}" -gt 0 ]; then
+      <agent-cli> "Fix: ${PAWL_LAST_VERIFY_OUTPUT:-verify failed}"
+    else
+      <agent-cli>  # reads prompt from stdin
+    fi ;;
+  send)  shift; tmux send-keys -t "$PAWL_SESSION:$PAWL_TASK" "$*" Enter ;;
+  stop)  tmux send-keys -t "$PAWL_SESSION:$PAWL_TASK" C-c ;;
+  read)  <agent-log-command> ;;
+esac
+```
+
+Prompt flows via stdin — compose in the `run` command: `cat $PAWL_TASK_FILE | driver start`, `echo "custom" | driver start`, or pipe any generator. See `references/claude-driver.sh` for a ready-to-use Claude Code driver with session resume.
+
+### Retry Feedback Loop
+
+On retry, `$PAWL_RETRY_COUNT` and `$PAWL_LAST_VERIFY_OUTPUT` are automatically available. Use `PAWL_RETRY_COUNT` to detect retries (more reliable than checking if verify output is non-empty):
+
+```bash
+# In driver script:
+if [ "${PAWL_RETRY_COUNT:-0}" -gt 0 ]; then
+  <agent-cli> "Fix: ${PAWL_LAST_VERIFY_OUTPUT:-verify failed}"
+else
+  <agent-cli>  # first run
+fi
+# Session resume: claude -r $PAWL_RUN_ID (run_id is stable across retries within a run)
+```
+
+### Multi-Step Composition
+
+Split work into sequential steps with different verify strategies (e.g. plan → execute):
+
+```jsonc
+{ "name": "plan",    "run": "<agent> --plan-only",
+  "in_viewport": true, "verify": "manual", "on_fail": "manual" },
+{ "name": "develop", "run": "<agent> --execute",
+  "in_viewport": true, "verify": "<test>", "on_fail": "retry" }
+```
+
+Plan rejection: `pawl reset --step` on the plan step.
+
 ### Git Worktree Skeleton
 
-Define git vars in `config.vars`, then use them in workflow steps. Replace `⟨work⟩` with work steps below. Omit `review` gate if work step already has `"verify": "manual"`.
+For git-based projects needing task isolation via worktrees. Define git vars in `config.vars`, then use them in workflow steps. Replace `⟨work⟩` with work steps above. Omit `review` gate if work step already has `"verify": "manual"`.
 
 ```jsonc
 {
@@ -94,53 +179,6 @@ Define git vars in `config.vars`, then use them in workflow steps. Replace `⟨w
 
 Multi-task: `pawl start task-a && pawl start task-b` — each gets independent JSONL/worktree/viewport. Non-git: omit `vars` and setup/merge/cleanup; use your own init/teardown.
 
-### Work Steps: 2 Dimensions
-
-All work steps with git worktree start with `"run": "cd ${worktree} && <command>"`. Two orthogonal choices:
-
-| | auto verify | manual verify |
-|---|---|---|
-| **viewport** | `"in_viewport": true, "verify": "<test>", "on_fail": "retry"` | `"in_viewport": true, "verify": "manual", "on_fail": "manual"` |
-| **sync** | `"on_fail": "retry"` | `"verify": "manual"` |
-
-### Retry Feedback Loop
-
-On retry, `$PAWL_RETRY_COUNT` and `$PAWL_LAST_VERIFY_OUTPUT` are automatically available:
-
-```bash
-# In step run command:
-if [ -n "$PAWL_LAST_VERIFY_OUTPUT" ]; then
-  <agent-cli> "Fix: $PAWL_LAST_VERIFY_OUTPUT"
-else
-  <agent-cli> "$(cat $PAWL_TASK_FILE)"
-fi
-# Session resume: claude -r $PAWL_RUN_ID (run_id is stable across retries within a run)
-```
-
-### AI Worker Pattern
-
-Any non-interactive CLI works. pawl provides `$PAWL_TASK_FILE` (prompt) and `$PAWL_LOG_FILE` (feedback):
-
-```jsonc
-{ "name": "develop", "run": "cd ${worktree} && cat $PAWL_TASK_FILE | <agent-cli>",
-  "in_viewport": true, "verify": "cd ${worktree} && <test>", "on_fail": "retry" }
-```
-
-Compose with retry feedback loop for auto-fix on failure.
-
-### Multi-Step Composition
-
-Split work into sequential steps with different verify strategies (e.g. plan → execute):
-
-```jsonc
-{ "name": "plan",    "run": "cd ${worktree} && <agent> --plan-only",
-  "in_viewport": true, "verify": "manual", "on_fail": "manual" },
-{ "name": "develop", "run": "cd ${worktree} && <agent> --execute",
-  "in_viewport": true, "verify": "cd ${worktree} && <test>", "on_fail": "retry" }
-```
-
-Plan rejection: `pawl reset --step` on the plan step.
-
 ## Claude Code CLI for Workflows
 
 Workflow-essential flags (full reference: `claude --help`):
@@ -159,24 +197,20 @@ Workflow-essential flags (full reference: `claude --help`):
 | `--json-schema '{...}'` | Force structured JSON output (validated against schema) |
 | `--tools "Bash,Read,Edit"` | Restrict available tools (empty `""` = no tools) |
 
-### Instantiation: Worker with Session Resume
+### Instantiation: Claude Code Driver
 
-Compose the generic AI Worker Pattern + Retry Feedback Loop with Claude Code.
-`$PAWL_RUN_ID` (UUID v4) is stable across retries within a run — use it directly as session ID:
+Copy `references/claude-driver.sh` to `.pawl/drivers/claude.sh`. The driver uses `$PAWL_RUN_ID` as session ID — first run via `--session-id`, retries via `-r` (full context preserved).
 
-```bash
-# pawl work step run command:
-cd ${worktree} && \
-if [ -n "$PAWL_LAST_VERIFY_OUTPUT" ]; then
-  claude -p "Fix: $PAWL_LAST_VERIFY_OUTPUT" -r $PAWL_RUN_ID
-else
-  cat $PAWL_TASK_FILE | claude -p --session-id $PAWL_RUN_ID
-fi
+```jsonc
+{ "name": "develop", "run": "cat $PAWL_TASK_FILE | .pawl/drivers/claude.sh start",
+  "in_viewport": true, "verify": "<test>", "on_fail": "retry" }
 ```
 
-- First run: `--session-id $PAWL_RUN_ID` starts a session keyed to this pawl run
-- Retry: `-r $PAWL_RUN_ID` resumes session context, `$PAWL_LAST_VERIFY_OUTPUT` has failure output
-- No file management needed — pawl provides the stable handle
+Reduce system prompt tokens (~13x) with:
+
+```bash
+--tools "Bash,Write" --setting-sources "" --mcp-config '{"mcpServers":{}}' --disable-slash-commands
+```
 
 ### Instantiation: Plan-Then-Execute
 
