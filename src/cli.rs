@@ -57,21 +57,6 @@ pub enum Command {
         step: bool,
     },
 
-    /// Enter task viewport
-    Enter {
-        /// Task name
-        task: String,
-    },
-
-    /// Capture viewport content
-    Capture {
-        /// Task name
-        task: String,
-        /// Number of lines to capture (default: 50)
-        #[arg(short, long, default_value = "50")]
-        lines: usize,
-    },
-
     /// Wait for task to reach a specific status
     Wait {
         /// Task name

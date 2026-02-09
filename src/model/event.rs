@@ -33,6 +33,8 @@ pub enum Event {
     StepResumed {
         ts: DateTime<Utc>,
         step: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
     ViewportLaunched {
         ts: DateTime<Utc>,
@@ -113,6 +115,11 @@ impl Event {
             Event::StepYielded { reason, .. } => {
                 vars.insert("reason".to_string(), reason.clone());
             }
+            Event::StepResumed { message, .. } => {
+                if let Some(msg) = message {
+                    vars.insert("message".to_string(), msg.clone());
+                }
+            }
             Event::StepReset { auto, .. } => {
                 vars.insert("auto".to_string(), auto.to_string());
             }
@@ -169,7 +176,7 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
                 s.status = TaskStatus::Waiting;
                 s.message = Some(reason.clone());
             }
-            Event::StepResumed { ts, step } => {
+            Event::StepResumed { ts, step, .. } => {
                 let Some(s) = state.as_mut() else { continue };
                 s.updated_at = Some(*ts);
                 s.step_status.insert(*step, StepStatus::Success);
@@ -294,7 +301,7 @@ mod tests {
         assert_eq!(state.message.as_deref(), Some("gate"));
 
         let mut events2 = events;
-        events2.push(Event::StepResumed { ts: ts(), step: 0 });
+        events2.push(Event::StepResumed { ts: ts(), step: 0, message: None });
         let state = replay(&events2, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Running);
         assert_eq!(state.current_step, 1);
@@ -456,7 +463,7 @@ mod tests {
                 duration: None, stdout: None, stderr: None, verify_output: None,
             },
             Event::StepYielded { ts: ts(), step: 0, reason: "gate".to_string() },
-            Event::StepResumed { ts: ts(), step: 0 },
+            Event::StepResumed { ts: ts(), step: 0, message: None },
             Event::ViewportLaunched { ts: ts(), step: 0 },
             Event::StepSkipped { ts: ts(), step: 0 },
             Event::StepReset { ts: ts(), step: 0, auto: false },

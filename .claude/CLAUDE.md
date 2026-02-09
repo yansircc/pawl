@@ -75,7 +75,7 @@ pawl is a coroutine, not a daemon — it yields and waits for external resumptio
 ```
 src/
 ├── main.rs              # Entry point, PawlError → text stderr + exit code
-├── cli.rs               # clap CLI (14 subcommands)
+├── cli.rs               # clap CLI (12 subcommands)
 ├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
 │   ├── config.rs        # Config + Step structs, JSONC loader, vars (IndexMap)
@@ -92,9 +92,7 @@ src/
 │   ├── control.rs       # pawl stop/reset
 │   ├── run.rs           # pawl _run (in_viewport parent process, replaces runner script + trap)
 │   ├── done.rs          # pawl done (approve waiting step or complete in_viewport step)
-│   ├── capture.rs       # pawl capture (tmux content)
 │   ├── wait.rs          # pawl wait (poll via Project API)
-│   ├── enter.rs         # pawl enter (attach to viewport)
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all, JSONL output)
 │   └── templates/       # Template files embedded via include_str!
@@ -103,9 +101,9 @@ src/
 │       ├── author.md              # Role: task authoring guide
 │       ├── orchestrate.md         # Role: workflow design, recipes, Claude CLI
 │       ├── supervise.md           # Role: polling and troubleshooting
-│       └── claude-driver.sh       # Agent driver: Claude Code launch script
+│       └── claude-driver.sh       # Claude Code adapter (start + read)
 ├── viewport/
-│   ├── mod.rs           # Viewport trait (open/execute/read/exists/is_active/close/attach)
+│   ├── mod.rs           # Viewport trait (open/execute/exists/close)
 │   └── tmux.rs          # TmuxViewport implementation
 └── util/
     ├── project.rs       # get_project_root (.pawl/ walk-up), validate_task_name
@@ -209,7 +207,7 @@ Per-task event log: `.pawl/logs/{task}.jsonl`
 - `task_started` — initializes Running, step=0
 - `step_finished` — success=true ? Success+advance : Failed (unified: sync, _run, done, verify failure). Includes `verify_output` for verify failures.
 - `step_yielded` — step paused, waiting for approval (reason: "gate"/"verify_manual"/"on_fail_manual")
-- `step_resumed` — approval granted, advance step
+- `step_resumed` — approval granted, advance step. Includes `message` from `pawl done -m`.
 - `viewport_launched` — Running (in_viewport step sent to tmux)
 - `step_skipped` — Skipped+advance
 - `step_reset` — reset step to Running (auto=true for retry, auto=false for manual)
@@ -233,8 +231,6 @@ Event hooks: `config.on` maps event type names to shell commands. Hooks are auto
 | `pawl stop <task>` | Stop task (Running or Waiting) |
 | `pawl reset <task>` | Reset to initial state |
 | `pawl reset --step <task>` | Retry current step |
-| `pawl enter <task>` | Attach to viewport |
-| `pawl capture <task> [-l N]` | Capture tmux content (JSON to stdout) |
 | `pawl wait <task> --until <status>[,status2] [-t sec]` | Wait for status (multi-status) |
 | `pawl log <task> [--step N] [--all]` | View logs as JSONL (default=last event, --all=current run) |
 | `pawl events [task] [--follow] [--type types]` | Unified event stream (--follow, --type filter) |

@@ -64,6 +64,7 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
             project.append_event(&task_name, &Event::StepResumed {
                 ts: event_timestamp(),
                 step: step_idx,
+                message: message.map(|s| s.to_string()),
             })?;
 
             eprintln!("Step {} approved.", step_idx + 1);

@@ -66,43 +66,8 @@ impl Viewport for TmuxViewport {
         Ok(())
     }
 
-    fn read(&self, name: &str, lines: usize) -> Result<Option<String>> {
-        if !self.window_exists_raw(name) {
-            return Ok(None);
-        }
-
-        let start = -(lines as i64);
-        let cmd = format!(
-            "tmux capture-pane -t '{}:{}' -p -J -S {}",
-            self.session, name, start
-        );
-        let result = run_command(&cmd)?;
-        if result.success {
-            Ok(Some(result.stdout))
-        } else {
-            Ok(None)
-        }
-    }
-
     fn exists(&self, name: &str) -> bool {
         self.window_exists_raw(name)
-    }
-
-    fn is_active(&self, name: &str) -> bool {
-        let cmd = format!(
-            "tmux list-panes -t '{}:{}' -F '#{{pane_current_command}}' 2>/dev/null",
-            self.session, name
-        );
-        if let Ok(result) = run_command(&cmd) {
-            if result.success {
-                let cmd_name = result.stdout.trim();
-                !matches!(cmd_name, "bash" | "zsh" | "sh" | "fish" | "")
-            } else {
-                false
-            }
-        } else {
-            false
-        }
     }
 
     fn close(&self, name: &str) -> Result<()> {
@@ -112,13 +77,6 @@ impl Viewport for TmuxViewport {
         let cmd = format!("tmux kill-window -t '{}:{}'", self.session, name);
         run_command(&cmd)
             .with_context(|| format!("Failed to kill window: {}:{}", self.session, name))?;
-        Ok(())
-    }
-
-    fn attach(&self, name: &str) -> Result<()> {
-        let cmd = format!("tmux select-window -t '{}:{}'", self.session, name);
-        run_command(&cmd)
-            .with_context(|| format!("Failed to select window: {}:{}", self.session, name))?;
         Ok(())
     }
 }

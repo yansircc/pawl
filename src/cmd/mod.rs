@@ -1,9 +1,7 @@
-pub mod capture;
 pub mod common;
 pub mod control;
 pub mod create;
 pub mod done;
-pub mod enter;
 pub mod events;
 pub mod init;
 pub mod log;
@@ -26,8 +24,6 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Status { task } => status::run(task.as_deref()),
         Command::Stop { task } => control::stop(&task),
         Command::Reset { task, step } => control::reset(&task, step),
-        Command::Enter { task } => enter::run(&task),
-        Command::Capture { task, lines } => capture::run(&task, lines),
         Command::Wait { task, until, timeout, interval } => {
             wait::run(&task, &until, timeout, interval)
         }

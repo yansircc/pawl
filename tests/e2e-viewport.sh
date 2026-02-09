@@ -242,65 +242,6 @@ test_vp_loss_recovery() {
   assert_json "$out" ".status" "completed"
 }
 
-test_vp_capture_content() {
-  setup_vp_project "cap-content" '{"workflow":[{"name":"echo","run":"echo PAWL_MARKER_12345; sleep 60","in_viewport":true}]}'
-  create_task t1
-  pawl start t1 >/dev/null 2>&1
-  wait_status t1 "running" 5 || return 1
-  sleep 0.8
-  local out
-  out=$(pawl capture t1 2>/dev/null)
-  assert_json "$out" ".viewport_exists" "true" || return 1
-  local content
-  content=$(echo "$out" | jq -r '.content')
-  assert_contains "$content" "PAWL_MARKER_12345" || return 1
-  pawl done t1 >/dev/null 2>&1 || true
-}
-
-test_vp_capture_no_viewport() {
-  setup_vp_project "cap-none" '{"workflow":[{"name":"work","run":"true","in_viewport":true}]}'
-  create_task t1
-  local out
-  out=$(pawl capture t1 2>/dev/null)
-  assert_json "$out" ".viewport_exists" "false"
-}
-
-test_vp_capture_active() {
-  setup_vp_project "cap-active" '{"workflow":[{"name":"work","run":"sleep 60","in_viewport":true}]}'
-  create_task t1
-  pawl start t1 >/dev/null 2>&1
-  wait_status t1 "running" 5 || return 1
-  sleep 0.3
-  local out
-  out=$(pawl capture t1 2>/dev/null)
-  assert_json "$out" ".viewport_exists" "true" || return 1
-  assert_json "$out" ".process_active" "true" || return 1
-  pawl done t1 >/dev/null 2>&1
-  sleep 0.2
-  out=$(pawl capture t1 2>/dev/null)
-  assert_json "$out" ".viewport_exists" "false"
-}
-
-test_vp_enter() {
-  setup_vp_project "enter-ok" '{"workflow":[{"name":"work","run":"sleep 60","in_viewport":true}]}'
-  create_task t1
-  pawl start t1 >/dev/null 2>&1
-  wait_status t1 "running" 5 || return 1
-  sleep 0.3
-  local rc=0
-  pawl enter t1 >/dev/null 2>&1 || rc=$?
-  assert_exit 0 "$rc" || return 1
-  pawl done t1 >/dev/null 2>&1 || true
-}
-
-test_vp_enter_no_viewport() {
-  setup_vp_project "enter-none" '{"workflow":[{"name":"work","run":"true","in_viewport":true}]}'
-  create_task t1
-  local rc=0
-  pawl enter t1 >/dev/null 2>&1 || rc=$?
-  assert_exit 4 "$rc"
-}
-
 test_vp_stop() {
   setup_vp_project "stop" '{"workflow":[{"name":"work","run":"sleep 60","in_viewport":true}]}'
   create_task t1
@@ -558,11 +499,6 @@ TESTS=(
   "test_vp_on_fail_manual|viewport on_fail=manual → waiting → done accepts"
   "test_vp_loss_detected|viewport loss → failed"
   "test_vp_loss_recovery|viewport loss → reset --step → re-executes"
-  "test_vp_capture_content|capture content contains marker"
-  "test_vp_capture_no_viewport|capture pending → viewport_exists=false"
-  "test_vp_capture_active|capture active → process_active=true, after done → viewport gone"
-  "test_vp_enter|enter viewport → exit 0"
-  "test_vp_enter_no_viewport|enter no viewport → exit 4"
   "test_vp_stop|stop running viewport → stopped"
   "test_vp_env_vars|PAWL_ env vars available in viewport"
   "test_vp_consecutive|consecutive in_viewport steps → exec chain"
