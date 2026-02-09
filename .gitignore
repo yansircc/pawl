@@ -1,3 +1,4 @@
 /target
-.claude/
+.DS_Store
+.claude/HANDOFF.md
 .pawl/

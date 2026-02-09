@@ -7,7 +7,7 @@
 #   TUI:   { "run": ".pawl/drivers/claude.sh", ... }
 #
 # Reduce system prompt tokens (~13x):
-#   --tools "Bash,Write" --setting-sources "" --mcp-config '{"mcpServers":{}}' --disable-slash-commands
+#   --model haiku --system-prompt "Reply concisely" --tools "Bash,Write" --setting-sources "" --mcp-config '{"mcpServers":{}}' --disable-slash-commands
 set -euo pipefail
 
 case "${1:-start}" in
