@@ -115,10 +115,8 @@ impl Event {
             Event::StepYielded { reason, .. } => {
                 vars.insert("reason".to_string(), reason.clone());
             }
-            Event::StepResumed { message, .. } => {
-                if let Some(msg) = message {
-                    vars.insert("message".to_string(), msg.clone());
-                }
+            Event::StepResumed { message: Some(msg), .. } => {
+                vars.insert("message".to_string(), msg.clone());
             }
             Event::StepReset { auto, .. } => {
                 vars.insert("auto".to_string(), auto.to_string());
@@ -219,11 +217,10 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
     }
 
     // Auto-derive Completed when all steps done
-    if let Some(s) = state.as_mut() {
-        if s.current_step >= workflow_len && s.status == TaskStatus::Running {
+    if let Some(s) = state.as_mut()
+        && s.current_step >= workflow_len && s.status == TaskStatus::Running {
             s.status = TaskStatus::Completed;
         }
-    }
 
     state
 }

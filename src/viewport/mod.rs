@@ -17,7 +17,7 @@ pub trait Viewport {
 pub fn create_viewport(backend: &str, session: &str) -> Result<Box<dyn Viewport>> {
     match backend {
         "tmux" => Ok(Box::new(tmux::TmuxViewport::new(session))),
-        other => return Err(PawlError::Validation {
+        other => Err(PawlError::Validation {
             message: format!("Unsupported viewport backend: {}", other),
         }.into()),
     }

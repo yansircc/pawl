@@ -61,44 +61,35 @@ pub fn run(task_filter: Option<&str>, follow: bool, type_filter: Option<&str>) -
     watcher.watch(&logs_dir, RecursiveMode::NonRecursive)?;
 
     // Poll for events
-    loop {
-        match rx.recv() {
-            Ok(event) => {
-                if !matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
+    while let Ok(event) = rx.recv() {
+        if !matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
+            continue;
+        }
+
+        for path in &event.paths {
+            let Some(ext) = path.extension() else {
+                continue;
+            };
+            if ext != "jsonl" {
+                continue;
+            }
+
+            let task_name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Apply task filter
+            if let Some(ref filter) = task_filter
+                && task_name != *filter {
                     continue;
                 }
 
-                for path in &event.paths {
-                    let Some(ext) = path.extension() else {
-                        continue;
-                    };
-                    if ext != "jsonl" {
-                        continue;
-                    }
-
-                    let task_name = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-
-                    // Apply task filter
-                    if let Some(ref filter) = task_filter {
-                        if task_name != *filter {
-                            continue;
-                        }
-                    }
-
-                    let offset = file_offsets.get(path).copied().unwrap_or(0);
-                    match print_events_from_file(&task_name, path, offset, type_set.as_deref()) {
-                        Ok(new_offset) => {
-                            file_offsets.insert(path.clone(), new_offset);
-                        }
-                        Err(_) => {}
-                    }
-                }
+            let offset = file_offsets.get(path).copied().unwrap_or(0);
+            if let Ok(new_offset) = print_events_from_file(&task_name, path, offset, type_set.as_deref()) {
+                file_offsets.insert(path.clone(), new_offset);
             }
-            Err(_) => break,
         }
     }
 
@@ -130,11 +121,10 @@ fn discover_log_files(
             .unwrap_or("")
             .to_string();
 
-        if let Some(filter) = task_filter {
-            if task_name != filter {
+        if let Some(filter) = task_filter
+            && task_name != filter {
                 continue;
             }
-        }
 
         files.push((task_name, path));
     }
@@ -177,17 +167,15 @@ fn print_events_from_file(task_name: &str, path: &std::path::Path, offset: u64, 
         // Apply type filter if present
         if let Some(types) = type_filter {
             // Extract "type":"..." from JSON line
-            if let Some(type_val) = extract_json_type(line) {
-                if !types.contains(&type_val) {
+            if let Some(type_val) = extract_json_type(line)
+                && !types.contains(&type_val) {
                     continue;
                 }
-            }
         }
 
         // Inject "name" field into the JSON object
-        if line.starts_with('{') {
-            // Insert task name as the first field
-            println!("{{\"name\":\"{}\",{}", task_name, &line[1..]);
+        if let Some(rest) = line.strip_prefix('{') {
+            println!("{{\"name\":\"{}\",{}", task_name, rest);
         } else {
             println!("{}", line);
         }

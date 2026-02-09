@@ -98,16 +98,11 @@ mod tests {
             .var("project_root", "/home/user/project")
             .var("step", "Develop")
             .var("step_index", "1")
-            .var("log_file", "/home/user/project/.pawl/logs/auth.jsonl")
-            .var("task_file", "/home/user/project/.pawl/tasks/auth.md");
+            .var("log_file", "/home/user/project/.pawl/logs/auth.jsonl");
 
         assert_eq!(
             ctx.expand("${log_file}"),
             "/home/user/project/.pawl/logs/auth.jsonl"
-        );
-        assert_eq!(
-            ctx.expand("${task_file}"),
-            "/home/user/project/.pawl/tasks/auth.md"
         );
         assert_eq!(ctx.expand("${step_index}"), "1");
         assert_eq!(
@@ -124,14 +119,12 @@ mod tests {
             .var("project_root", "/home/user/project")
             .var("step", "Setup")
             .var("step_index", "1")
-            .var("log_file", "/logs/auth.jsonl")
-            .var("task_file", "/tasks/auth.md");
+            .var("log_file", "/logs/auth.jsonl");
 
         let env = ctx.to_env_vars();
         assert_eq!(env.get("PAWL_TASK"), Some(&"auth".to_string()));
         assert_eq!(env.get("PAWL_PROJECT_ROOT"), Some(&"/home/user/project".to_string()));
         assert_eq!(env.get("PAWL_LOG_FILE"), Some(&"/logs/auth.jsonl".to_string()));
-        assert_eq!(env.get("PAWL_TASK_FILE"), Some(&"/tasks/auth.md".to_string()));
         assert_eq!(env.get("PAWL_STEP_INDEX"), Some(&"1".to_string()));
     }
 

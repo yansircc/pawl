@@ -6,19 +6,13 @@ use crate::error::PawlError;
 
 use super::common::PAWL_DIR;
 
-const DEFAULT_CONFIG: &str = include_str!("templates/config.jsonc");
-const PAWL_SKILL: &str = include_str!("templates/pawl-skill.md");
-const SKILL_AUTHOR: &str = include_str!("templates/author.md");
-const SKILL_ORCHESTRATE: &str = include_str!("templates/orchestrate.md");
-const SKILL_SUPERVISE: &str = include_str!("templates/supervise.md");
-const SKILL_CLAUDE_DRIVER: &str = include_str!("templates/claude-driver.sh");
+const DEFAULT_CONFIG: &str = include_str!("templates/config.json");
+const README: &str = include_str!("templates/readme.md");
 
 const GITIGNORE_ENTRIES: &str = r#"
 # pawl - Resumable Step Sequencer
 .pawl/*
-!.pawl/tasks/
-!.pawl/config.jsonc
-!.pawl/skills/
+!.pawl/config.json
 "#;
 
 pub fn run() -> Result<()> {
@@ -37,52 +31,25 @@ pub fn run() -> Result<()> {
 
     eprintln!("Initializing pawl in {}...", project_root);
 
-    fs::create_dir_all(pawl_dir.join("tasks"))
-        .context("Failed to create .pawl/tasks/ directory")?;
+    fs::create_dir_all(&pawl_dir)
+        .context("Failed to create .pawl/ directory")?;
 
-    let config_path = pawl_dir.join("config.jsonc");
+    let config_path = pawl_dir.join("config.json");
     fs::write(&config_path, DEFAULT_CONFIG)
-        .context("Failed to write config.jsonc")?;
+        .context("Failed to write config.json")?;
     eprintln!("  Created {}", config_path.display());
 
-    let skill_dir = pawl_dir.join("skills/pawl");
-    let refs_dir = skill_dir.join("references");
-    fs::create_dir_all(&refs_dir)
-        .context("Failed to create .pawl/skills/pawl/references/ directory")?;
-    let skill_path = skill_dir.join("SKILL.md");
-    fs::write(&skill_path, PAWL_SKILL)
-        .context("Failed to write SKILL.md")?;
-    eprintln!("  Created {}", skill_path.display());
-    for (name, content) in [
-        ("author.md", SKILL_AUTHOR),
-        ("orchestrate.md", SKILL_ORCHESTRATE),
-        ("supervise.md", SKILL_SUPERVISE),
-        ("claude-driver.sh", SKILL_CLAUDE_DRIVER),
-    ] {
-        let path = refs_dir.join(name);
-        fs::write(&path, content).with_context(|| format!("Failed to write {}", name))?;
-        #[cfg(unix)]
-        if name.ends_with(".sh") {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&path)?.permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&path, perms)?;
-        }
-        eprintln!("  Created {}", path.display());
-    }
+    let readme_path = pawl_dir.join("README.md");
+    fs::write(&readme_path, README)
+        .context("Failed to write README.md")?;
+    eprintln!("  Created {}", readme_path.display());
 
     update_gitignore(&project_root);
 
     eprintln!("\nInitialization complete!");
     eprintln!("\nNext steps:");
-    eprintln!("  1. Edit .pawl/config.jsonc to customize your workflow");
-    eprintln!("  2. Create a task: pawl create <name> [description]");
-    eprintln!("  3. Start the task: pawl start <name>");
-    eprintln!();
-    eprintln!("  To use with Claude Code:");
-    eprintln!("    mkdir -p .claude && mv .pawl/skills .claude/");
-    eprintln!("  To use with other AI tools:");
-    eprintln!("    Move .pawl/skills/* to your tool's skills directory");
+    eprintln!("  1. Edit .pawl/config.json to define your workflow");
+    eprintln!("  2. Start a task: pawl start <name>");
 
     // Output JSON
     let json = serde_json::json!({
@@ -117,8 +84,7 @@ fn update_gitignore(project_root: &str) {
         format!("{}\n{}", current_content, GITIGNORE_ENTRIES)
     };
 
-    match fs::write(&gitignore_path, new_content) {
-        Ok(()) => eprintln!("  Updated .gitignore"),
-        Err(_) => {} // Best-effort: silently skip if can't write
+    if let Ok(()) = fs::write(&gitignore_path, new_content) {
+        eprintln!("  Updated .gitignore");
     }
 }

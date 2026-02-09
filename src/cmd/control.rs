@@ -119,12 +119,11 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             .map(|s| s.status == TaskStatus::Running)
             .unwrap_or(false);
 
-        if is_running {
-            if project.viewport.exists(&task_name) {
+        if is_running
+            && project.viewport.exists(&task_name) {
                 eprintln!("Stopping task viewport...");
                 project.viewport.execute(&task_name, "\x03")?;
             }
-        }
 
         project.append_event(&task_name, &Event::TaskReset { ts: event_timestamp() })?;
 

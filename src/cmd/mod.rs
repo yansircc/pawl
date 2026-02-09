@@ -1,6 +1,5 @@
 pub mod common;
 pub mod control;
-pub mod create;
 pub mod done;
 pub mod events;
 pub mod init;
@@ -16,9 +15,6 @@ use anyhow::Result;
 pub fn dispatch(cmd: Command) -> Result<()> {
     match cmd {
         Command::Init => init::run(),
-        Command::Create { name, description, depends } => {
-            create::run(&name, description.as_deref(), depends.as_deref())
-        }
         Command::List => status::list(),
         Command::Start { task, reset } => start::run(&task, reset),
         Command::Status { task } => status::run(task.as_deref()),

@@ -14,7 +14,6 @@ use super::common::Project;
 pub fn run(task_name: &str, reset: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
-    let task_def = project.load_task(&task_name)?;
 
     // Check if task is already running
     if let Some(state) = project.replay_task(&task_name)? {
@@ -52,7 +51,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
     }
 
     // Check dependencies
-    let blocking = project.check_dependencies(&task_def)?;
+    let blocking = project.check_dependencies(&task_name)?;
     if !blocking.is_empty() {
         return Err(PawlError::Precondition {
             message: format!("Task '{}' is blocked by incomplete dependencies: {}", task_name, blocking.join(", ")),
@@ -84,7 +83,10 @@ pub fn resume_workflow(project: &Project, task_name: &str) -> Result<()> {
 
 /// Execute workflow steps starting from current_step
 fn execute(project: &Project, task_name: &str) -> Result<()> {
-    let task_def = project.load_task(task_name)?;
+    let skip_list: Vec<String> = project
+        .task_config(task_name)
+        .map(|tc| tc.skip.clone())
+        .unwrap_or_default();
 
     loop {
         // Replay to get current state
@@ -104,7 +106,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         let run_id = &state.run_id;
 
         // Check if this step should be skipped for this task
-        if task_def.skip.contains(&step.name) {
+        if skip_list.contains(&step.name) {
             project.append_event(task_name, &Event::StepSkipped {
                 ts: event_timestamp(),
                 step: step_idx,

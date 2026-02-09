@@ -105,13 +105,10 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
         stderr: None,
     };
 
-    match settle_step(&project, task_name, step_idx, &step, record)? {
-        true => {
-            // Pipeline says continue — check if next step is also in_viewport
-            // If so, execute() will detect PAWL_IN_VIEWPORT and exec into next pawl _run
-            resume_workflow(&project, task_name)?;
-        }
-        false => {}
+    if settle_step(&project, task_name, step_idx, &step, record)? {
+        // Pipeline says continue — check if next step is also in_viewport
+        // If so, execute() will detect PAWL_IN_VIEWPORT and exec into next pawl _run
+        resume_workflow(&project, task_name)?;
     }
 
     Ok(())
@@ -122,7 +119,7 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
 /// would cause a broken pipe panic in Rust's println! macro.
 fn redirect_to_devnull() {
     unsafe {
-        let devnull = libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_WRONLY);
+        let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
         if devnull >= 0 {
             libc::dup2(devnull, libc::STDOUT_FILENO);
             libc::dup2(devnull, libc::STDERR_FILENO);

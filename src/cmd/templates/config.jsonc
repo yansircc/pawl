@@ -1,6 +1,0 @@
-{
-  // User-defined variables — see orchestrate.md for recipes.
-  // "vars": { "branch": "pawl/${task}", "worktree": "${project_root}/.pawl/worktrees/${task}" },
-  // Design your workflow — see orchestrate.md for step properties, variables, and recipes.
-  "workflow": []
-}

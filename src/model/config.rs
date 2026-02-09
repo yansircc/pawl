@@ -3,8 +3,18 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read as _;
+
 use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TaskConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skip: Vec<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -19,6 +29,10 @@ pub struct Config {
     /// User-defined variables (expanded in definition order)
     #[serde(default)]
     pub vars: IndexMap<String, String>,
+
+    /// Per-task metadata (description, depends, skip)
+    #[serde(default)]
+    pub tasks: IndexMap<String, TaskConfig>,
 
     /// Workflow steps
     pub workflow: Vec<Step>,
@@ -72,9 +86,9 @@ impl Step {
 }
 
 impl Config {
-    /// Load config from .pawl/config.jsonc
+    /// Load config from .pawl/config.json
     pub fn load<P: AsRef<Path>>(pawl_dir: P) -> Result<Self> {
-        let config_path = pawl_dir.as_ref().join("config.jsonc");
+        let config_path = pawl_dir.as_ref().join("config.json");
         Self::load_from(&config_path)
     }
 
@@ -86,15 +100,9 @@ impl Config {
         Self::from_str(&content)
     }
 
-    /// Parse config from JSONC string
+    /// Parse config from JSON string
     pub fn from_str(content: &str) -> Result<Self> {
-        // Strip comments using json_comments crate
-        let mut stripped = String::new();
-        json_comments::StripComments::new(content.as_bytes())
-            .read_to_string(&mut stripped)
-            .context("Failed to strip comments from JSONC")?;
-
-        let config: Self = serde_json::from_str(&stripped).context("Failed to parse config JSON")?;
+        let config: Self = serde_json::from_str(content).context("Failed to parse config JSON")?;
 
         for step in &config.workflow {
             if step.run.is_none() && (step.verify.is_some() || step.on_fail.is_some()) {

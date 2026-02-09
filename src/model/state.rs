@@ -85,7 +85,7 @@ impl std::str::FromStr for TaskStatus {
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
             "stopped" => Ok(Self::Stopped),
-            _ => return Err(PawlError::Validation {
+            _ => Err(PawlError::Validation {
                 message: format!("Invalid status '{}'. Valid values: pending, running, waiting, completed, failed, stopped", s),
             }.into()),
         }

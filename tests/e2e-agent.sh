@@ -70,23 +70,14 @@ setup_agent_project() {
   mkdir -p "$dir"
   cd "$dir"
   pawl init >/dev/null 2>&1
-  echo "$config" | jq --arg s "$session" '. + {session: $s}' > .pawl/config.jsonc
+  echo "$config" | jq --arg s "$session" '. + {session: $s}' > .pawl/config.json
 }
 
 create_task() {
   local name="$1"
-  local body="${2:-}"
-  if [ -n "$body" ]; then
-    echo "$body" > ".pawl/tasks/${name}.md"
-  else
-    cat > ".pawl/tasks/${name}.md" <<EOF
----
-name: ${name}
----
-
-Task ${name}
-EOF
-  fi
+  local empty='{}'
+  local opts="${2:-$empty}"
+  python3 -c "import json,sys; c=json.load(open('.pawl/config.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/config.json','w'),indent=2)" "$name" "$opts"
 }
 
 wait_status() {
@@ -99,19 +90,18 @@ wait_status() {
   fi
 }
 
-# Call supervisor agent: reads supervise.md, executes pawl commands
+# Call supervisor agent: executes pawl commands following routing hints
 # Uses --output-format stream-json --verbose for observability
 # Uses --max-budget-usd to cap runaway costs
 call_supervisor() {
   local project_dir="$1" prompt="$2" max_time="${3:-30}"
-  local supervise_md
-  supervise_md="$(cat "${project_dir}/.pawl/skills/pawl/references/supervise.md" 2>/dev/null || true)"
+  local sys_prompt="You are a pawl supervisor. pawl commands: 'pawl status <task>' shows status with suggest/prompt routing hints. 'pawl done <task>' approves a waiting step. 'pawl reset --step <task>' retries a failed step. Follow the suggest (mechanical) and prompt (judgment) fields from status output."
 
   run_with_timeout "$max_time" "$CCC" -p \
     --model haiku \
     --tools "Bash" \
     --permission-mode "bypassPermissions" \
-    --system-prompt "$supervise_md" \
+    --system-prompt "$sys_prompt" \
     --setting-sources "" --strict-mcp-config \
     --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
     --output-format stream-json --verbose \

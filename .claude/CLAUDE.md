@@ -48,18 +48,16 @@ Append-only JSONL is the only truth. No caches, no `status.json`, no separate st
 ```
 src/
 ├── main.rs              # Entry point, PawlError → text stderr + exit code
-├── cli.rs               # clap CLI (12 subcommands)
+├── cli.rs               # clap CLI (11 subcommands)
 ├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
-│   ├── config.rs        # Config + Step structs, JSONC loader, vars (IndexMap)
+│   ├── config.rs        # Config + TaskConfig + Step structs, JSON loader, vars (IndexMap)
 │   ├── event.rs         # Event enum (10 variants), replay(), count_auto_retries()
-│   ├── state.rs         # TaskState, TaskStatus (Display+FromStr), StepStatus (Display)
-│   └── task.rs          # TaskDefinition + YAML frontmatter parser (with skip)
+│   └── state.rs         # TaskState, TaskStatus (Display+FromStr), StepStatus (Display)
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
 │   ├── common.rs        # Project context, event IO, output_task_state
-│   ├── init.rs          # pawl init (scaffold, uses include_str! for templates)
-│   ├── create.rs        # pawl create (improved task template)
+│   ├── init.rs          # pawl init (config.json + README.md scaffold)
 │   ├── start.rs         # pawl start (execution engine, settle_step pipeline)
 │   ├── status.rs        # pawl status / pawl list (+ derive_routing for suggest/prompt)
 │   ├── control.rs       # pawl stop/reset
@@ -69,17 +67,13 @@ src/
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all, JSONL output)
 │   └── templates/       # Template files embedded via include_str!
-│       ├── config.jsonc           # Empty scaffold with vars hint
-│       ├── pawl-skill.md          # SKILL.md: orientation + role routing
-│       ├── author.md              # Role: task authoring guide
-│       ├── orchestrate.md         # Role: workflow design, recipes
-│       ├── supervise.md           # Role: polling and troubleshooting
-│       └── claude-driver.sh       # Claude Code adapter (start + read)
+│       ├── config.json            # Empty scaffold
+│       └── readme.md              # README.md: pawl reference
 ├── viewport/
 │   ├── mod.rs           # Viewport trait (open/execute/exists/close)
 │   └── tmux.rs          # TmuxViewport implementation
 └── util/
-    ├── project.rs       # get_project_root (.pawl/ walk-up), validate_task_name
+    ├── project.rs       # get_project_root (.pawl/ walk-up)
     ├── shell.rs         # run_command variants, CommandResult
     └── variable.rs      # Context (builder pattern), expand(), to_env_vars()
 ```
@@ -91,7 +85,7 @@ src/
 - **in_viewport**: Runs command in viewport, waits for `pawl done`
 - **Verify**: `"manual"` for manual approval, or a shell command (must exit 0)
 - **on_fail**: `"retry"` for auto-retry (up to max_retries), `"manual"` to wait for decision
-- **skip** (per-task): Task frontmatter `skip: [step_name, ...]` auto-skips listed steps
+- **skip** (per-task): `config.json` tasks section `"skip": ["step_name"]` auto-skips listed steps
 
 ## State Machine
 
@@ -118,7 +112,7 @@ E2E tests (require tmux):
 
 | Script | Tests | What | Cost |
 |--------|-------|------|------|
-| `tests/e2e.sh` | 72 | Sync workflows | Free |
+| `tests/e2e.sh` | 68 | Sync workflows | Free |
 | `tests/e2e-viewport.sh` | 27 | Viewport lifecycle | Free |
 | `tests/e2e-agent.sh` | 9 | Real haiku agents | ~$0.05 |
 

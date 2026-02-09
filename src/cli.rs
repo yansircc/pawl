@@ -13,17 +13,6 @@ pub enum Command {
     /// Initialize a new workflow project
     Init,
 
-    /// Create a new task
-    Create {
-        /// Task name
-        name: String,
-        /// Task description (optional)
-        description: Option<String>,
-        /// Comma-separated list of task dependencies
-        #[arg(short, long)]
-        depends: Option<String>,
-    },
-
     /// List all tasks
     List,
 

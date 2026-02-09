@@ -67,23 +67,14 @@ setup_vp_project() {
   mkdir -p "$dir"
   cd "$dir"
   pawl init >/dev/null 2>&1
-  echo "$config" | jq --arg s "$session" '. + {session: $s}' > .pawl/config.jsonc
+  echo "$config" | jq --arg s "$session" '. + {session: $s}' > .pawl/config.json
 }
 
 create_task() {
   local name="$1"
-  local body="${2:-}"
-  if [ -n "$body" ]; then
-    echo "$body" > ".pawl/tasks/${name}.md"
-  else
-    cat > ".pawl/tasks/${name}.md" <<EOF
----
-name: ${name}
----
-
-Task ${name}
-EOF
-  fi
+  local empty='{}'
+  local opts="${2:-$empty}"
+  python3 -c "import json,sys; c=json.load(open('.pawl/config.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/config.json','w'),indent=2)" "$name" "$opts"
 }
 
 wait_status() {
@@ -320,12 +311,7 @@ test_vp_done_message_gate() {
 
 test_vp_skip() {
   setup_vp_project "skip-vp" '{"workflow":[{"name":"dangerous","run":"sleep 60","in_viewport":true},{"name":"fin","run":"true"}]}'
-  create_task t1 "---
-name: t1
-skip:
-  - dangerous
----
-Task t1"
+  create_task t1 '{"skip":["dangerous"]}'
   local out
   out=$(pawl start t1 2>/dev/null)
   assert_json "$out" ".status" "completed" || return 1
@@ -505,7 +491,7 @@ TESTS=(
   "test_vp_consecutive_three|three consecutive in_viewport steps"
   "test_vp_done_message|done -m records message in log"
   "test_vp_done_message_gate|done -m on gate step (sync)"
-  "test_vp_skip|skip in_viewport step via frontmatter"
+  "test_vp_skip|skip in_viewport step via config tasks"
   "test_vp_hook_viewport_launched|hook viewport_launched fires"
   "test_vp_hook_viewport_lost|hook viewport_lost fires"
   "test_vp_verify_fail_retry|viewport verify fail triggers retry"

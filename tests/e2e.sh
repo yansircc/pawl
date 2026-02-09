@@ -92,25 +92,19 @@ setup_project() {
   mkdir -p "$dir"
   cd "$dir"
   pawl init >/dev/null 2>&1
-  echo "$config" > .pawl/config.jsonc
+  echo "$config" > .pawl/config.json
 }
 
-# Write a task file directly
-# Usage: create_task <name> [frontmatter-body]
+# Add a task entry to config.json
+# Usage: create_task <name> [json-opts]
+# Examples: create_task t1
+#           create_task child '{"depends":["parent"]}'
+#           create_task t1 '{"skip":["dangerous"]}'
 create_task() {
   local name="$1"
-  local body="${2:-}"
-  if [ -n "$body" ]; then
-    echo "$body" > ".pawl/tasks/${name}.md"
-  else
-    cat > ".pawl/tasks/${name}.md" <<EOF
----
-name: ${name}
----
-
-Task ${name}
-EOF
-  fi
+  local empty='{}'
+  local opts="${2:-$empty}"
+  python3 -c "import json,sys; c=json.load(open('.pawl/config.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/config.json','w'),indent=2)" "$name" "$opts"
 }
 
 cleanup() {
@@ -142,8 +136,8 @@ test_init() {
   local out
   out=$(pawl init 2>/dev/null)
   assert_json "$out" ".pawl_dir" "$dir/.pawl" || return
-  [ -f .pawl/config.jsonc ] || { fail "missing config.jsonc"; return; }
-  [ -d .pawl/tasks ] || { fail "missing tasks/"; return; }
+  [ -f .pawl/config.json ] || { fail "missing config.json"; return; }
+  [ -f .pawl/README.md ] || { fail "missing README.md"; return; }
   pass
 }
 
@@ -155,55 +149,6 @@ test_init_duplicate() {
   local rc=0
   pawl init >/dev/null 2>&1 || rc=$?
   assert_exit 5 "$rc" || return
-  pass
-}
-
-test_create() {
-  begin_test "create task → JSON output"
-  setup_project "create" '{"workflow":[]}'
-  local out
-  out=$(pawl create mytask 2>/dev/null)
-  assert_json "$out" ".name" "mytask" || return
-  [ -f .pawl/tasks/mytask.md ] || { fail "missing task file"; return; }
-  pass
-}
-
-test_create_duplicate() {
-  begin_test "create duplicate → exit 5"
-  setup_project "create-dup" '{"workflow":[]}'
-  pawl create dup-task >/dev/null 2>&1
-  local rc=0
-  pawl create dup-task >/dev/null 2>&1 || rc=$?
-  assert_exit 5 "$rc" || return
-  pass
-}
-
-test_create_invalid_name() {
-  begin_test "create invalid name → exit 6"
-  setup_project "create-inv" '{"workflow":[]}'
-  local rc=0
-
-  pawl create ".dot" >/dev/null 2>&1 || rc=$?
-  assert_exit 6 "$rc" || return
-
-  rc=0; pawl create "bad.lock" >/dev/null 2>&1 || rc=$?
-  assert_exit 6 "$rc" || return
-
-  rc=0; pawl create "a/b" >/dev/null 2>&1 || rc=$?
-  assert_exit 6 "$rc" || return
-
-  rc=0; pawl create "a..b" >/dev/null 2>&1 || rc=$?
-  assert_exit 6 "$rc" || return
-
-  pass
-}
-
-test_create_with_depends() {
-  begin_test "create --depends → depends array"
-  setup_project "create-dep" '{"workflow":[]}'
-  local out
-  out=$(pawl create child --depends parent 2>/dev/null)
-  assert_json "$out" ".depends[0]" "parent" || return
   pass
 }
 
@@ -220,10 +165,6 @@ test_start_and_complete() {
 
 test_init
 test_init_duplicate
-test_create
-test_create_duplicate
-test_create_invalid_name
-test_create_with_depends
 test_start_and_complete
 
 # ═══════════════════════════════════════════════════════
@@ -252,12 +193,12 @@ test_start_no_project() {
   pass
 }
 
-test_start_no_task() {
-  begin_test "start nonexistent task → exit 4"
+test_start_undeclared_task() {
+  begin_test "start undeclared task → completes (no constraints)"
   setup_project "notask" '{"workflow":[{"name":"a","run":"true"}]}'
-  local rc=0
-  pawl start nonexistent >/dev/null 2>&1 || rc=$?
-  assert_exit 4 "$rc" || return
+  local out
+  out=$(pawl start nonexistent 2>/dev/null)
+  assert_json "$out" ".status" "completed" || return
   pass
 }
 
@@ -296,7 +237,7 @@ test_start_reset_flag() {
 
 test_start_multi_step
 test_start_no_project
-test_start_no_task
+test_start_undeclared_task
 test_start_already_waiting
 test_start_completed
 test_start_reset_flag
@@ -510,14 +451,9 @@ test_on_fail_manual_reset_step
 echo "── Skip ──"
 
 test_skip_step() {
-  begin_test "skip step via frontmatter"
+  begin_test "skip step via config tasks"
   setup_project "skip1" '{"workflow":[{"name":"dangerous","run":"false"},{"name":"fin","run":"true"}]}'
-  create_task t1 "---
-name: t1
-skip:
-  - dangerous
----
-Task t1"
+  create_task t1 '{"skip":["dangerous"]}'
   local out
   out=$(pawl start t1 2>/dev/null)
   assert_json "$out" ".status" "completed" || return
@@ -527,13 +463,7 @@ Task t1"
 test_skip_multiple() {
   begin_test "skip multiple steps"
   setup_project "skip2" '{"workflow":[{"name":"a","run":"false"},{"name":"b","run":"false"},{"name":"c","run":"true"}]}'
-  create_task t1 "---
-name: t1
-skip:
-  - a
-  - b
----
-Task t1"
+  create_task t1 '{"skip":["a","b"]}'
   local out
   out=$(pawl start t1 2>/dev/null)
   assert_json "$out" ".status" "completed" || return
@@ -698,12 +628,7 @@ test_dep_blocks_start() {
   begin_test "dependency blocks start → exit 3"
   setup_project "dep1" '{"workflow":[{"name":"a","run":"true"}]}'
   create_task parent
-  create_task child "---
-name: child
-depends:
-  - parent
----
-Child task"
+  create_task child '{"depends":["parent"]}'
   local rc=0
   pawl start child >/dev/null 2>&1 || rc=$?
   assert_exit 3 "$rc" || return
@@ -714,12 +639,7 @@ test_dep_satisfied() {
   begin_test "dependency satisfied → starts"
   setup_project "dep2" '{"workflow":[{"name":"a","run":"true"}]}'
   create_task parent
-  create_task child "---
-name: child
-depends:
-  - parent
----
-Child task"
+  create_task child '{"depends":["parent"]}'
   pawl start parent >/dev/null 2>&1
   local out
   out=$(pawl start child 2>/dev/null)
@@ -731,18 +651,8 @@ test_dep_chain() {
   begin_test "dependency chain C→B→A"
   setup_project "dep3" '{"workflow":[{"name":"a","run":"true"}]}'
   create_task taskA
-  create_task taskB "---
-name: taskB
-depends:
-  - taskA
----
-B"
-  create_task taskC "---
-name: taskC
-depends:
-  - taskB
----
-C"
+  create_task taskB '{"depends":["taskA"]}'
+  create_task taskC '{"depends":["taskB"]}'
   # C blocked by B (which is blocked by A)
   local rc=0
   pawl start taskC >/dev/null 2>&1 || rc=$?

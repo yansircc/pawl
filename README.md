@@ -24,16 +24,16 @@ Requires: Rust, tmux.
 
 ```bash
 pawl init                    # scaffold .pawl/
-# edit .pawl/config.jsonc    # define workflow
+# edit .pawl/config.json    # define workflow
 pawl create my-task          # create a task
 pawl start my-task           # run the pipeline
 ```
 
 ## How It Works
 
-Define a workflow in `.pawl/config.jsonc`:
+Define a workflow in `.pawl/config.json`:
 
-```jsonc
+```json
 {
   "workflow": [
     { "name": "build",   "run": "npm run build" },
@@ -73,7 +73,7 @@ pawl status task-a | jq '{suggest, prompt}'
 
 ### Single Agent with Retry Loop
 
-```jsonc
+```json
 {
   "workflow": [
     { "name": "implement", "run": "cat ${task_file} | claude -p --session-id $PAWL_RUN_ID",
@@ -99,7 +99,7 @@ Leader's pawl spawns workers, each worker has its own pawl workflow. Worker B fa
 
 ### Event Hooks for Coordination
 
-```jsonc
+```json
 "on": {
   "step_finished": "if [ '${success}' = 'true' ] && [ '${step}' = 'test' ]; then notify-leader; fi"
 }
@@ -111,7 +111,7 @@ Fire-and-forget shell commands on any event. Cascade across pawl instances, noti
 
 ### Release Engineering
 
-```jsonc
+```json
 {
   "workflow": [
     { "name": "bump",    "run": "npm version patch" },
@@ -128,7 +128,7 @@ Deploy to staging → `pawl done` after manual smoke test → deploy to prod →
 
 ### Infra with Approval Gate
 
-```jsonc
+```json
 {
   "vars": { "env": "set -a && source ${project_root}/.env.local && set +a" },
   "workflow": [
@@ -142,7 +142,7 @@ Deploy to staging → `pawl done` after manual smoke test → deploy to prod →
 
 ### Git Worktree Workflow
 
-```jsonc
+```json
 {
   "vars": {
     "base_branch": "main",

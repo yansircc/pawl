@@ -100,7 +100,7 @@ fn poll_status(
 
 fn parse_statuses(s: &str) -> Result<Vec<TaskStatus>> {
     s.split(',')
-        .map(|part| part.trim().parse::<TaskStatus>().map_err(Into::into))
+        .map(|part| part.trim().parse::<TaskStatus>())
         .collect()
 }
 

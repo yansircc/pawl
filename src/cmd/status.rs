@@ -7,6 +7,8 @@ use super::common::{extract_step_context, Project};
 #[derive(Serialize)]
 struct TaskSummary {
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     status: String,
     run_id: String,
     current_step: usize,
@@ -113,14 +115,15 @@ pub fn list() -> Result<()> {
 }
 
 fn show_all_tasks(project: &Project) -> Result<()> {
-    let tasks = project.load_all_tasks()?;
+    let tasks = project.discover_tasks()?;
     let workflow_len = project.config.workflow.len();
 
     let mut summaries: Vec<TaskSummary> = Vec::new();
 
-    for task_def in &tasks {
-        let name = &task_def.name;
-        let blocking = project.check_dependencies(task_def)?;
+    for name in &tasks {
+        let tc = project.task_config(name);
+        let blocking = project.check_dependencies(name)?;
+        let description = tc.and_then(|t| t.description.clone());
 
         project.detect_viewport_loss(name)?;
         let summary = if let Some(state) = project.replay_task(name)? {
@@ -132,6 +135,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
 
             TaskSummary {
                 name: name.clone(),
+                description,
                 status: status_str,
                 run_id: state.run_id,
                 current_step: state.current_step,
@@ -150,6 +154,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             let (suggest, prompt) = derive_routing("pending", None, name);
             TaskSummary {
                 name: name.clone(),
+                description,
                 status: "pending".to_string(),
                 run_id: String::new(),
                 current_step: 0,
@@ -174,7 +179,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
 }
 
 fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
-    let task_def = project.load_task(task_name)?;
+    let tc = project.task_config(task_name);
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
 
@@ -228,12 +233,8 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
 
     let detail = TaskDetail {
         name: task_name.to_string(),
-        description: if task_def.description.is_empty() {
-            None
-        } else {
-            Some(task_def.description.clone())
-        },
-        depends: task_def.depends.clone(),
+        description: tc.and_then(|t| t.description.clone()),
+        depends: tc.map(|t| t.depends.clone()).unwrap_or_default(),
         status: status_str,
         run_id: state.as_ref().map(|s| s.run_id.clone()).unwrap_or_default(),
         current_step,

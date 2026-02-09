@@ -5,8 +5,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use crate::error::PawlError;
+use crate::model::config::TaskConfig;
 use crate::model::event::{event_timestamp, replay, Event};
-use crate::model::{Config, TaskDefinition, TaskState, TaskStatus};
+use crate::model::{Config, TaskState, TaskStatus};
 use crate::util::project::get_project_root;
 use crate::util::shell::spawn_background;
 use crate::util::variable::Context;
@@ -26,15 +27,12 @@ pub fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option
             {
                 if last_feedback.is_none() {
                     let mut parts = Vec::new();
-                    if let Some(vo) = verify_output {
-                        if !vo.is_empty() { parts.push(vo.as_str()); }
-                    }
-                    if let Some(out) = stdout {
-                        if !out.is_empty() { parts.push(out.as_str()); }
-                    }
-                    if let Some(err) = stderr {
-                        if !err.is_empty() { parts.push(err.as_str()); }
-                    }
+                    if let Some(vo) = verify_output
+                        && !vo.is_empty() { parts.push(vo.as_str()); }
+                    if let Some(out) = stdout
+                        && !out.is_empty() { parts.push(out.as_str()); }
+                    if let Some(err) = stderr
+                        && !err.is_empty() { parts.push(err.as_str()); }
                     if !parts.is_empty() {
                         last_feedback = Some(parts.join("\n"));
                     }
@@ -90,7 +88,6 @@ impl Project {
             .var("step", step_name)
             .var("step_index", step_idx.map(|i| i.to_string()).unwrap_or_default())
             .var("log_file", self.log_file(task_name).to_string_lossy())
-            .var("task_file", self.task_file(task_name).to_string_lossy())
             .var("run_id", run_id);
 
         // Expand user vars in definition order (earlier vars available to later)
@@ -114,40 +111,50 @@ impl Project {
         self.config.session_name(&self.project_root)
     }
 
-    /// Load a task definition by name
-    pub fn load_task(&self, name: &str) -> Result<TaskDefinition> {
-        let task_path = self.pawl_dir.join("tasks").join(format!("{}.md", name));
-        if !task_path.exists() {
-            return Err(PawlError::NotFound {
-                message: format!("Task '{}' not found. Create it with: pawl create {}", name, name),
-            }.into());
-        }
-        TaskDefinition::load(&task_path)
+    /// Get task config from config.tasks (returns None for undeclared tasks)
+    pub fn task_config(&self, name: &str) -> Option<&TaskConfig> {
+        self.config.tasks.get(name)
     }
 
-    /// Load all task definitions
-    pub fn load_all_tasks(&self) -> Result<Vec<TaskDefinition>> {
-        TaskDefinition::load_all(self.pawl_dir.join("tasks"))
+    /// Discover all known tasks: config.tasks keys ∪ log file stems, sorted
+    pub fn discover_tasks(&self) -> Result<Vec<String>> {
+        let mut names: std::collections::BTreeSet<String> = self.config.tasks.keys().cloned().collect();
+        let logs_dir = self.pawl_dir.join("logs");
+        if logs_dir.exists() {
+            for entry in fs::read_dir(&logs_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().map(|e| e == "jsonl").unwrap_or(false)
+                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        names.insert(stem.to_string());
+                    }
+            }
+        }
+        Ok(names.into_iter().collect())
     }
 
     /// Resolve task name from name or 1-based index
     pub fn resolve_task_name(&self, name_or_index: &str) -> Result<String> {
         if let Ok(index) = name_or_index.parse::<usize>() {
-            let tasks = self.load_all_tasks()?;
+            let tasks = self.discover_tasks()?;
             if index == 0 || index > tasks.len() {
                 return Err(PawlError::NotFound {
                     message: format!("Task index {} out of range. Have {} tasks.", index, tasks.len()),
                 }.into());
             }
-            return Ok(tasks[index - 1].name.clone());
+            return Ok(tasks[index - 1].clone());
         }
         Ok(name_or_index.to_string())
     }
 
     /// Check if all dependencies of a task are completed
-    pub fn check_dependencies(&self, task: &TaskDefinition) -> Result<Vec<String>> {
+    pub fn check_dependencies(&self, task_name: &str) -> Result<Vec<String>> {
+        let depends = match self.task_config(task_name) {
+            Some(tc) => &tc.depends,
+            None => return Ok(Vec::new()),
+        };
         let mut blocking = Vec::new();
-        for dep in &task.depends {
+        for dep in depends {
             let state = self.replay_task(dep)?;
             match state {
                 Some(s) if s.status == TaskStatus::Completed => {}
@@ -160,11 +167,6 @@ impl Project {
     /// Get the JSONL log file path for a task
     pub fn log_file(&self, task_name: &str) -> PathBuf {
         self.pawl_dir.join("logs").join(format!("{}.jsonl", task_name))
-    }
-
-    /// Get the task definition file path
-    pub fn task_file(&self, task_name: &str) -> PathBuf {
-        self.pawl_dir.join("tasks").join(format!("{}.md", task_name))
     }
 
     /// Append an event to the task's JSONL log file (with exclusive file lock),
@@ -230,8 +232,8 @@ impl Project {
     pub fn detect_viewport_loss(&self, task_name: &str) -> Result<bool> {
         let state = self.replay_task(task_name)?;
 
-        if let Some(ref s) = state {
-            if s.status == TaskStatus::Running {
+        if let Some(ref s) = state
+            && s.status == TaskStatus::Running {
                 let step_idx = s.current_step;
                 if step_idx < self.config.workflow.len()
                     && self.config.workflow[step_idx].in_viewport
@@ -247,7 +249,6 @@ impl Project {
                     return Ok(false);
                 }
             }
-        }
 
         Ok(true)
     }

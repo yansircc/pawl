@@ -11,9 +11,6 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
     let project = Project::load()?;
     let task_name = project.resolve_task_name(task_name)?;
 
-    // Verify task exists
-    let _task = project.load_task(&task_name)?;
-
     // Check if task has been started
     let state = project.replay_task(&task_name)?;
     if state.is_none() {
@@ -36,7 +33,7 @@ pub fn run(task_name: &str, step: Option<usize>, all: bool) -> Result<()> {
 
     let lines: Vec<String> = reader
         .lines()
-        .filter_map(|l| l.ok())
+        .map_while(Result::ok)
         .filter(|l| !l.trim().is_empty())
         .collect();
 
