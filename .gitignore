@@ -1,7 +1,3 @@
 /target
 .claude/
-.pawl/*
-!.pawl/tasks/
-!.pawl/config.jsonc
-!.pawl/lib/
-.pawl/lib/node_modules/
+.pawl/

@@ -38,6 +38,8 @@ Secrets from `.env` files belong in the shell layer — use a vars prefix to avo
 
 Rules: Failable `in_viewport` → add `on_fail` (otherwise terminal). Observable output → add `verify` (otherwise `pawl done` trusts blindly). Gate step (no `run`) → `verify`/`on_fail` ignored.
 
+**When to add a gate step**: Only add a gate (step with no `run`) when verify is insufficient and human judgment is needed (e.g., code review, design approval). If `verify` already covers the acceptance criteria, the task completes automatically after verify passes — no gate needed. Unnecessary gates force manual `pawl done` on every task, adding overhead without value.
+
 ## Intrinsic Variables
 
 Available as `${var}` in config commands, `PAWL_*` env vars in subprocesses:

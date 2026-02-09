@@ -6,7 +6,7 @@ Task files (`.pawl/tasks/{task}.md`) serve dual purpose:
 1. **pawl definition**: frontmatter (name, depends, skip) controls sequencing
 2. **AI worker prompt**: `cat $PAWL_TASK_FILE | <agent-cli>` — the file IS the prompt
 
-Frontmatter fields: `name` (required, matches filename), `depends` (list of prerequisite tasks), `skip` (list of step names to auto-skip for this task).
+Frontmatter fields: `name` (required, matches filename), `depends` (list of prerequisite tasks — **enforced**: `pawl start` refuses with exit 3 if any dependency is not completed), `skip` (list of step names to auto-skip for this task).
 
 ## Writing Effective Tasks
 

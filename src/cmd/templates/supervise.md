@@ -45,6 +45,18 @@ pawl list
 pawl events --follow --type step_yielded,step_finished
 ```
 
+### Log (inspection)
+
+`pawl log <task>` is the supervisor's primary diagnostic tool. The event log is the single source of truth — not viewport content, not terminal output.
+
+```bash
+pawl log <task> --all          # Full event history for current run
+pawl log <task> --step 0       # Events for a specific step
+pawl log <task>                # Last event only
+```
+
+Key fields in `step_finished` events: `success`, `exit_code`, `duration`, `verify_output` (captured test/build output on failure). Use `verify_output` to diagnose why a step failed — it contains the exact stderr/stdout from the verify command.
+
 ### Poll (fallback)
 
 `pawl list` for a one-shot status check. Only use repeated polling when wait/events are impractical:

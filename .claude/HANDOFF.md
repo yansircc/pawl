@@ -1,87 +1,60 @@
 # Session Handoff
 
-## Current Session (S45): Driver Adapter + 监工体验 + Viewport 精简
+## Current Session (S46): 遗留项清理 + 端到端监工测试 + 文档修复
 
 ### What changed
 
-**1. Driver Adapter：4 操作 → 2 操作（start + read）**
+**1. 关闭 S44 以来的 3 个 pending 项（全部"不改"）**
 
-`claude-driver.sh` 从 start/send/stop/read 简化为 start + read。send/stop 是 substrate（tmux send-keys / pawl stop），不属于 adapter。
+| 遗留项 | 结论 | 核心推理 |
+|--------|------|---------|
+| `pawl stop` 加 viewport.close() | 不加 | stop 是状态操作，不是资源生命周期。done 的 close 是 resume 时序约束的解法，stop 无 resume |
+| Settings.json Stop hook | 不需要 | _run 已完整捕获 child exit → settle_step |
+| TUI mode prompt injection | 已解决 | 初始 prompt: driver 传参/stdin。retry: `-r $PAWL_RUN_ID`。运行中: substrate |
 
-- `start`：通过 `[ -t 0 ]` 自动检测 pipe vs TUI 模式
-- `read`：推导 Claude Code session log 路径，输出 JSONL
-- 默认参数 `${1:-start}`（无参数时默认 start）
+推理教训：S44 agent 通过对称性审计发现疑似遗漏，标记 pending。接手时容易掉入**类比推理**（"done 做了所以 stop 也该做"），跳过因果分析。用 /rethink 打破了锚定。
 
-**2. orchestrate.md 精简**
+**2. 端到端监工测试（Go CLI 项目 `jot`）**
 
-- Agent Driver 章节：2 操作模板 + pipe/TUI 双模式 config 示例 + 完成检测说明
-- 删除整个 `## Claude Code CLI for Workflows` 章节（CC flags 表、CC Adapter 实例化、Plan-Then-Execute、Structured Output）——编排者不需要 CC 专属知识，已封装在 adapter 里
-- 省 token 参数挪到 `claude-driver.sh` 头部注释
+在 /tmp/pawl-tui-test/ 搭建了完整的 pawl 监工流程测试：
+- 7 个 task（scaffold → storage → cmd-add/list/search/tags-delete/export）
+- fake agent 脚本（agent.sh，根据 $PAWL_TASK 生成 Go 代码）
+- TUI 模式验证通过
+- cmd-search 触发了真实 retry（agent.sh 有 bug：test 文件缺 import "strings"）
+- 完整经历：auto-retry 3 次 → 耗尽 → failed → 手动修 agent.sh → reset --step → 成功
 
-**3. 修复 `done -m` 消息丢失 bug**
+6 个摩擦点分析结果：0 个需要改 pawl 代码。2 个是编排者错误（过度使用 gate），4 个符合设计哲学。
 
-`pawl done -m "reason"` 在 Waiting 路径（gate/manual approval）下 message 被静默丢弃。违反 `state = replay(log)`。
+**3. 文档修复（3 处）**
 
-修复：`StepResumed` 事件加 `message: Option<String>` 字段 + hook `${message}` 变量。
+| 文件 | 改动 |
+|------|------|
+| `supervise.md` | 新增 **Log (inspection)** 章节：`pawl log` 三种用法 + verify_output 说明 |
+| `orchestrate.md` | Step Properties Rules 后追加 **gate 决策指导** |
+| `author.md` | `depends` 字段标注 **enforced**（`pawl start` 拒绝 + exit 3） |
 
-**4. 监工体验实测**（详见下方独立章节）
+实测确认 `depends` 是强制执行的（之前误以为是 informational）。
 
-**5. 删除 `pawl capture` + `pawl enter`，精简 viewport trait**
+### 决策记录
 
-通过监工实测 + essence 分析确认：
-- capture 引导监工看 terminal buffer（stale、非结构化），偏离 `state = replay(log)` 真相源
-- enter 是 substrate 封装（`tmux select-window`），唯一消费者是人类，pawl 是 agent-first
-- `{需要 in_viewport} ∩ {简单脚本} ∩ {需要详细日志}` = ∅，capture 无独占用例
-
-Viewport trait 从 7 → 4 方法：`open, execute, exists, close`。删除 `read, is_active, attach`。
-
-### 监工体验记录
-
-以 pawl 自身作为实验对象，完整走了两轮监工流程。
-
-**第一轮（同步 + gate）**：prepare → work(verify+retry) → review(gate) → deliver。体验了 status → log → done 的基本循环。发现 done -m 消息丢失 bug。
-
-**第二轮（异步 in_viewport + verify 失败 + retry）**：
-
-搭建了一个有 bug 的 Rust 项目（fibonacci off-by-one），用模拟 agent 脚本修代码，`cargo test` 做 verify。
-
-实际流程：
-1. `pawl start` 立刻返回（in_viewport 异步）
-2. Agent 第一次只修 base case → verify 失败（`left:3 right:5`）→ auto retry
-3. Agent 第二次修 loop bound → verify 通过 → gate 等待
-4. 监工检查 `log --all`（verify_output 有完整测试输出）、`capture`（stale/误导）、直接 `cargo test`
-5. `pawl done -m "Both fixes verified..."` 审批 → commit 自动执行
-
-**关键发现**：
-
-| 发现 | 分类 | 结论 |
-|------|------|------|
-| verify 的 `cmd \| tail -5` 吞退出码 | 编排者错误 | trust the substrate，不是 pawl 的问题 |
-| capture 显示 stale 输出，有误导性 | 设计矛盾 | 与 `state = replay(log)` 冲突 → 删掉 |
-| `log --all` 的 verify_output 比 capture 可靠 | 验证设计 | 日志是监工最重要的工具 |
-| status 的 prompt 字段直接路由决策 | 验证设计 | agent 不需要理解 pawl 内部 |
-| done -m 消息在 gate 路径丢失 | 真 bug | 已修复（StepResumed.message） |
-
-**设计洞察**：pawl 的事件日志是监工的真相源。capture 是错误的旁路——它鼓励监工看 terminal buffer 而非日志。删掉后监工被引导到 `log`（审计轨迹）和 driver `read`（agent 日志），这两个都更可靠。
-
-### S44 遗留问题处置
-
-| S44 遗留 | 处置 |
-|---------|------|
-| Viewport CRUD 不对称（缺 write/send） | 已解决：send 是 substrate（tmux send-keys），不属于 viewport trait |
-| `pawl stop` 是否关 viewport | 未检查，仍 pending |
-| Driver 4 操作 vs essence | 已解决：adapter = start + read，send/stop = substrate |
-| Settings.json Stop hook 集成 | 仍 pending |
-| TUI mode prompt injection 时序 | 仍 pending（`[ -t 0 ]` 检测已实现，但 TUI 模式下的 prompt 注入方案未定） |
+- **拒绝 batch start / auto-advance**：trust the substrate，shell 循环就是批量机制
+- **拒绝 `pawl list` 人类友好格式**：agent-first 设计，jq 是 formatting substrate
+- **拒绝 retry_count 累计计数**：auto retry 和 manual reset 语义不同，各有正确行为
+- **确认 depends 是 enforced**：`pawl start` 检查依赖，未满足返回 exit 3 (Precondition)
 
 ---
 
 ## Previous Sessions (compressed)
 
+### S45: Driver Adapter + 监工体验 + Viewport 精简
+- Driver adapter 简化为 2 操作（start + read），send/stop 归 substrate
+- 修复 `done -m` 消息丢失 bug（StepResumed.message）
+- 监工实测两轮（同步+gate / 异步+verify+retry），确认日志是监工真相源
+- 删除 capture/enter，viewport trait 从 7→4 方法
+
 ### S44: Agent Driver 概念 + orchestrate.md 重构
-- 从 foreman-worker 模型推导 driver 4 操作（start/send/stop/read）
+- 从 foreman-worker 模型推导 driver 操作
 - orchestrate.md recipe 重排：Plain Workflow 排第一，解耦 worktree 依赖
-- 实测验证（sonnet agent + stdin + retry resume）
 
 ### S43 and earlier
 - S43: Agent 本质讨论 + 验证，hook insight
@@ -96,9 +69,7 @@ Viewport trait 从 7 → 4 方法：`open, execute, exists, close`。删除 `rea
 
 ## Pending Work
 
-1. **确认 `pawl stop` 行为**：检查 control.rs，是否需要加 viewport.close()
-2. **Settings.json Stop hook 集成**：claude-driver.sh 引用 co-located settings.json
-3. **TUI mode prompt injection**：`[ -t 0 ]` 已实现，但 prompt 注入到 TUI 的时序方案未定
+None.
 
 ## Known Issues
 
