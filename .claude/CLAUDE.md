@@ -1,8 +1,8 @@
-# pawl — Durable Execution Primitive for Shell
+# pawl
 
-Shell's missing `yield`. A single binary that turns any shell pipeline into a resumable coroutine with failure routing. Define a step sequence, run it for any task — pawl yields when it needs judgment, retries on failure, and rebuilds state from log after crash. The consumer is agents (AI or script), not humans. CLI output is JSON stdout + plain text stderr. `pawl status` provides self-routing hints (suggest/prompt) so agents know what to do next without understanding pawl's internals.
+Shell's missing `yield`. Resumable coroutines with failure routing. Consumers are programs, not humans.
 
-## Design Philosophy
+## Design Constraints
 
 ### The Single Invariant
 
@@ -28,12 +28,12 @@ Append-only JSONL is the only truth. No caches, no `status.json`, no separate st
 4. **Two authorities per decision point**. Machine (exit code) or manual (`pawl done`), never both.
 5. **Failure is routable**. Failure → retry | yield | terminate.
 
-### Agent-First Interface
+### Machine-First Interface
 
 1. **Structured output**: stdout = JSON/JSONL, stderr = progress. JSON is the only format, not an option.
 2. **Typed errors**: `PawlError` → plain text stderr + exit codes 2-7 (StateConflict=2, Precondition=3, NotFound=4, AlreadyExists=5, Validation=6, Timeout=7). Internal errors remain anyhow (exit 1).
 3. **Status-driven routing**: `pawl status` includes `suggest` (mechanical) and `prompt` (requires judgment). Routing lives only in status — errors report, they don't route.
-4. **Agent UX ≠ Human UX**: Agents consume SKILL.md, not `-h`.
+4. **Machine UX ≠ Human UX**: Consumers parse JSON and exit codes, not `-h` text.
 
 ### Coding Conventions
 
@@ -78,28 +78,16 @@ src/
     └── variable.rs      # Context (builder pattern), expand(), to_env_vars()
 ```
 
-## Core Concepts
+## Model Constraints
 
-- **Step**: 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_viewport`
-- **Gate step**: No `run` command — waits for `pawl done`
-- **in_viewport**: Runs command in viewport, waits for `pawl done`
-- **Verify**: `"manual"` for manual approval, or a shell command (must exit 0)
-- **on_fail**: `"retry"` for auto-retry (up to max_retries), `"manual"` to wait for decision
-- **skip** (per-task): `config.json` tasks section `"skip": ["step_name"]` auto-skips listed steps
-
-## State Machine
-
-**TaskStatus**: `Pending` → `Running` → `Waiting` / `Completed` / `Failed` / `Stopped`
-
-**StepStatus**: `Success` | `Failed` | `Skipped`
-
-## Event Sourcing
-
-JSONL per-task log (`.pawl/logs/{task}.jsonl`) is the **single source of truth**. State is reconstructed via `replay()`.
-
-10 event types: `task_started`, `step_finished`, `step_yielded`, `step_resumed`, `viewport_launched`, `step_skipped`, `step_reset`, `task_stopped`, `task_reset`, `viewport_lost`.
-
-Auto-completion: `current_step >= workflow_len` → replay derives `Completed`. Event hooks: `config.on` maps event type names to shell commands, auto-fired in `append_event()`.
+- **Step** has exactly 4 orthogonal properties: `run`, `verify`, `on_fail`, `in_viewport`. Don't add a 5th — compose from these.
+- **Gate step** (no `run`): no implicit behavior. `verify`/`on_fail` are ignored on gates.
+- **in_viewport**: viewport lifecycle only. pawl doesn't know what runs inside.
+- **on_fail**: only `"retry"` or `"manual"`. No other failure policies.
+- **TaskStatus**: `Pending` → `Running` → `Waiting` / `Completed` / `Failed` / `Stopped`. No other states.
+- **StepStatus**: `Success` | `Failed` | `Skipped`. No other outcomes.
+- **Events**: 10 types, each with exactly one emission point. Adding an event type is a design decision, not a code decision.
+- **Replay**: `.pawl/logs/{task}.jsonl` → `replay()` → `TaskState`. Auto-completion: `current_step >= workflow_len` → `Completed`.
 
 ## Dev & Test
 

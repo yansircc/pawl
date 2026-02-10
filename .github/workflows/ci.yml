@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Unit tests
+        run: cargo test
+
+      - name: Build & install
+        run: cargo install --path .
+
+      - name: Sync E2E tests
+        run: bash tests/e2e.sh
+
+      - name: Viewport E2E tests
+        run: |
+          sudo apt-get install -y tmux
+          bash tests/e2e-viewport.sh
