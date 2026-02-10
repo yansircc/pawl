@@ -22,10 +22,11 @@
             font-family: 'Inter', system-ui, sans-serif;
             background: var(--base);
             color: var(--ink);
-            padding: 32px 40px;
+            padding: 24px 32px;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 12px;
+            height: 100vh;
         }
 
         h1, h2 {
@@ -77,12 +78,13 @@
         .container {
             display: grid;
             grid-template-columns: 1fr 280px;
-            gap: 28px;
-            align-items: start;
+            gap: 24px;
+            flex: 1;
+            min-height: 0;
         }
 
         /* --- Task rows --- */
-        .task-list { display: flex; flex-direction: column; gap: 6px; }
+        .task-list { display: flex; flex-direction: column; gap: 5px; overflow-y: auto; min-height: 0; }
 
         .card {
             background: var(--white);
@@ -164,7 +166,10 @@
             height: 8px;
             border: 1px solid #bbb;
             background: #eee;
+            cursor: pointer;
         }
+        .p-step:hover { opacity: 0.7; }
+        .p-step.selected { outline: 2px solid var(--ink); outline-offset: 1px; }
         .p-step.success  { background: var(--success); border-color: var(--success); }
         .p-step.current  { background: var(--primary); border-color: #3a9ae0; animation: pulse 1.5s ease-in-out infinite; }
         .p-step.retrying { background: #FF9800; border-color: #E65100; animation: pulse 1.5s ease-in-out infinite; }
@@ -243,8 +248,9 @@
             background: var(--white);
             border: 2px solid var(--ink);
             padding: 8px 10px;
-            max-height: calc(100vh - 160px);
             overflow-y: auto;
+            min-height: 0;
+            max-height: 100%;
         }
 
         .sidebar-box h2 {
@@ -252,7 +258,20 @@
             margin-bottom: 6px;
             padding-bottom: 6px;
             border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
+
+        .filter-clear {
+            font-size: 10px;
+            font-weight: 400;
+            cursor: pointer;
+            color: #999;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        .filter-clear:hover { color: var(--ink); }
 
         .ev {
             font-family: 'JetBrains Mono', monospace;
@@ -273,6 +292,7 @@
         .ev-label.retry { color: #E65100; }
         .ev-label.wait { color: #b60; }
         .ev-label.start { color: var(--primary); }
+        .ev-hook { color: #E65100; margin-left: 2px; font-size: 9px; }
 
         .empty-state {
             color: #bbb;
@@ -313,6 +333,8 @@
 <script>
 let lastEventTsMs = 0;
 let allEvents = [];
+let eventFilter = null; // { task, step } or null
+let configuredHooks = {}; // event_type -> command
 
 function elapsed(iso) {
     if (!iso) return '';
@@ -385,14 +407,15 @@ function buildCardHtml(t) {
     const grid = t.workflow.map(s => {
         let cls = s.status;
         if (cls === 'current' && isRetrying) cls = 'retrying';
-        return `<div class="p-step ${cls}"></div>`;
+        const sel = (eventFilter && eventFilter.task === t.name && eventFilter.step === s.name) ? ' selected' : '';
+        return `<div class="p-step ${cls}${sel}" data-task="${t.name}" data-step="${s.name}" onclick="toggleStepFilter(this)"></div>`;
     }).join('');
 
     // Meta parts
     const meta = [];
     const cur = t.workflow.find(s => s.status === 'current');
     if (cur) meta.push(cur.name);
-    if (t.started_at && ['running','waiting'].includes(t.status)) meta.push(elapsed(t.started_at));
+    if (t.started_at && ['running','waiting'].includes(t.status)) meta.push(`<span class="elapsed" data-started="${t.started_at}">${elapsed(t.started_at)}</span>`);
     if (t.started_at && t.updated_at && ['completed','failed','stopped'].includes(t.status)) meta.push(duration(t.started_at, t.updated_at));
     const depsHtml = (t.depends && t.depends.length) ? `<span class="task-deps">← ${t.depends.join(', ')}</span>` : '';
 
@@ -446,6 +469,7 @@ function buildCardHtml(t) {
 function renderTasks(data) {
     document.getElementById('project-path').textContent = data.project_root;
     document.getElementById('workflow-bar').textContent = data.workflow_steps.join(' → ');
+    configuredHooks = data.hooks || {};
     renderSummary(data.tasks);
 
     const el = document.getElementById('tasks');
@@ -501,11 +525,37 @@ function eventLabel(e) {
 
 function renderEvents() {
     const el = document.getElementById('events');
-    if (!allEvents.length) { el.innerHTML = '<div class="empty-state">no events yet</div>'; return; }
-    el.innerHTML = allEvents.slice(0, 80).map(e => {
+    const filtered = eventFilter
+        ? allEvents.filter(e => e.task === eventFilter.task && e.step_name === eventFilter.step)
+        : allEvents;
+    const title = eventFilter
+        ? `<span>${esc(eventFilter.task)} / ${esc(eventFilter.step)}</span><span class="filter-clear" onclick="clearFilter()">✕ clear</span>`
+        : 'EVENT LOG';
+    if (!filtered.length) { el.innerHTML = `<h2>${title}</h2><div class="empty-state">${eventFilter ? 'no events for this step' : 'no events yet'}</div>`; return; }
+    el.innerHTML = `<h2>${title}</h2>` + filtered.slice(0, 80).map(e => {
         const [label, cls] = eventLabel(e);
-        return `<div class="ev"><span class="ev-time">${hms(e.ts)}</span><span class="ev-task">${e.task}</span><span class="ev-label ${cls}">${label}</span></div>`;
+        const hook = configuredHooks[e.type] ? `<span class="ev-hook" title="hook: ${esc(configuredHooks[e.type])}">⚡</span>` : '';
+        return `<div class="ev"><span class="ev-time">${hms(e.ts)}</span><span class="ev-task">${e.task}</span><span class="ev-label ${cls}">${label}</span>${hook}</div>`;
     }).join('');
+}
+
+function toggleStepFilter(el) {
+    const task = el.dataset.task, step = el.dataset.step;
+    if (eventFilter && eventFilter.task === task && eventFilter.step === step) {
+        eventFilter = null;
+    } else {
+        eventFilter = { task, step };
+    }
+    // Update selected state on all step blocks
+    document.querySelectorAll('.p-step.selected').forEach(e => e.classList.remove('selected'));
+    if (eventFilter) el.classList.add('selected');
+    renderEvents();
+}
+
+function clearFilter() {
+    eventFilter = null;
+    document.querySelectorAll('.p-step.selected').forEach(e => e.classList.remove('selected'));
+    renderEvents();
 }
 
 async function fetchStatus() {
@@ -525,8 +575,15 @@ async function fetchEvents() {
     } catch(e) {}
 }
 
+function updateElapsed() {
+    document.querySelectorAll('.elapsed[data-started]').forEach(el => {
+        el.textContent = elapsed(el.dataset.started);
+    });
+}
+
 fetchStatus(); fetchEvents();
 setInterval(() => { fetchStatus(); fetchEvents(); }, 2000);
+setInterval(updateElapsed, 1000);
 </script>
 
 </body>

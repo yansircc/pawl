@@ -12,6 +12,7 @@ const DASHBOARD_HTML: &str = include_str!("templates/dashboard.html");
 struct StatusResponse {
     project_root: String,
     workflow_steps: Vec<String>,
+    hooks: std::collections::HashMap<String, String>,
     tasks: Vec<TaskEntry>,
 }
 
@@ -50,7 +51,7 @@ pub fn run(port: u16) -> Result<()> {
     loop {
         let request = match server.recv() {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(_) => break Ok(()),
         };
 
         let url = request.url().to_string();
@@ -103,9 +104,12 @@ fn build_status() -> Result<String> {
         });
     }
 
+    let hooks = project.config.on.clone();
+
     let resp = StatusResponse {
         project_root: project.project_root,
         workflow_steps,
+        hooks,
         tasks: entries,
     };
 
