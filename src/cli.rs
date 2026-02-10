@@ -97,6 +97,13 @@ pub enum Command {
         message: Option<String>,
     },
 
+    /// Start read-only web dashboard
+    Dashboard {
+        /// Port to listen on
+        #[arg(short, long, default_value = "3131")]
+        port: u16,
+    },
+
     /// Internal: run command in viewport as parent process
     #[command(name = "_run", hide = true)]
     Run {

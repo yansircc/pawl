@@ -12,6 +12,8 @@ Shell can pipe, chain, trap, and cron — but it can't **pause, wait for a decis
 
 One invariant: `state = replay(log)`. Append-only JSONL, no database, no status file.
 
+![pawl dashboard](assets/dashboard.jpeg)
+
 ## Install
 
 ```bash
@@ -26,6 +28,7 @@ Requires: Rust. Optional: tmux (only for interactive `in_viewport` steps).
 pawl init                    # scaffold .pawl/ with config + full reference
 # edit .pawl/config.json     # define your workflow
 pawl start my-task           # run the pipeline
+pawl dashboard               # live web dashboard on localhost:3131
 ```
 
 ## How It Works

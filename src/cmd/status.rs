@@ -33,32 +33,32 @@ struct TaskSummary {
 
 /// JSON output structure for task detail
 #[derive(Serialize)]
-struct TaskDetail {
-    name: String,
-    description: Option<String>,
-    depends: Vec<String>,
-    status: String,
-    run_id: String,
-    current_step: usize,
-    total_steps: usize,
+pub struct TaskDetail {
+    pub name: String,
+    pub description: Option<String>,
+    pub depends: Vec<String>,
+    pub status: String,
+    pub run_id: String,
+    pub current_step: usize,
+    pub total_steps: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<String>,
+    pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    started_at: Option<String>,
+    pub started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    updated_at: Option<String>,
-    retry_count: usize,
+    pub updated_at: Option<String>,
+    pub retry_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    last_feedback: Option<String>,
+    pub last_feedback: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    suggest: Vec<String>,
+    pub suggest: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    prompt: Option<String>,
-    workflow: Vec<StepInfo>,
+    pub prompt: Option<String>,
+    pub workflow: Vec<StepInfo>,
 }
 
 #[derive(Serialize)]
-struct StepInfo {
+pub struct StepInfo {
     index: usize,
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -66,9 +66,9 @@ struct StepInfo {
     status: String,
 }
 
-/// Derive routing hints from task status. Only used by status output.
+/// Derive routing hints from task status.
 /// suggest = mechanical commands, prompt = requires judgment.
-fn derive_routing(status: &str, message: Option<&str>, task: &str) -> (Vec<String>, Option<String>) {
+pub fn derive_routing(status: &str, message: Option<&str>, task: &str) -> (Vec<String>, Option<String>) {
     match status {
         "pending" => (vec![format!("pawl start {task}")], None),
         "waiting" => match message {
@@ -178,12 +178,12 @@ fn show_all_tasks(project: &Project) -> Result<()> {
     Ok(())
 }
 
-fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
+/// Build task detail data without side effects (no detect_viewport_loss, no printing).
+pub fn build_task_detail(project: &Project, task_name: &str) -> Result<TaskDetail> {
     let tc = project.task_config(task_name);
     let workflow = &project.config.workflow;
     let workflow_len = workflow.len();
 
-    project.detect_viewport_loss(task_name)?;
     let state = project.replay_task(task_name)?;
     let current_step = state.as_ref().map(|s| s.current_step).unwrap_or(0);
 
@@ -231,7 +231,7 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
     let msg = state.as_ref().and_then(|s| s.message.clone());
     let (suggest, prompt) = derive_routing(&status_str, msg.as_deref(), task_name);
 
-    let detail = TaskDetail {
+    Ok(TaskDetail {
         name: task_name.to_string(),
         description: tc.and_then(|t| t.description.clone()),
         depends: tc.map(|t| t.depends.clone()).unwrap_or_default(),
@@ -247,8 +247,12 @@ fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
         suggest,
         prompt,
         workflow: steps,
-    };
+    })
+}
 
+fn show_task_detail(project: &Project, task_name: &str) -> Result<()> {
+    project.detect_viewport_loss(task_name)?;
+    let detail = build_task_detail(project, task_name)?;
     println!("{}", serde_json::to_string(&detail)?);
     Ok(())
 }

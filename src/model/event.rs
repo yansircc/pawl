@@ -67,6 +67,22 @@ pub fn event_timestamp() -> DateTime<Utc> {
 }
 
 impl Event {
+    /// Returns the timestamp of this event
+    pub fn ts(&self) -> DateTime<Utc> {
+        match self {
+            Event::TaskStarted { ts, .. }
+            | Event::StepFinished { ts, .. }
+            | Event::StepYielded { ts, .. }
+            | Event::StepResumed { ts, .. }
+            | Event::ViewportLaunched { ts, .. }
+            | Event::StepSkipped { ts, .. }
+            | Event::StepReset { ts, .. }
+            | Event::TaskStopped { ts, .. }
+            | Event::TaskReset { ts, .. }
+            | Event::ViewportLost { ts, .. } => *ts,
+        }
+    }
+
     /// Returns the serde snake_case tag name for this event
     pub fn type_name(&self) -> &'static str {
         match self {

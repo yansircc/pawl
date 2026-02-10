@@ -23,3 +23,4 @@ libc = "0.2"
 notify = "7"
 uuid = { version = "1", features = ["v4"] }
 indexmap = { version = "2.13.0", features = ["serde"] }
+tiny_http = "0.12"
