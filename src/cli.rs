@@ -97,11 +97,14 @@ pub enum Command {
         message: Option<String>,
     },
 
-    /// Start read-only web dashboard
-    Dashboard {
+    /// Start HTTP API server
+    Serve {
         /// Port to listen on
         #[arg(short, long, default_value = "3131")]
         port: u16,
+        /// Path to HTML file to serve at /
+        #[arg(long)]
+        ui: Option<String>,
     },
 
     /// Internal: run command in viewport as parent process

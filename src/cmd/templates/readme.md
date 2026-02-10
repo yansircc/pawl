@@ -129,7 +129,7 @@ Event types and extra variables:
 | `pawl wait <name...> --until <status> [-t sec] [--any]` | Block until target status |
 | `pawl events [name] [--follow] [--type ...]` | Event stream (live or historical) |
 | `pawl log <name> [--step N] [--all]` | View log events |
-| `pawl dashboard [--port N]` | Live web dashboard (default: 3131) |
+| `pawl serve [--port N] [--ui file]` | HTTP API server (default: 3131) |
 | `pawl _run` | Internal: viewport parent process |
 
 **Task indexing**: tasks can be referenced by name or 1-based index (e.g., `pawl start 1` = first task).

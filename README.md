@@ -28,7 +28,7 @@ Requires: Rust. Optional: tmux (only for interactive `in_viewport` steps).
 pawl init                    # scaffold .pawl/ with config + full reference
 # edit .pawl/config.json     # define your workflow
 pawl start my-task           # run the pipeline
-pawl dashboard               # live web dashboard on localhost:3131
+pawl serve                   # HTTP API on localhost:3131
 ```
 
 ## How It Works
@@ -117,7 +117,7 @@ pawl reset <name> [--step]        # full reset or retry current step
 pawl wait <n...> --until <s> [--any] [-t sec]  # block until target status
 pawl events [name] [--follow] [--type ...]     # event stream
 pawl log <name> [--step N] [--all]             # view log events
-pawl dashboard [--port N]         # live web dashboard (default: 3131)
+pawl serve [--port N] [--ui file]  # HTTP API server (default: 3131)
 ```
 
 Exit codes: 0=success, 2=state conflict, 3=precondition (deps), 4=not found, 5=already exists, 6=validation, 7=timeout.

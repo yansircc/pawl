@@ -66,11 +66,10 @@ src/
 │   ├── wait.rs          # pawl wait (poll via Project API)
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all, JSONL output)
-│   ├── dashboard.rs     # pawl dashboard (tiny_http server + REST API)
+│   ├── serve.rs         # pawl serve (tiny_http JSON API + optional --ui)
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.json            # Empty scaffold
-│       ├── readme.md              # README.md: pawl reference
-│       └── dashboard.html         # Dashboard frontend (~530 lines)
+│       └── readme.md              # README.md: pawl reference
 ├── viewport/
 │   ├── mod.rs           # Viewport trait (open/execute/exists/close)
 │   └── tmux.rs          # TmuxViewport implementation

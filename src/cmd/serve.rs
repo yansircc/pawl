@@ -1,12 +1,12 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use serde::Serialize;
-use tiny_http::{Header, Response, Server};
+use tiny_http::{Header, Method, Response, Server};
 
 use super::common::Project;
 use super::status::{build_task_detail, TaskDetail};
 use crate::model::event::Event;
-
-const DASHBOARD_HTML: &str = include_str!("templates/dashboard.html");
 
 #[derive(Serialize)]
 struct StatusResponse {
@@ -40,13 +40,33 @@ struct EventsResponse {
     events: Vec<EventEntry>,
 }
 
-pub fn run(port: u16) -> Result<()> {
+pub fn run(port: u16, ui_path: Option<&str>) -> Result<()> {
+    let (ui_dir, ui_index) = match ui_path {
+        Some(path) => {
+            let p = Path::new(path);
+            if !p.exists() {
+                anyhow::bail!("UI file not found: {}", path);
+            }
+            let dir = p
+                .parent()
+                .unwrap_or(Path::new("."))
+                .canonicalize()
+                .map_err(|e| anyhow::anyhow!("Failed to resolve UI directory: {}", e))?;
+            let index = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            (Some(dir), index)
+        }
+        None => (None, String::new()),
+    };
+
     let addr = format!("0.0.0.0:{}", port);
     let server = Server::http(&addr)
         .map_err(|e| anyhow::anyhow!("Failed to start server: {}", e))?;
 
-    eprintln!("pawl dashboard: http://localhost:{}", port);
-    eprintln!("Press Ctrl+C to stop");
+    eprintln!("pawl serve: http://localhost:{}", port);
 
     loop {
         let request = match server.recv() {
@@ -54,12 +74,18 @@ pub fn run(port: u16) -> Result<()> {
             Err(_) => break Ok(()),
         };
 
+        if *request.method() == Method::Options {
+            let _ = request.respond(preflight_response());
+            continue;
+        }
+
         let url = request.url().to_string();
         let response = match url.as_str() {
-            "/" => serve_html(),
-            "/api/status" => serve_status(),
-            u if u.starts_with("/api/stream/") => serve_stream(u),
-            u if u.starts_with("/api/events") => serve_events(u),
+            "/" => serve_root(&ui_dir, &ui_index),
+            "/api/status" => with_cors(serve_status()),
+            u if u.starts_with("/api/stream/") => with_cors(serve_stream(u)),
+            u if u.starts_with("/api/events") => with_cors(serve_events(u)),
+            u if !u.starts_with("/api/") => serve_static(&ui_dir, u),
             _ => not_found(),
         };
 
@@ -67,9 +93,85 @@ pub fn run(port: u16) -> Result<()> {
     }
 }
 
-fn serve_html() -> Response<std::io::Cursor<Vec<u8>>> {
-    Response::from_string(DASHBOARD_HTML)
-        .with_header(content_type("text/html; charset=utf-8"))
+fn serve_root(
+    ui_dir: &Option<PathBuf>,
+    ui_index: &str,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    match ui_dir {
+        Some(dir) => {
+            let file_path = dir.join(ui_index);
+            match std::fs::read_to_string(&file_path) {
+                Ok(html) => Response::from_string(html)
+                    .with_header(content_type("text/html; charset=utf-8")),
+                Err(_) => not_found(),
+            }
+        }
+        None => {
+            let discovery = serde_json::json!({
+                "endpoints": [
+                    {"path": "/api/status", "description": "Task status and workflow info"},
+                    {"path": "/api/events?since=<ms>", "description": "Event stream (newest first, max 200)"},
+                    {"path": "/api/stream/<task>?offset=<bytes>", "description": "Streaming stdout for running task"},
+                ]
+            });
+            json_response(&discovery.to_string())
+        }
+    }
+}
+
+fn serve_static(
+    ui_dir: &Option<PathBuf>,
+    url_path: &str,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    let dir = match ui_dir {
+        Some(d) => d,
+        None => return not_found(),
+    };
+
+    // Strip leading slash
+    let rel = url_path.trim_start_matches('/');
+    if rel.is_empty() {
+        return not_found();
+    }
+
+    // Reject path traversal
+    for component in Path::new(rel).components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return not_found();
+        }
+    }
+
+    let file_path = dir.join(rel);
+
+    // Verify resolved path is within ui_dir
+    match file_path.canonicalize() {
+        Ok(resolved) => {
+            if !resolved.starts_with(dir) {
+                return not_found();
+            }
+        }
+        Err(_) => return not_found(),
+    }
+
+    match std::fs::read(&file_path) {
+        Ok(data) => {
+            let ct = match file_path
+                .extension()
+                .and_then(|e| e.to_str())
+            {
+                Some("css") => "text/css; charset=utf-8",
+                Some("js") => "application/javascript; charset=utf-8",
+                Some("html") | Some("htm") => "text/html; charset=utf-8",
+                Some("json") => "application/json",
+                Some("svg") => "image/svg+xml",
+                Some("png") => "image/png",
+                Some("ico") => "image/x-icon",
+                _ => "application/octet-stream",
+            };
+            Response::from_data(data).with_header(content_type(ct))
+        }
+        Err(_) => not_found(),
+    }
 }
 
 fn serve_status() -> Response<std::io::Cursor<Vec<u8>>> {
@@ -252,6 +354,24 @@ fn build_event_detail(event: &Event) -> String {
 
 fn content_type(ct: &str) -> Header {
     Header::from_bytes("Content-Type", ct).unwrap()
+}
+
+fn cors_header() -> Header {
+    Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap()
+}
+
+fn with_cors(
+    response: Response<std::io::Cursor<Vec<u8>>>,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    response.with_header(cors_header())
+}
+
+fn preflight_response() -> Response<std::io::Cursor<Vec<u8>>> {
+    Response::from_string("")
+        .with_status_code(204)
+        .with_header(cors_header())
+        .with_header(Header::from_bytes("Access-Control-Allow-Methods", "GET, OPTIONS").unwrap())
+        .with_header(Header::from_bytes("Access-Control-Allow-Headers", "Content-Type").unwrap())
 }
 
 fn json_response(json: &str) -> Response<std::io::Cursor<Vec<u8>>> {

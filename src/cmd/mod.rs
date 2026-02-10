@@ -1,6 +1,6 @@
 pub mod common;
 pub mod control;
-pub mod dashboard;
+pub mod serve;
 pub mod done;
 pub mod events;
 pub mod init;
@@ -29,7 +29,7 @@ pub fn dispatch(cmd: Command) -> Result<()> {
             events::run(task.as_deref(), follow, event_type.as_deref())
         }
         Command::Done { task, message } => done::done(&task, message.as_deref()),
-        Command::Dashboard { port } => dashboard::run(port),
+        Command::Serve { port, ui } => serve::run(port, ui.as_deref()),
         Command::Run { task, step } => run::run_in_viewport(&task, step),
     }
 }
