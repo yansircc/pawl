@@ -169,6 +169,11 @@ impl Project {
         self.pawl_dir.join("logs").join(format!("{}.jsonl", task_name))
     }
 
+    /// Get the stream file path for a task (live stdout during execution)
+    pub fn stream_file(&self, task_name: &str) -> PathBuf {
+        self.pawl_dir.join("streams").join(format!("{}.stream", task_name))
+    }
+
     /// Append an event to the task's JSONL log file (with exclusive file lock),
     /// then auto-fire any matching hook from config.on.
     pub fn append_event(&self, task_name: &str, event: &Event) -> Result<()> {

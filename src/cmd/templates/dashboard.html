@@ -301,6 +301,39 @@
             text-align: center;
             font-size: 13px;
         }
+
+        /* Stream panel */
+        .stream-toggle {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            color: var(--primary);
+            background: none;
+            border: 1px solid var(--primary);
+            padding: 1px 6px;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+        .stream-toggle:hover { background: var(--primary); color: white; }
+        .stream-toggle.active { background: var(--primary); color: white; }
+
+        .stream-panel {
+            background: #1e1e2e;
+            color: #cdd6f4;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            padding: 8px 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            border-top: 1px solid #333;
+            line-height: 1.5;
+        }
+        .stream-panel .sl { white-space: pre-wrap; word-break: break-all; }
+        .stream-panel .sl-text { color: #89b4fa; }
+        .stream-panel .sl-tool { color: #f9e2af; }
+        .stream-panel .sl-result { color: #a6e3a1; }
+        .stream-panel .sl-raw { color: #6c7086; }
     </style>
 </head>
 <body>
@@ -446,8 +479,22 @@ function buildCardHtml(t) {
         }
     }
 
+    // Stream toggle (only when stream data exists)
+    const ss = streamState[t.name];
+    const hasStream = ss && ss.lines.length > 0;
+    const streamBtn = hasStream
+        ? `<button class="stream-toggle${ss.visible ? ' active' : ''}" onclick="toggleStream('${t.name}')">${ss.visible ? '▼ OUTPUT' : '▶ OUTPUT'}</button>`
+        : '';
+
+    // Stream panel (only when visible and has content)
+    const streamHtml = (hasStream && ss.visible)
+        ? `<div class="stream-panel" id="stream-${t.name}">${ss.lines.slice(-100).map(l => `<div class="sl ${l.cls}">${esc(l.text)}</div>`).join('')}</div>`
+        : '';
+
     // State key for diff detection (excludes elapsed time which changes every render)
-    const stateKey = `${t.status}|${t.current_step}|${t.retry_count}|${t.last_feedback || ''}`;
+    const streamVis = streamState[t.name]?.visible ? '1' : '0';
+    const streamLen = streamState[t.name]?.lines.length || 0;
+    const stateKey = `${t.status}|${t.current_step}|${t.retry_count}|${t.last_feedback || ''}|${streamVis}|${streamLen}`;
 
     return `<div class="card st-${t.status}" id="task-${t.name}" data-state="${esc(stateKey)}">
             <div class="card-main">
@@ -461,8 +508,10 @@ function buildCardHtml(t) {
                 <div class="progress-grid">${grid}</div>
                 <span class="card-meta">${t.current_step}/${t.total_steps}</span>
                 ${retryHtml}
+                ${streamBtn}
             </div>
             ${extraHtml}
+            ${streamHtml}
         </div>`;
 }
 
@@ -558,8 +607,109 @@ function clearFilter() {
     renderEvents();
 }
 
+// --- Stream state ---
+const streamState = {}; // { taskName: { offset, lines, active, visible } }
+
+function toggleStream(taskName) {
+    const ss = streamState[taskName];
+    if (ss) ss.visible = !ss.visible;
+    // Force re-render of this card
+    const card = document.getElementById('task-' + taskName);
+    if (card) card.dataset.state = '';
+    fetchStatus();
+}
+
+function parseStreamLine(raw) {
+    try {
+        const obj = JSON.parse(raw);
+        if (obj.type === 'assistant' && obj.message) {
+            const content = obj.message.content;
+            if (Array.isArray(content)) {
+                for (const block of content) {
+                    if (block.type === 'text' && block.text) {
+                        return { cls: 'sl-text', text: block.text.slice(0, 200) };
+                    }
+                    if (block.type === 'tool_use') {
+                        return { cls: 'sl-tool', text: `[tool] ${block.name || 'unknown'}` };
+                    }
+                }
+            }
+            return { cls: 'sl-raw', text: `[${obj.type}]` };
+        }
+        if (obj.type === 'result') {
+            const cost = obj.cost_usd != null ? ` cost=$${obj.cost_usd.toFixed(4)}` : '';
+            return { cls: 'sl-result', text: `[done]${cost}` };
+        }
+        return { cls: 'sl-raw', text: `[${obj.type || 'json'}]` };
+    } catch {
+        if (!raw.trim()) return null;
+        return { cls: 'sl-raw', text: raw.slice(0, 200) };
+    }
+}
+
+async function fetchStreams(tasks) {
+    for (const t of tasks) {
+        if (t.status !== 'running') {
+            // Task no longer running — final fetch then stop tracking
+            const ss = streamState[t.name];
+            if (ss && ss.active) {
+                ss.active = false;
+                try {
+                    const data = await (await fetch(`/api/stream/${t.name}?offset=${ss.offset}`)).json();
+                    if (data.content) appendStreamContent(t.name, data.content, data.offset);
+                } catch {}
+            }
+            continue;
+        }
+        // Auto-probe all running tasks
+        const ss = streamState[t.name] || { offset: 0, lines: [], active: false, visible: false };
+        try {
+            const data = await (await fetch(`/api/stream/${t.name}?offset=${ss.offset}`)).json();
+            if (data.active || data.content) {
+                // File recreated (new step) → reset
+                if (data.offset < ss.offset) {
+                    ss.offset = 0;
+                    ss.lines = [];
+                    const refetch = await (await fetch(`/api/stream/${t.name}?offset=0`)).json();
+                    Object.assign(data, refetch);
+                }
+                ss.active = data.active;
+                if (!streamState[t.name]) streamState[t.name] = ss;
+                if (data.content) appendStreamContent(t.name, data.content, data.offset);
+            }
+        } catch {}
+    }
+}
+
+function appendStreamContent(taskName, content, newOffset) {
+    const ss = streamState[taskName];
+    if (!ss) return;
+    ss.offset = newOffset;
+    const rawLines = content.split('\n');
+    for (const raw of rawLines) {
+        const parsed = parseStreamLine(raw);
+        if (parsed) ss.lines.push(parsed);
+    }
+    // Keep last 200 lines in memory
+    if (ss.lines.length > 200) ss.lines = ss.lines.slice(-200);
+    // Update panel if visible
+    if (ss.visible) {
+        const panel = document.getElementById('stream-' + taskName);
+        if (panel) {
+            panel.innerHTML = ss.lines.slice(-100).map(l => `<div class="sl ${l.cls}">${esc(l.text)}</div>`).join('');
+            panel.scrollTop = panel.scrollHeight;
+        }
+    }
+}
+
+let lastTasks = [];
+
 async function fetchStatus() {
-    try { renderTasks(await (await fetch('/api/status')).json()); } catch(e) {}
+    try {
+        const data = await (await fetch('/api/status')).json();
+        lastTasks = data.tasks || [];
+        renderTasks(data);
+    } catch(e) {}
 }
 
 async function fetchEvents() {
@@ -583,6 +733,7 @@ function updateElapsed() {
 
 fetchStatus(); fetchEvents();
 setInterval(() => { fetchStatus(); fetchEvents(); }, 2000);
+setInterval(() => { if (lastTasks.length) fetchStreams(lastTasks); }, 1000);
 setInterval(updateElapsed, 1000);
 </script>
 

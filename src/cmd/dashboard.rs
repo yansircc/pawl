@@ -58,6 +58,7 @@ pub fn run(port: u16) -> Result<()> {
         let response = match url.as_str() {
             "/" => serve_html(),
             "/api/status" => serve_status(),
+            u if u.starts_with("/api/stream/") => serve_stream(u),
             u if u.starts_with("/api/events") => serve_events(u),
             _ => not_found(),
         };
@@ -114,6 +115,55 @@ fn build_status() -> Result<String> {
     };
 
     Ok(serde_json::to_string(&resp)?)
+}
+
+fn serve_stream(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    match build_stream(url) {
+        Ok(json) => json_response(&json),
+        Err(e) => error_response(&e.to_string()),
+    }
+}
+
+fn build_stream(url: &str) -> Result<String> {
+    // Parse: /api/stream/{task}?offset=N
+    let path = url.split('?').next().unwrap_or(url);
+    let task_name = path.strip_prefix("/api/stream/").unwrap_or("");
+    if task_name.is_empty() {
+        anyhow::bail!("Missing task name");
+    }
+
+    let offset: u64 = url
+        .split("offset=")
+        .nth(1)
+        .and_then(|s| s.split('&').next())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let project = Project::load()?;
+    let stream_file = project.stream_file(task_name);
+
+    if !stream_file.exists() {
+        let resp = serde_json::json!({
+            "task": task_name,
+            "content": "",
+            "offset": 0,
+            "active": false,
+        });
+        return Ok(resp.to_string());
+    }
+
+    let data = std::fs::read(&stream_file).unwrap_or_default();
+    let file_len = data.len() as u64;
+    let start = (offset as usize).min(data.len());
+    let content = String::from_utf8_lossy(&data[start..]).to_string();
+
+    let resp = serde_json::json!({
+        "task": task_name,
+        "content": content,
+        "offset": file_len,
+        "active": true,
+    });
+    Ok(resp.to_string())
 }
 
 fn serve_events(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {

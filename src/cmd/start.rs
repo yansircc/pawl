@@ -1,4 +1,6 @@
 use anyhow::{bail, Result};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::os::unix::process::CommandExt as _;
 use std::time::Instant;
 use uuid::Uuid;
@@ -7,7 +9,7 @@ use crate::error::PawlError;
 use crate::model::config::Step;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
-use crate::util::shell::run_command_with_env;
+use crate::util::shell::run_command;
 use crate::util::variable::Context;
 use super::common::Project;
 
@@ -178,7 +180,7 @@ pub struct StepRecord {
     pub stderr: Option<String>,
 }
 
-/// Execute a normal (synchronous) step
+/// Execute a normal (synchronous) step with streaming stdout
 fn execute_step(
     project: &Project,
     task_name: &str,
@@ -189,10 +191,21 @@ fn execute_step(
     let state = project.replay_task(task_name)?.expect("Task state missing");
     let step_idx = state.current_step;
 
-    let start_time = Instant::now();
+    // Set up stream file for live output
+    let stream_file = project.stream_file(task_name);
+    let streams_dir = stream_file.parent().unwrap();
+    fs::create_dir_all(streams_dir)?;
+    fs::write(&stream_file, "")?;
 
+    let start_time = Instant::now();
     let env = ctx.to_env_vars();
-    let result = run_command_with_env(command, &env)?;
+
+    let stream_path = stream_file.clone();
+    let result = run_command(command, &env, |line| {
+        if let Ok(mut f) = OpenOptions::new().append(true).open(&stream_path) {
+            let _ = writeln!(f, "{}", line);
+        }
+    })?;
 
     let duration = start_time.elapsed().as_secs_f64();
 
@@ -202,6 +215,9 @@ fn execute_step(
         stdout: Some(result.stdout.clone()),
         stderr: Some(result.stderr.clone()),
     };
+
+    // Clean up stream file before settle_step
+    let _ = fs::remove_file(&stream_file);
 
     if result.success {
         eprintln!("  ✓ Done");
@@ -432,7 +448,7 @@ fn run_verify(project: &Project, task_name: &str, step: &Step, step_idx: usize) 
             }
             let expanded = ctx.expand(cmd);
             let env = ctx.to_env_vars();
-            let result = run_command_with_env(&expanded, &env)?;
+            let result = run_command(&expanded, &env, |_| {})?;
 
             if result.success {
                 Ok(VerifyResult::Passed)

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::process::{Command, Output, Stdio};
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Result of a command execution
 #[derive(Debug)]
@@ -11,51 +13,60 @@ pub struct CommandResult {
     pub success: bool,
 }
 
-impl CommandResult {
-    fn from_output(output: Output) -> Self {
-        Self {
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            exit_code: output.status.code().unwrap_or(-1),
-            success: output.status.success(),
-        }
-    }
-}
+static STDERR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Run a shell command and return the result
-pub fn run_command(cmd: &str) -> Result<CommandResult> {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .with_context(|| format!("Failed to execute command: {}", cmd))?;
+/// Run a shell command with env, streaming stdout line-by-line through a callback.
+/// stderr is redirected to a temp file internally to avoid pipe deadlocks.
+/// For batch (non-streaming) usage, pass `|_| {}` as the callback.
+pub fn run_command(
+    cmd: &str,
+    env: &HashMap<String, String>,
+    mut on_line: impl FnMut(&str),
+) -> Result<CommandResult> {
+    let id = STDERR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stderr_path = std::env::temp_dir().join(format!("pawl-{}-{}.stderr", std::process::id(), id));
 
-    Ok(CommandResult::from_output(output))
-}
+    let stderr_out = std::fs::File::create(&stderr_path)
+        .with_context(|| "Failed to create stderr temp file")?;
 
-/// Run a shell command with environment variables
-pub fn run_command_with_env(cmd: &str, env: &HashMap<String, String>) -> Result<CommandResult> {
     let mut command = Command::new("sh");
     command.arg("-c").arg(cmd);
-
     for (key, value) in env {
         command.env(key, value);
     }
 
-    let output = command
+    let mut child = command
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .with_context(|| format!("Failed to execute command: {}", cmd))?;
+        .stderr(Stdio::from(stderr_out))
+        .spawn()
+        .with_context(|| format!("Failed to spawn command: {}", cmd))?;
 
-    Ok(CommandResult::from_output(output))
+    let stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let reader = BufReader::new(stdout_pipe);
+    let mut stdout_buf = String::new();
+
+    for line in reader.lines() {
+        let line = line.with_context(|| "Failed to read stdout line")?;
+        on_line(&line);
+        stdout_buf.push_str(&line);
+        stdout_buf.push('\n');
+    }
+
+    let status = child.wait().with_context(|| "Failed to wait for child process")?;
+    let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&stderr_path);
+
+    Ok(CommandResult {
+        stdout: stdout_buf,
+        stderr,
+        exit_code: status.code().unwrap_or(-1),
+        success: status.success(),
+    })
 }
 
 /// Run a command and check if it succeeded (for boolean checks)
 pub fn run_command_success(cmd: &str) -> bool {
-    run_command(cmd).map(|r| r.success).unwrap_or(false)
+    run_command(cmd, &HashMap::new(), |_| {}).map(|r| r.success).unwrap_or(false)
 }
 
 /// Spawn a command in the background (fire-and-forget)
@@ -75,16 +86,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_run_command() {
-        let result = run_command("echo hello").unwrap();
+    fn test_run_command_batch() {
+        let result = run_command("echo hello", &HashMap::new(), |_| {}).unwrap();
         assert!(result.success);
         assert_eq!(result.stdout.trim(), "hello");
     }
 
     #[test]
     fn test_run_command_failure() {
-        let result = run_command("exit 1").unwrap();
+        let result = run_command("exit 1", &HashMap::new(), |_| {}).unwrap();
         assert!(!result.success);
         assert_eq!(result.exit_code, 1);
+    }
+
+    #[test]
+    fn test_run_command_streaming() {
+        let env = HashMap::new();
+        let mut lines = Vec::new();
+
+        let result = run_command(
+            "echo line1; echo line2; echo line3",
+            &env,
+            |line| lines.push(line.to_string()),
+        )
+        .unwrap();
+
+        assert!(result.success);
+        assert_eq!(lines, vec!["line1", "line2", "line3"]);
+        assert_eq!(result.stdout.trim(), "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_run_command_stderr() {
+        let result = run_command("echo out; echo err >&2; exit 42", &HashMap::new(), |_| {}).unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.exit_code, 42);
+        assert_eq!(result.stdout.trim(), "out");
+        assert_eq!(result.stderr.trim(), "err");
     }
 }

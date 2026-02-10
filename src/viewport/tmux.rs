@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 
+use std::collections::HashMap;
+
 use crate::util::shell::{run_command, run_command_success};
 
 use super::Viewport;
@@ -31,7 +33,7 @@ impl Viewport for TmuxViewport {
     fn open(&self, name: &str, cwd: &str) -> Result<()> {
         if !self.session_exists() {
             let cmd = format!("tmux new-session -d -s '{}' -c '{}'", self.session, cwd);
-            run_command(&cmd)
+            run_command(&cmd, &HashMap::new(), |_| {})
                 .with_context(|| format!("Failed to create tmux session: {}", self.session))?;
         }
 
@@ -40,7 +42,7 @@ impl Viewport for TmuxViewport {
                 "tmux new-window -d -t '{}' -n '{}' -c '{}'",
                 self.session, name, cwd
             );
-            run_command(&cmd)
+            run_command(&cmd, &HashMap::new(), |_| {})
                 .with_context(|| format!("Failed to create window: {}:{}", self.session, name))?;
         }
 
@@ -51,7 +53,7 @@ impl Viewport for TmuxViewport {
         // Handle raw control characters (e.g., Ctrl+C for interrupt)
         if text == "\x03" {
             let cmd = format!("tmux send-keys -t '{}:{}' C-c", self.session, name);
-            run_command(&cmd)
+            run_command(&cmd, &HashMap::new(), |_| {})
                 .with_context(|| format!("Failed to send interrupt to {}:{}", self.session, name))?;
             return Ok(());
         }
@@ -61,7 +63,7 @@ impl Viewport for TmuxViewport {
             "tmux send-keys -t '{}:{}' '{}' && tmux send-keys -t '{}:{}' Enter",
             self.session, name, escaped, self.session, name
         );
-        run_command(&cmd)
+        run_command(&cmd, &HashMap::new(), |_| {})
             .with_context(|| format!("Failed to send keys to {}:{}", self.session, name))?;
         Ok(())
     }
@@ -75,7 +77,7 @@ impl Viewport for TmuxViewport {
             return Ok(());
         }
         let cmd = format!("tmux kill-window -t '{}:{}'", self.session, name);
-        run_command(&cmd)
+        run_command(&cmd, &HashMap::new(), |_| {})
             .with_context(|| format!("Failed to kill window: {}:{}", self.session, name))?;
         Ok(())
     }
