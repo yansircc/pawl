@@ -46,10 +46,10 @@ pub enum Command {
         step: bool,
     },
 
-    /// Wait for task to reach a specific status
+    /// Wait for task(s) to reach a specific status
     Wait {
-        /// Task name
-        task: String,
+        /// Task name(s)
+        tasks: Vec<String>,
         /// Target status (pending, running, waiting, completed, failed, stopped). Comma-separated for multiple.
         #[arg(long)]
         until: String,
@@ -59,6 +59,9 @@ pub enum Command {
         /// Poll interval in milliseconds (default: 500)
         #[arg(long, default_value = "500")]
         interval: u64,
+        /// Return when ANY task reaches target (default: wait for ALL)
+        #[arg(long)]
+        any: bool,
     },
 
     /// Show task logs (JSONL output)

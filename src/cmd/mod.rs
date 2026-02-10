@@ -20,8 +20,8 @@ pub fn dispatch(cmd: Command) -> Result<()> {
         Command::Status { task } => status::run(task.as_deref()),
         Command::Stop { task } => control::stop(&task),
         Command::Reset { task, step } => control::reset(&task, step),
-        Command::Wait { task, until, timeout, interval } => {
-            wait::run(&task, &until, timeout, interval)
+        Command::Wait { tasks, until, timeout, interval, any } => {
+            wait::run(&tasks, &until, timeout, interval, any)
         }
         Command::Log { task, step, all } => log::run(&task, step, all),
         Command::Events { task, follow, event_type } => {

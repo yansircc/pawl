@@ -32,7 +32,7 @@ stdout = JSON/JSONL, stderr = plain text (progress/errors). `pawl status` includ
 | `pawl done <name> [-m msg]` | Approve waiting step or complete in_viewport step |
 | `pawl stop <name>` | Stop a running task |
 | `pawl reset <name> [--step]` | Reset task or single step |
-| `pawl wait <name> --until <status> [-t sec]` | Block until target status |
+| `pawl wait <name...> --until <status> [-t sec] [--any]` | Block until target status |
 | `pawl events [name] [--follow] [--type ...]` | Event stream (live or historical) |
 | `pawl log <name> [--step N] [--all]` | View log events |
 | `pawl _run` | Internal: viewport parent process |
@@ -41,7 +41,18 @@ stdout = JSON/JSONL, stderr = plain text (progress/errors). `pawl status` includ
 
 ## Config
 
-`config.json` is pawl's only configuration file, containing workflow definition and optional task metadata.
+`config.json` is pawl's only configuration file, containing workflow definition and optional metadata.
+
+### Top-Level Options
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `workflow` | Step sequence (required) | — |
+| `vars` | User-defined variables | — |
+| `tasks` | Per-task metadata (depends, skip) | — |
+| `on` | Event hooks | — |
+| `session` | tmux session name | directory name |
+| `viewport` | Viewport backend | `"tmux"` |
 
 ### Workflow
 
@@ -97,8 +108,42 @@ Rules:
 
 ### Variables
 
+Two layers: `${var}` expanded by pawl (static, visible in logs), `$ENV_VAR` expanded by shell at runtime (dynamic).
+
 Built-in: `task` `session` `project_root` `step` `step_index` `log_file` `run_id` `retry_count` `last_verify_output`
 
-Use `${var}` in commands, `PAWL_*` env vars in subprocesses (e.g., `$PAWL_RUN_ID`).
+User variables via `"vars"` in config.json, expanded in declaration order. Later vars can reference earlier vars and built-in vars:
 
-User variables via `"vars"` in config.json, expanded in declaration order.
+```json
+{
+  "vars": {
+    "branch": "pawl/${task}",
+    "worktree": "${project_root}/.pawl/worktrees/${task}"
+  }
+}
+```
+
+All variables available as `PAWL_*` env vars in subprocesses (e.g., `$PAWL_RUN_ID`).
+
+### Event Hooks
+
+Top-level `"on"` maps event type → shell command (fire-and-forget, async, silent on failure). All context variables are available in hook commands.
+
+```json
+{
+  "on": {
+    "step_finished": "echo '[${task}] ${step} exit=${exit_code}' >> ${project_root}/.pawl/hook.log"
+  }
+}
+```
+
+Event types and extra variables:
+
+| Event | Extra vars |
+|-------|------------|
+| `task_started` | `${run_id}` |
+| `step_finished` | `${success}` `${exit_code}` `${duration}` |
+| `step_yielded` | `${reason}` |
+| `step_resumed` | `${message}` |
+| `step_reset` | `${auto}` |
+| `viewport_launched` `step_skipped` `viewport_lost` `task_stopped` `task_reset` | — |
