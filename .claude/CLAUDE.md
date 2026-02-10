@@ -48,7 +48,7 @@ Append-only JSONL is the only truth. No caches, no `status.json`, no separate st
 ```
 src/
 ├── main.rs              # Entry point, PawlError → text stderr + exit code
-├── cli.rs               # clap CLI (11 subcommands)
+├── cli.rs               # clap CLI (12 subcommands)
 ├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
 │   ├── config.rs        # Config + TaskConfig + Step structs, JSON loader, vars (IndexMap)
@@ -66,9 +66,11 @@ src/
 │   ├── wait.rs          # pawl wait (poll via Project API)
 │   ├── events.rs        # pawl events (unified event stream, --follow, --type filter)
 │   ├── log.rs           # pawl log (--step/--all, JSONL output)
+│   ├── dashboard.rs     # pawl dashboard (tiny_http server + REST API)
 │   └── templates/       # Template files embedded via include_str!
 │       ├── config.json            # Empty scaffold
-│       └── readme.md              # README.md: pawl reference
+│       ├── readme.md              # README.md: pawl reference
+│       └── dashboard.html         # Dashboard frontend (~530 lines)
 ├── viewport/
 │   ├── mod.rs           # Viewport trait (open/execute/exists/close)
 │   └── tmux.rs          # TmuxViewport implementation
@@ -89,6 +91,26 @@ src/
 - **Events**: 10 types, each with exactly one emission point. Adding an event type is a design decision, not a code decision.
 - **Replay**: `.pawl/logs/{task}.jsonl` → `replay()` → `TaskState`. Auto-completion: `current_step >= workflow_len` → `Completed`.
 
+## Execution Engine
+
+### settle_step pipeline: combine → decide → split
+
+1. **Combine**: exit_code + verify → `Outcome` (Success | Failure{feedback} | ManualNeeded)
+2. **Decide**: (Outcome, FailPolicy) → `Verdict` — pure function, 6 rules:
+
+```
+Success + any           → Advance
+ManualNeeded + any      → Yield("verify_manual")
+Failure + Terminal      → Fail
+Failure + Retry(can)    → Retry
+Failure + Retry(!can)   → Fail
+Failure + Manual        → Yield("on_fail_manual")
+```
+
+3. **Split**: emit StepFinished event, then route by Verdict (advance cursor / yield / reset step / terminate).
+
+`can_retry` = `count_auto_retries() < max_retries`. Count scans events backward to last TaskStarted/manual StepReset.
+
 ## Dev & Test
 
 ```bash
@@ -100,7 +122,7 @@ E2E tests (require tmux):
 
 | Script | Tests | What | Cost |
 |--------|-------|------|------|
-| `tests/e2e.sh` | 68 | Sync workflows | Free |
+| `tests/e2e.sh` | 136 | Sync workflows | Free |
 | `tests/e2e-viewport.sh` | 27 | Viewport lifecycle | Free |
 | `tests/e2e-agent.sh` | 9 | Real haiku agents | ~$0.05 |
 

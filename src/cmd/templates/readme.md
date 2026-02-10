@@ -120,7 +120,7 @@ Event types and extra variables:
 | Command | Purpose |
 |---------|---------|
 | `pawl init` | Initialize `.pawl/` scaffold |
-| `pawl start <name>` | Execute task (blocks until complete/yield/fail) |
+| `pawl start <name> [--reset]` | Execute task (--reset: auto-reset before start) |
 | `pawl status [name]` | Query status (includes suggest/prompt routing hints) |
 | `pawl list` | List all task statuses |
 | `pawl done <name> [-m msg]` | Approve waiting step or complete in_viewport step |
@@ -129,9 +129,29 @@ Event types and extra variables:
 | `pawl wait <name...> --until <status> [-t sec] [--any]` | Block until target status |
 | `pawl events [name] [--follow] [--type ...]` | Event stream (live or historical) |
 | `pawl log <name> [--step N] [--all]` | View log events |
+| `pawl dashboard [--port N]` | Live web dashboard (default: 3131) |
 | `pawl _run` | Internal: viewport parent process |
 
-**Conventions**: Indices are 0-based. `suggest` = mechanical commands (execute directly), `prompt` = requires judgment. `pawl done` is always in the prompt.
+**Task indexing**: tasks can be referenced by name or 1-based index (e.g., `pawl start 1` = first task).
+
+**Conventions**: Indices are 0-based in JSON output. `suggest` = mechanical commands (execute directly), `prompt` = requires judgment. `pawl done` is always in the prompt.
+
+### Exit Codes
+
+| Code | Meaning | Example |
+|------|---------|---------|
+| 0 | Success | — |
+| 1 | Internal error | IO failure, unexpected panic |
+| 2 | State conflict | Task already running, invalid state transition |
+| 3 | Precondition failed | Dependencies incomplete |
+| 4 | Not found | Unknown task name |
+| 5 | Already exists | `.pawl/` already initialized |
+| 6 | Validation error | Invalid status value, unknown viewport backend |
+| 7 | Timeout | `pawl wait` exceeded `-t` limit |
+
+### Viewport Lost
+
+If an `in_viewport` step's tmux window disappears (user closes it, tmux crash), pawl detects it on the next operation (`pawl status`, `pawl done`) and emits a `viewport_lost` event. The task transitions to Failed.
 
 ## Reference
 

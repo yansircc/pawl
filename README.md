@@ -57,25 +57,70 @@ Four primitives compose into any workflow:
 
 Add `"in_viewport": true` to run in an interactive terminal (tmux).
 
+### Variables & Hooks
+
+Commands support `${var}` expansion. 9 built-in variables (`task`, `step`, `run_id`, `retry_count`, `last_verify_output`, ...) plus user-defined `vars`:
+
+```json
+{
+  "vars": {
+    "branch": "pawl/${task}",
+    "worktree": "${project_root}/.pawl/wt/${task}"
+  },
+  "on": {
+    "step_finished": "echo '${task}/${step} exit=${exit_code}' >> .pawl/hooks.log"
+  }
+}
+```
+
+`vars` are expanded in declaration order (later vars can reference earlier ones). All available as `PAWL_*` env vars.
+
+`on` maps event types to shell commands (fire-and-forget). 10 event types: `task_started`, `step_finished`, `step_yielded`, `step_resumed`, `step_skipped`, `step_reset`, `viewport_launched`, `viewport_lost`, `task_stopped`, `task_reset`.
+
 ### Multi-Task with Dependencies
 
-Tasks can declare dependencies to form a DAG. pawl enforces ordering — a task won't start until its dependencies complete:
+All tasks share one workflow. Tasks can declare dependencies (DAG) and skip steps they don't need:
 
 ```json
 {
   "tasks": {
-    "lib":  { "workflow": [{ "name": "build", "run": "make lib" }] },
-    "api":  { "workflow": [{ "name": "build", "run": "make api" }], "depends": ["lib"] },
-    "web":  { "workflow": [{ "name": "build", "run": "make web" }], "depends": ["lib"] },
-    "ship": { "workflow": [{ "name": "deploy", "run": "make deploy" }], "depends": ["api", "web"] }
-  }
+    "lib":  { "description": "Core library" },
+    "api":  { "depends": ["lib"] },
+    "web":  { "depends": ["lib"], "skip": ["deploy"] },
+    "ship": { "depends": ["api", "web"], "skip": ["build", "test"] }
+  },
+  "workflow": [
+    { "name": "build", "run": "make build -C ${task}" },
+    { "name": "test",  "run": "make test -C ${task}", "on_fail": "retry" },
+    { "name": "deploy","run": "make deploy -C ${task}" }
+  ]
 }
 ```
 
 ```bash
 pawl start lib & pawl start api & pawl start web & pawl start ship
 # lib runs immediately; api + web wait for lib; ship waits for both
+# web skips deploy; ship skips build+test (only deploys)
 ```
+
+`skip` turns one workflow into many — each task derives its own step sequence by exclusion.
+
+## CLI
+
+```bash
+pawl start <name> [--reset]       # run pipeline (--reset: reset first, then start)
+pawl status [name]                # query status with routing hints
+pawl list                         # all tasks summary
+pawl done <name> [-m msg]         # approve waiting step / complete viewport step
+pawl stop <name>                  # stop a running task
+pawl reset <name> [--step]        # full reset or retry current step
+pawl wait <n...> --until <s> [--any] [-t sec]  # block until target status
+pawl events [name] [--follow] [--type ...]     # event stream
+pawl log <name> [--step N] [--all]             # view log events
+pawl dashboard [--port N]         # live web dashboard (default: 3131)
+```
+
+Exit codes: 0=success, 2=state conflict, 3=precondition (deps), 4=not found, 5=already exists, 6=validation, 7=timeout.
 
 ## Self-Routing
 
@@ -85,6 +130,13 @@ stdout = JSON, stderr = progress. `pawl status` returns machine-readable routing
 pawl status task-a | jq '{suggest, prompt}'
 # suggest: ["pawl reset --step task-a"]     ← execute directly
 # prompt:  ["verify test results, then: pawl done task-a"]  ← requires judgment
+```
+
+Orchestrate multiple tasks:
+
+```bash
+pawl wait task-a task-b --until completed --any   # return when ANY finishes
+pawl wait task-a task-b --until completed          # return when ALL finish
 ```
 
 ## Design
@@ -97,7 +149,7 @@ Three ideas, everything else follows:
 
 ## Tests
 
-192 tests: 136 sync E2E, 27 viewport E2E, 9 real-agent E2E, ~20 unit tests.
+204 tests: 136 sync E2E, 27 viewport E2E, 9 real-agent E2E, 32 unit tests.
 
 ```bash
 cargo test                    # unit tests
