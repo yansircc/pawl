@@ -1,4 +1,4 @@
-# pawl
+# Pawl
 
 Shell can pipe, chain, trap, and cron — but it can't **pause, wait for a decision, resume after a crash, or route failures**. pawl adds these missing primitives: a single binary that turns any shell pipeline into a resumable coroutine with failure routing.
 
@@ -75,6 +75,15 @@ Three ideas, everything else follows:
 ## Documentation
 
 `pawl init` generates `.pawl/README.md` — the full reference for config schema, commands, variables, and event hooks.
+
+## Ecosystem
+
+- [pawl-foreman](https://github.com/yansircc/agent-skills) — Claude Code skill for orchestrating AI agents with pawl
+
+  ```bash
+  /plugin marketplace add yansircc/agent-skills
+  /plugin install pawl-foreman@yansircc-skills
+  ```
 
 ## License
 
