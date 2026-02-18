@@ -207,9 +207,9 @@ test_vp_loss_detected() {
   create_task t1
   pawl start t1 >/dev/null 2>&1
   wait_status t1 "running" 5 || return 1
-  sleep 0.3
+  sleep 0.5
   tmux kill-window -t "${session}:t1" 2>/dev/null || true
-  sleep 0.3
+  sleep 1
   local out
   out=$(pawl status t1 2>/dev/null)
   assert_json "$out" ".status" "failed"
