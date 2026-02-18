@@ -26,14 +26,14 @@ Requires: Rust. Optional: tmux (only for interactive `in_viewport` steps).
 
 ```bash
 pawl init                    # scaffold .pawl/ with config + full reference
-# edit .pawl/config.json     # define your workflow
+# edit .pawl/workflows/default.json  # define your workflow
 pawl start my-task           # run the pipeline
 pawl serve                   # HTTP API on localhost:3131
 ```
 
 ## How It Works
 
-Define a workflow in `.pawl/config.json`:
+Define a workflow in `.pawl/workflows/default.json`:
 
 ```json
 {
@@ -79,7 +79,7 @@ Commands support `${var}` expansion. 9 built-in variables (`task`, `step`, `run_
 
 ### Multi-Task with Dependencies
 
-All tasks share one workflow. Tasks can declare dependencies (DAG) and skip steps they don't need:
+Tasks can declare dependencies (DAG) and skip steps they don't need. Each workflow file (`.pawl/workflows/*.json`) defines its own step sequence — use multiple files for different task types:
 
 ```json
 {
@@ -160,7 +160,7 @@ bash tests/e2e-agent.sh       # real AI agents (requires API key, ~$0.05)
 
 ## Documentation
 
-`pawl init` generates `.pawl/README.md` — the full reference for config schema, commands, variables, and event hooks.
+`pawl init` generates `.pawl/README.md` — the full reference for workflow schema, commands, variables, and event hooks.
 
 ## Ecosystem
 

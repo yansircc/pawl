@@ -6,11 +6,13 @@ Core invariant: `state = replay(log)`. Append-only JSONL is the single source of
 
 stdout = JSON/JSONL, stderr = plain text (progress/errors). `pawl status` includes routing hints (`suggest`/`prompt`) so consumers don't need to understand pawl internals.
 
-## Config
+## Workflows
 
-`config.json` is pawl's only configuration file, containing workflow definition and optional metadata.
+Each `.pawl/workflows/*.json` file defines an independent workflow with its own step sequence, tasks, variables, and hooks. The file name (without `.json`) becomes the workflow name.
 
-### Top-Level Options
+Task names must be globally unique across all workflow files.
+
+### Workflow File Schema
 
 | Field | Description | Default |
 |-------|-------------|---------|
@@ -21,10 +23,9 @@ stdout = JSON/JSONL, stderr = plain text (progress/errors). `pawl status` includ
 | `session` | tmux session name | directory name |
 | `viewport` | Viewport backend | `"tmux"` |
 
-### Workflow
+### Example: Single Workflow
 
-Step sequence shared by all tasks:
-
+`.pawl/workflows/default.json`:
 ```json
 {
   "workflow": [
@@ -34,6 +35,38 @@ Step sequence shared by all tasks:
   ]
 }
 ```
+
+### Example: Multiple Workflows
+
+`.pawl/workflows/build.json`:
+```json
+{
+  "workflow": [
+    { "name": "compile", "run": "make build" },
+    { "name": "test",    "run": "make test", "on_fail": "retry" }
+  ],
+  "tasks": {
+    "lib":  { "description": "Core library" },
+    "api":  { "depends": ["lib"] }
+  }
+}
+```
+
+`.pawl/workflows/deploy.json`:
+```json
+{
+  "workflow": [
+    { "name": "stage",   "run": "deploy --env staging" },
+    { "name": "verify",  "verify": "manual" },
+    { "name": "promote", "run": "deploy --env prod" }
+  ],
+  "tasks": {
+    "release": { "depends": ["lib", "api"] }
+  }
+}
+```
+
+Dependencies can reference tasks from other workflows (e.g., `release` depends on `lib` and `api` from the build workflow).
 
 ### Step Properties
 
@@ -54,7 +87,7 @@ Rules:
 
 ### Tasks (optional)
 
-Declare inter-task dependencies and per-task step skipping. Undeclared tasks can `pawl start` freely with no constraints:
+Declare inter-task dependencies and per-task step skipping. Undeclared tasks can `pawl start` freely with no constraints (only when using a single workflow):
 
 ```json
 {
@@ -68,18 +101,18 @@ Declare inter-task dependencies and per-task step skipping. Undeclared tasks can
 ```
 
 - **description**: Human-readable task description, shown in `pawl list`/`pawl status` JSON output
-- **depends**: Prerequisite task list. **Enforced**: incomplete deps → `pawl start` refuses (exit 3)
+- **depends**: Prerequisite task list. **Enforced**: incomplete deps → `pawl start` refuses (exit 3). Can reference tasks in other workflows.
 - **skip**: Step names to auto-skip for this task
 
-All three fields are optional. Undeclared tasks can `pawl start` freely with no constraints.
+All three fields are optional. With multiple workflows, all tasks must be declared in a workflow file.
 
 ### Variables
 
 Two layers: `${var}` expanded by pawl (static, visible in logs), `$ENV_VAR` expanded by shell at runtime (dynamic).
 
-Built-in: `task` `session` `project_root` `step` `step_index` `log_file` `run_id` `retry_count` `last_verify_output`
+Built-in: `task` `workflow` `session` `project_root` `step` `step_index` `log_file` `run_id` `retry_count` `last_verify_output`
 
-User variables via `"vars"` in config.json, expanded in declaration order. Later vars can reference earlier vars and built-in vars:
+User variables via `"vars"` in workflow files, expanded in declaration order. Later vars can reference earlier vars and built-in vars:
 
 ```json
 {
@@ -94,7 +127,7 @@ All variables available as `PAWL_*` env vars in subprocesses (e.g., `$PAWL_RUN_I
 
 ### Event Hooks
 
-Top-level `"on"` maps event type → shell command (fire-and-forget, async, silent on failure). All context variables are available in hook commands.
+Top-level `"on"` maps event type → shell command (fire-and-forget, async, silent on failure). All context variables are available in hook commands. Each workflow file has its own hooks:
 
 ```json
 {
@@ -108,7 +141,7 @@ Event types and extra variables:
 
 | Event | Extra vars |
 |-------|------------|
-| `task_started` | `${run_id}` |
+| `task_started` | `${run_id}` `${workflow}` |
 | `step_finished` | `${success}` `${exit_code}` `${duration}` |
 | `step_yielded` | `${reason}` |
 | `step_resumed` | `${message}` |
@@ -155,7 +188,9 @@ If an `in_viewport` step's tmux window disappears (user closes it, tmux crash), 
 
 ## Reference
 
-**Task**: A named instance of the workflow. `pawl start foo` creates an independent event log for `foo`.
+**Task**: A named instance of a workflow. `pawl start foo` creates an independent event log for `foo`.
+
+**Workflow**: A step sequence defined in `.pawl/workflows/<name>.json`. Each workflow file is a complete, independent configuration.
 
 **Step types**: run (shell command), gate (no `run` — pauses for `pawl done`), viewport (`"in_viewport": true` — runs in tmux window).
 

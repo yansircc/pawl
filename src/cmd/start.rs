@@ -39,7 +39,7 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
                     }.into());
                 }
                 TaskStatus::Waiting => {
-                    let step_name = project.step_name(state.current_step);
+                    let step_name = project.step_name(&task_name, state.current_step);
                     let reason = state.message.as_deref().unwrap_or("approval");
                     return Err(PawlError::StateConflict {
                         task: task_name.clone(),
@@ -60,11 +60,14 @@ pub fn run(task_name: &str, reset: bool) -> Result<()> {
         }.into());
     }
 
-    // Emit TaskStarted event with run_id
+    // Emit TaskStarted event with run_id and workflow name
     let run_id = Uuid::new_v4().to_string();
+    let (wf_name, _) = project.workflow_for(&task_name)?;
+    let wf_name = wf_name.to_string();
     project.append_event(&task_name, &Event::TaskStarted {
         ts: event_timestamp(),
         run_id,
+        workflow: wf_name,
     })?;
 
     eprintln!("Starting task: {}", task_name);
@@ -96,7 +99,8 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
         let state = state.expect("Task state missing");
         let step_idx = state.current_step;
 
-        let workflow_len = project.config.workflow.len();
+        let (_, config) = project.workflow_for(task_name)?;
+        let workflow_len = config.workflow.len();
 
         // Check if we've completed all steps
         if step_idx >= workflow_len {
@@ -104,7 +108,7 @@ fn execute(project: &Project, task_name: &str) -> Result<()> {
             return Ok(());
         }
 
-        let step = &project.config.workflow[step_idx];
+        let step = &config.workflow[step_idx];
         let run_id = &state.run_id;
 
         // Check if this step should be skipped for this task
@@ -409,12 +413,13 @@ fn launch_in_viewport(
 
     let session = ctx.get("session").unwrap();
 
-    project.viewport.open(task_name, &project.project_root)?;
+    let vp = project.viewport_for(task_name)?;
+    vp.open(task_name, &project.project_root)?;
 
     eprintln!("  → Sending to {}:{}", session, task_name);
     eprintln!("  → Waiting for 'pawl done {}'", task_name);
 
-    project.viewport.execute(task_name, &run_cmd)?;
+    vp.execute(task_name, &run_cmd)?;
 
     Ok(())
 }

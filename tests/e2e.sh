@@ -92,10 +92,10 @@ setup_project() {
   mkdir -p "$dir"
   cd "$dir"
   pawl init >/dev/null 2>&1
-  echo "$config" > .pawl/config.json
+  echo "$config" > .pawl/workflows/default.json
 }
 
-# Add a task entry to config.json
+# Add a task entry to workflows/default.json
 # Usage: create_task <name> [json-opts]
 # Examples: create_task t1
 #           create_task child '{"depends":["parent"]}'
@@ -104,7 +104,7 @@ create_task() {
   local name="$1"
   local empty='{}'
   local opts="${2:-$empty}"
-  python3 -c "import json,sys; c=json.load(open('.pawl/config.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/config.json','w'),indent=2)" "$name" "$opts"
+  python3 -c "import json,sys; c=json.load(open('.pawl/workflows/default.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/workflows/default.json','w'),indent=2)" "$name" "$opts"
 }
 
 cleanup() {
@@ -136,7 +136,7 @@ test_init() {
   local out
   out=$(pawl init 2>/dev/null)
   assert_json "$out" ".pawl_dir" "$dir/.pawl" || return
-  [ -f .pawl/config.json ] || { fail "missing config.json"; return; }
+  [ -f .pawl/workflows/default.json ] || { fail "missing workflows/default.json"; return; }
   [ -f .pawl/README.md ] || { fail "missing README.md"; return; }
   pass
 }

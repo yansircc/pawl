@@ -33,11 +33,13 @@ pub fn stop(task_name: &str) -> Result<()> {
     }
 
     // Send Ctrl+C to the viewport (if running)
-    let session = project.session_name();
+    let session = project.session_name_for(&task_name)?;
 
-    if project.viewport.exists(&task_name) {
-        eprintln!("Sending interrupt to {}:{}...", session, task_name);
-        project.viewport.execute(&task_name, "\x03")?;
+    if let Ok(vp) = project.viewport_for(&task_name) {
+        if vp.exists(&task_name) {
+            eprintln!("Sending interrupt to {}:{}...", session, task_name);
+            vp.execute(&task_name, "\x03")?;
+        }
     }
 
     project.append_event(&task_name, &Event::TaskStopped {
@@ -71,7 +73,8 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
         };
 
         let step_idx = state.current_step;
-        if step_idx >= project.config.workflow.len() {
+        let (_, config) = project.workflow_for(&task_name)?;
+        if step_idx >= config.workflow.len() {
             return Err(PawlError::StateConflict {
                 task: task_name.clone(),
                 status: "completed".into(),
@@ -110,7 +113,7 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             auto: false,
         })?;
 
-        eprintln!("Reset step {}: {}", step_idx + 1, project.step_name(step_idx));
+        eprintln!("Reset step {}: {}", step_idx + 1, project.step_name(&task_name, step_idx));
         resume_workflow(&project, &task_name)?;
     } else {
         // Full task reset
@@ -119,11 +122,14 @@ pub fn reset(task_name: &str, step_only: bool) -> Result<()> {
             .map(|s| s.status == TaskStatus::Running)
             .unwrap_or(false);
 
-        if is_running
-            && project.viewport.exists(&task_name) {
-                eprintln!("Stopping task viewport...");
-                project.viewport.execute(&task_name, "\x03")?;
+        if is_running {
+            if let Ok(vp) = project.viewport_for(&task_name) {
+                if vp.exists(&task_name) {
+                    eprintln!("Stopping task viewport...");
+                    vp.execute(&task_name, "\x03")?;
+                }
             }
+        }
 
         project.append_event(&task_name, &Event::TaskReset { ts: event_timestamp() })?;
 

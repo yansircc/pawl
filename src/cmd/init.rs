@@ -6,13 +6,13 @@ use crate::error::PawlError;
 
 use super::common::PAWL_DIR;
 
-const DEFAULT_CONFIG: &str = include_str!("templates/config.json");
+const DEFAULT_WORKFLOW: &str = include_str!("templates/workflow.json");
 const README: &str = include_str!("templates/readme.md");
 
 const GITIGNORE_ENTRIES: &str = r#"
 # pawl - Resumable Step Sequencer
 .pawl/*
-!.pawl/config.json
+!.pawl/workflows/
 "#;
 
 pub fn run() -> Result<()> {
@@ -34,10 +34,14 @@ pub fn run() -> Result<()> {
     fs::create_dir_all(&pawl_dir)
         .context("Failed to create .pawl/ directory")?;
 
-    let config_path = pawl_dir.join("config.json");
-    fs::write(&config_path, DEFAULT_CONFIG)
-        .context("Failed to write config.json")?;
-    eprintln!("  Created {}", config_path.display());
+    let workflows_dir = pawl_dir.join("workflows");
+    fs::create_dir_all(&workflows_dir)
+        .context("Failed to create .pawl/workflows/ directory")?;
+
+    let workflow_path = workflows_dir.join("default.json");
+    fs::write(&workflow_path, DEFAULT_WORKFLOW)
+        .context("Failed to write default.json")?;
+    eprintln!("  Created {}", workflow_path.display());
 
     let readme_path = pawl_dir.join("README.md");
     fs::write(&readme_path, README)
@@ -48,13 +52,13 @@ pub fn run() -> Result<()> {
 
     eprintln!("\nInitialization complete!");
     eprintln!("\nNext steps:");
-    eprintln!("  1. Edit .pawl/config.json to define your workflow");
+    eprintln!("  1. Edit .pawl/workflows/default.json to define your workflow");
     eprintln!("  2. Start a task: pawl start <name>");
 
     // Output JSON
     let json = serde_json::json!({
         "pawl_dir": pawl_dir.to_string_lossy(),
-        "config": config_path.to_string_lossy(),
+        "workflows_dir": workflows_dir.to_string_lossy(),
     });
     println!("{}", json);
 

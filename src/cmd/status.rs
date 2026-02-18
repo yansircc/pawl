@@ -7,6 +7,7 @@ use super::common::{extract_step_context, Project};
 #[derive(Serialize)]
 struct TaskSummary {
     name: String,
+    workflow: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
     status: String,
@@ -116,7 +117,6 @@ pub fn list() -> Result<()> {
 
 fn show_all_tasks(project: &Project) -> Result<()> {
     let tasks = project.discover_tasks()?;
-    let workflow_len = project.config.workflow.len();
 
     let mut summaries: Vec<TaskSummary> = Vec::new();
 
@@ -124,10 +124,13 @@ fn show_all_tasks(project: &Project) -> Result<()> {
         let tc = project.task_config(name);
         let blocking = project.check_dependencies(name)?;
         let description = tc.and_then(|t| t.description.clone());
+        let (wf_name, config) = project.workflow_for(name)?;
+        let wf_name = wf_name.to_string();
+        let workflow_len = config.workflow.len();
 
         project.detect_viewport_loss(name)?;
         let summary = if let Some(state) = project.replay_task(name)? {
-            let step_name = project.step_name(state.current_step).to_string();
+            let step_name = project.step_name(name, state.current_step).to_string();
             let events = project.read_events(name)?;
             let (retry_count, last_feedback) = extract_step_context(&events, state.current_step);
             let status_str = state.status.to_string();
@@ -135,6 +138,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
 
             TaskSummary {
                 name: name.clone(),
+                workflow: wf_name,
                 description,
                 status: status_str,
                 run_id: state.run_id,
@@ -154,6 +158,7 @@ fn show_all_tasks(project: &Project) -> Result<()> {
             let (suggest, prompt) = derive_routing("pending", None, name);
             TaskSummary {
                 name: name.clone(),
+                workflow: wf_name,
                 description,
                 status: "pending".to_string(),
                 run_id: String::new(),
@@ -181,7 +186,8 @@ fn show_all_tasks(project: &Project) -> Result<()> {
 /// Build task detail data without side effects (no detect_viewport_loss, no printing).
 pub fn build_task_detail(project: &Project, task_name: &str) -> Result<TaskDetail> {
     let tc = project.task_config(task_name);
-    let workflow = &project.config.workflow;
+    let (_, config) = project.workflow_for(task_name)?;
+    let workflow = &config.workflow;
     let workflow_len = workflow.len();
 
     let state = project.replay_task(task_name)?;

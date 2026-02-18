@@ -1,5 +1,7 @@
 use anyhow::Result;
 use fs2::FileExt;
+use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -47,43 +49,135 @@ pub fn extract_step_context(events: &[Event], step_idx: usize) -> (usize, Option
 
 pub const PAWL_DIR: &str = ".pawl";
 
-/// Project context with loaded config
+/// Project context with loaded workflows
 pub struct Project {
     pub project_root: String,
     pub pawl_dir: PathBuf,
-    pub config: Config,
-    pub viewport: Box<dyn Viewport>,
+    workflows: IndexMap<String, Config>,
+    task_index: HashMap<String, String>,
 }
 
 impl Project {
-    /// Load project from current directory
+    /// Load project from current directory — scans .pawl/workflows/*.json
     pub fn load() -> Result<Self> {
         let project_root = get_project_root()?;
         let pawl_dir = PathBuf::from(&project_root).join(PAWL_DIR);
+        let workflows_dir = pawl_dir.join("workflows");
 
-        let config = Config::load(&pawl_dir)?;
-        let session = config.session_name(&project_root);
-        let vp = viewport::create_viewport(&config.viewport, &session)?;
+        if !workflows_dir.exists() {
+            return Err(PawlError::NotFound {
+                message: "No .pawl/workflows/ directory found. Run 'pawl init' first.".into(),
+            }.into());
+        }
+
+        let mut workflows = IndexMap::new();
+        let mut task_index = HashMap::new();
+
+        let mut entries: Vec<_> = fs::read_dir(&workflows_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            let path = entry.path();
+            let wf_name = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            if wf_name.is_empty() {
+                continue;
+            }
+
+            let config = Config::load_from(&path)?;
+
+            // Validate task name uniqueness across workflows
+            for task_name in config.tasks.keys() {
+                if let Some(existing_wf) = task_index.get(task_name) {
+                    return Err(PawlError::Validation {
+                        message: format!(
+                            "Task '{}' declared in both '{}' and '{}' workflows. Task names must be globally unique.",
+                            task_name, existing_wf, wf_name
+                        ),
+                    }.into());
+                }
+                task_index.insert(task_name.clone(), wf_name.clone());
+            }
+
+            workflows.insert(wf_name, config);
+        }
+
+        if workflows.is_empty() {
+            return Err(PawlError::NotFound {
+                message: "No workflow files found in .pawl/workflows/. Run 'pawl init' first.".into(),
+            }.into());
+        }
 
         Ok(Self {
             project_root,
             pawl_dir,
-            config,
-            viewport: vp,
+            workflows,
+            task_index,
         })
     }
 
+    /// Find the workflow name and config for a given task.
+    /// Falls back to the first workflow if the task is undeclared (e.g. ad-hoc tasks).
+    pub fn workflow_for(&self, task_name: &str) -> Result<(&str, &Config)> {
+        if let Some(wf_name) = self.task_index.get(task_name) {
+            let config = self.workflows.get(wf_name).unwrap();
+            return Ok((wf_name, config));
+        }
+        // Undeclared task: use the first workflow (backward-compatible with single-workflow projects)
+        if self.workflows.len() == 1 {
+            let (name, config) = self.workflows.first().unwrap();
+            return Ok((name, config));
+        }
+        Err(PawlError::NotFound {
+            message: format!(
+                "Task '{}' not declared in any workflow. With multiple workflows, all tasks must be declared.",
+                task_name
+            ),
+        }.into())
+    }
+
+    /// Create a viewport for the given task's workflow
+    pub fn viewport_for(&self, task_name: &str) -> Result<Box<dyn Viewport>> {
+        let (_, config) = self.workflow_for(task_name)?;
+        let session = self.session_name_for(task_name)?;
+        viewport::create_viewport(&config.viewport, &session)
+    }
+
+    /// Get all workflows
+    pub fn all_workflows(&self) -> &IndexMap<String, Config> {
+        &self.workflows
+    }
+
+    /// Get session name for a task's workflow
+    pub fn session_name_for(&self, task_name: &str) -> Result<String> {
+        let (_, config) = self.workflow_for(task_name)?;
+        Ok(config.session_name(&self.project_root))
+    }
+
     /// Build a Context for variable expansion / env vars.
-    /// Intrinsic vars first, then user vars from config.vars (expanded in order).
+    /// Intrinsic vars first, then user vars from the task's workflow config.vars (expanded in order).
     pub fn context_for(&self, task_name: &str, step_idx: Option<usize>, run_id: &str) -> Context {
+        let (wf_name, config) = self.workflow_for(task_name).unwrap_or_else(|_| {
+            let (name, config) = self.workflows.first().unwrap();
+            (name, config)
+        });
+
         let step_name = step_idx
-            .and_then(|i| self.config.workflow.get(i))
+            .and_then(|i| config.workflow.get(i))
             .map(|s| s.name.as_str())
             .unwrap_or("");
 
+        let session = config.session_name(&self.project_root);
+
         let mut ctx = Context::build()
             .var("task", task_name)
-            .var("session", self.session_name())
+            .var("workflow", wf_name)
+            .var("session", session)
             .var("project_root", &self.project_root)
             .var("step", step_name)
             .var("step_index", step_idx.map(|i| i.to_string()).unwrap_or_default())
@@ -91,7 +185,7 @@ impl Project {
             .var("run_id", run_id);
 
         // Expand user vars in definition order (earlier vars available to later)
-        for (key, value) in &self.config.vars {
+        for (key, value) in &config.vars {
             let expanded = ctx.expand(value);
             ctx = ctx.var_owned(key.clone(), expanded);
         }
@@ -99,26 +193,38 @@ impl Project {
         ctx
     }
 
-    /// Get step name by index, returns "done" if past end.
-    pub fn step_name(&self, step_idx: usize) -> &str {
-        self.config.workflow.get(step_idx)
-            .map(|s| s.name.as_str())
-            .unwrap_or("done")
+    /// Get step name by index for a task, returns "done" if past end.
+    pub fn step_name(&self, task_name: &str, step_idx: usize) -> &str {
+        if let Ok((_, config)) = self.workflow_for(task_name) {
+            config.workflow.get(step_idx)
+                .map(|s| s.name.as_str())
+                .unwrap_or("done")
+        } else {
+            "done"
+        }
     }
 
-    /// Get session name
-    pub fn session_name(&self) -> String {
-        self.config.session_name(&self.project_root)
-    }
-
-    /// Get task config from config.tasks (returns None for undeclared tasks)
+    /// Get task config from the task's workflow (returns None for undeclared tasks)
     pub fn task_config(&self, name: &str) -> Option<&TaskConfig> {
-        self.config.tasks.get(name)
+        if let Some(wf_name) = self.task_index.get(name) {
+            self.workflows.get(wf_name).and_then(|c| c.tasks.get(name))
+        } else {
+            // Undeclared task: check all workflows
+            for config in self.workflows.values() {
+                if let Some(tc) = config.tasks.get(name) {
+                    return Some(tc);
+                }
+            }
+            None
+        }
     }
 
-    /// Discover all known tasks: config.tasks keys ∪ log file stems, sorted
+    /// Discover all known tasks: all workflow tasks keys ∪ log file stems, sorted
     pub fn discover_tasks(&self) -> Result<Vec<String>> {
-        let mut names: std::collections::BTreeSet<String> = self.config.tasks.keys().cloned().collect();
+        let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for config in self.workflows.values() {
+            names.extend(config.tasks.keys().cloned());
+        }
         let logs_dir = self.pawl_dir.join("logs");
         if logs_dir.exists() {
             for entry in fs::read_dir(&logs_dir)? {
@@ -175,7 +281,7 @@ impl Project {
     }
 
     /// Append an event to the task's JSONL log file (with exclusive file lock),
-    /// then auto-fire any matching hook from config.on.
+    /// then auto-fire any matching hook from the task's workflow config.on.
     pub fn append_event(&self, task_name: &str, event: &Event) -> Result<()> {
         let log_file = self.log_file(task_name);
         let log_dir = log_file.parent().unwrap();
@@ -228,7 +334,9 @@ impl Project {
     /// Replay events to reconstruct current TaskState
     pub fn replay_task(&self, task_name: &str) -> Result<Option<TaskState>> {
         let events = self.read_events(task_name)?;
-        let workflow_len = self.config.workflow.len();
+        let workflow_len = self.workflow_for(task_name)
+            .map(|(_, c)| c.workflow.len())
+            .unwrap_or(0);
         Ok(replay(&events, workflow_len))
     }
 
@@ -240,18 +348,23 @@ impl Project {
         if let Some(ref s) = state
             && s.status == TaskStatus::Running {
                 let step_idx = s.current_step;
-                if step_idx < self.config.workflow.len()
-                    && self.config.workflow[step_idx].in_viewport
-                    && !self.viewport.exists(task_name)
-                {
-                    self.append_event(
-                        task_name,
-                        &Event::ViewportLost {
-                            ts: event_timestamp(),
-                            step: step_idx,
-                        },
-                    )?;
-                    return Ok(false);
+                if let Ok((_, config)) = self.workflow_for(task_name) {
+                    if step_idx < config.workflow.len()
+                        && config.workflow[step_idx].in_viewport
+                    {
+                        if let Ok(vp) = self.viewport_for(task_name) {
+                            if !vp.exists(task_name) {
+                                self.append_event(
+                                    task_name,
+                                    &Event::ViewportLost {
+                                        ts: event_timestamp(),
+                                        step: step_idx,
+                                    },
+                                )?;
+                                return Ok(false);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -259,10 +372,14 @@ impl Project {
     }
 
     /// Fire a hook for an event (fire-and-forget).
-    /// Looks up config.on by the event's serde tag name, expands variables, spawns in background.
+    /// Looks up the task's workflow config.on by the event's serde tag name.
     fn spawn_event_hook(&self, task_name: &str, event: &Event) {
         let event_type = event.type_name();
-        let Some(cmd) = self.config.on.get(event_type) else {
+        let config = match self.workflow_for(task_name) {
+            Ok((_, c)) => c,
+            Err(_) => return,
+        };
+        let Some(cmd) = config.on.get(event_type) else {
             return;
         };
 
@@ -299,7 +416,8 @@ impl Project {
         self.detect_viewport_loss(task_name)?;
         let state = self.replay_task(task_name)?;
         let events = self.read_events(task_name)?;
-        let workflow_len = self.config.workflow.len();
+        let (wf_name, config) = self.workflow_for(task_name)?;
+        let workflow_len = config.workflow.len();
 
         let (current_step, status, run_id, message) = if let Some(s) = &state {
             (s.current_step, s.status.to_string(), s.run_id.clone(), s.message.clone())
@@ -311,10 +429,11 @@ impl Project {
 
         let json = serde_json::json!({
             "name": task_name,
+            "workflow": wf_name,
             "status": status,
             "run_id": run_id,
             "current_step": current_step,
-            "step_name": self.step_name(current_step),
+            "step_name": self.step_name(task_name, current_step),
             "total_steps": workflow_len,
             "message": message,
             "retry_count": retry_count,

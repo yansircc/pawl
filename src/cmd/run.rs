@@ -32,11 +32,12 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
         return Ok(());
     }
 
-    if step_idx >= project.config.workflow.len() {
+    let (_, config) = project.workflow_for(task_name)?;
+    if step_idx >= config.workflow.len() {
         return Ok(());
     }
 
-    let step = &project.config.workflow[step_idx];
+    let step = &config.workflow[step_idx];
     let command = match &step.run {
         Some(cmd) => cmd.clone(),
         None => bail!("Step {} has no run command", step_idx),
@@ -97,7 +98,8 @@ pub fn run_in_viewport(task_name: &str, step_idx: usize) -> Result<()> {
     }
 
     // 9. Use unified pipeline
-    let step = project.config.workflow[step_idx].clone();
+    let (_, config) = project.workflow_for(task_name)?;
+    let step = config.workflow[step_idx].clone();
     let record = StepRecord {
         exit_code,
         duration: Some(elapsed),

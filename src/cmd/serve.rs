@@ -9,10 +9,15 @@ use super::status::{build_task_detail, TaskDetail};
 use crate::model::event::Event;
 
 #[derive(Serialize)]
+struct WorkflowInfo {
+    steps: Vec<String>,
+    hooks: std::collections::HashMap<String, String>,
+}
+
+#[derive(Serialize)]
 struct StatusResponse {
     project_root: String,
-    workflow_steps: Vec<String>,
-    hooks: std::collections::HashMap<String, String>,
+    workflows: std::collections::HashMap<String, WorkflowInfo>,
     tasks: Vec<TaskEntry>,
 }
 
@@ -20,6 +25,7 @@ struct StatusResponse {
 struct TaskEntry {
     #[serde(flatten)]
     detail: TaskDetail,
+    workflow: String,
     blocked_by: Vec<String>,
     max_retries: usize,
 }
@@ -184,35 +190,36 @@ fn serve_status() -> Response<std::io::Cursor<Vec<u8>>> {
 fn build_status() -> Result<String> {
     let project = Project::load()?;
     let tasks = project.discover_tasks()?;
-    let workflow_steps: Vec<String> = project
-        .config
-        .workflow
-        .iter()
-        .map(|s| s.name.clone())
-        .collect();
+
+    let mut workflows_map = std::collections::HashMap::new();
+    for (wf_name, config) in project.all_workflows() {
+        let steps = config.workflow.iter().map(|s| s.name.clone()).collect();
+        let hooks = config.on.clone();
+        workflows_map.insert(wf_name.clone(), WorkflowInfo { steps, hooks });
+    }
 
     let mut entries = Vec::new();
     for name in &tasks {
         let detail = build_task_detail(&project, name)?;
         let blocked_by = project.check_dependencies(name)?;
-        let max_retries = if detail.current_step < project.config.workflow.len() {
-            project.config.workflow[detail.current_step].effective_max_retries()
+        let (wf_name, config) = project.workflow_for(name)?;
+        let wf_name = wf_name.to_string();
+        let max_retries = if detail.current_step < config.workflow.len() {
+            config.workflow[detail.current_step].effective_max_retries()
         } else {
             0
         };
         entries.push(TaskEntry {
             detail,
+            workflow: wf_name,
             blocked_by,
             max_retries,
         });
     }
 
-    let hooks = project.config.on.clone();
-
     let resp = StatusResponse {
         project_root: project.project_root,
-        workflow_steps,
-        hooks,
+        workflows: workflows_map,
         tasks: entries,
     };
 
@@ -300,12 +307,7 @@ fn build_events(url: &str) -> Result<String> {
             }
 
             let step_name = event.step_index().map(|i| {
-                project
-                    .config
-                    .workflow
-                    .get(i)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| format!("step-{}", i))
+                project.step_name(task_name, i).to_string()
             });
 
             let detail = build_event_detail(event);

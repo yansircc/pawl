@@ -144,7 +144,8 @@ fn output_all(project: &Project, tasks: &[String]) -> Result<()> {
             project.detect_viewport_loss(name)?;
             let state = project.replay_task(name)?;
             let events = project.read_events(name)?;
-            let workflow_len = project.config.workflow.len();
+            let (wf_name, config) = project.workflow_for(name)?;
+            let workflow_len = config.workflow.len();
 
             let (current_step, status, run_id, message) = if let Some(s) = &state {
                 (s.current_step, s.status.to_string(), s.run_id.clone(), s.message.clone())
@@ -156,10 +157,11 @@ fn output_all(project: &Project, tasks: &[String]) -> Result<()> {
 
             results.push(serde_json::json!({
                 "name": name,
+                "workflow": wf_name,
                 "status": status,
                 "run_id": run_id,
                 "current_step": current_step,
-                "step_name": project.step_name(current_step),
+                "step_name": project.step_name(name, current_step),
                 "total_steps": workflow_len,
                 "message": message,
                 "retry_count": retry_count,

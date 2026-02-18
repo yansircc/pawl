@@ -10,6 +10,7 @@ pub enum Event {
     TaskStarted {
         ts: DateTime<Utc>,
         run_id: String,
+        workflow: String,
     },
     StepFinished {
         ts: DateTime<Utc>,
@@ -125,8 +126,9 @@ impl Event {
                     vars.insert("duration".to_string(), format!("{:.1}", d));
                 }
             }
-            Event::TaskStarted { run_id, .. } => {
+            Event::TaskStarted { run_id, workflow, .. } => {
                 vars.insert("run_id".to_string(), run_id.clone());
+                vars.insert("workflow".to_string(), workflow.clone());
             }
             Event::StepYielded { reason, .. } => {
                 vars.insert("reason".to_string(), reason.clone());
@@ -150,7 +152,7 @@ pub fn replay(events: &[Event], workflow_len: usize) -> Option<TaskState> {
 
     for event in events {
         match event {
-            Event::TaskStarted { ts, run_id } => {
+            Event::TaskStarted { ts, run_id, .. } => {
                 state = Some(TaskState {
                     current_step: 0,
                     status: TaskStatus::Running,
@@ -274,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_task_started() {
-        let events = vec![Event::TaskStarted { ts: ts(), run_id: String::new() }];
+        let events = vec![Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() }];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.status, TaskStatus::Running);
         assert_eq!(state.current_step, 0);
@@ -283,7 +285,7 @@ mod tests {
     #[test]
     fn test_step_finished_success() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, true, 0),
         ];
         let state = replay(&events, 3).unwrap();
@@ -295,7 +297,7 @@ mod tests {
     #[test]
     fn test_step_finished_failure() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, false, 1),
         ];
         let state = replay(&events, 3).unwrap();
@@ -306,7 +308,7 @@ mod tests {
     #[test]
     fn test_step_yielded_resumed() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             Event::StepYielded { ts: ts(), step: 0, reason: "gate".to_string() },
         ];
         let state = replay(&events, 3).unwrap();
@@ -323,7 +325,7 @@ mod tests {
     #[test]
     fn test_step_yielded_after_finished_resets_current_step() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, true, 0),
             Event::StepYielded { ts: ts(), step: 0, reason: "verify_manual".to_string() },
         ];
@@ -335,7 +337,7 @@ mod tests {
     #[test]
     fn test_verify_failure_as_step_finished() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             Event::StepFinished {
                 ts: ts(), step: 0, success: false, exit_code: 0,
                 duration: Some(2.0), stdout: None, stderr: None,
@@ -351,7 +353,7 @@ mod tests {
     #[test]
     fn test_verify_failure_then_retry() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, false, 1),
             Event::StepReset { ts: ts(), step: 0, auto: true },
         ];
@@ -364,7 +366,7 @@ mod tests {
     #[test]
     fn test_auto_complete() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, true, 0),
         ];
         let state = replay(&events, 1).unwrap();
@@ -374,7 +376,7 @@ mod tests {
     #[test]
     fn test_reset_clears_state() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, true, 0),
             Event::TaskReset { ts: ts() },
         ];
@@ -385,10 +387,10 @@ mod tests {
     #[test]
     fn test_reset_then_restart() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, true, 0),
             Event::TaskReset { ts: ts() },
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
         ];
         let state = replay(&events, 3).unwrap();
         assert_eq!(state.current_step, 0);
@@ -399,7 +401,7 @@ mod tests {
     #[test]
     fn test_skip_step() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             Event::StepSkipped { ts: ts(), step: 0 },
         ];
         let state = replay(&events, 3).unwrap();
@@ -410,7 +412,7 @@ mod tests {
     #[test]
     fn test_task_stopped() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             Event::TaskStopped { ts: ts(), step: 0 },
         ];
         let state = replay(&events, 3).unwrap();
@@ -420,7 +422,7 @@ mod tests {
     #[test]
     fn test_step_reset_auto() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, false, 1),
             Event::StepReset { ts: ts(), step: 0, auto: true },
         ];
@@ -433,7 +435,7 @@ mod tests {
     #[test]
     fn test_step_reset_manual() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             finished(0, true, 0),
             Event::StepReset { ts: ts(), step: 0, auto: false },
         ];
@@ -445,7 +447,7 @@ mod tests {
     #[test]
     fn test_viewport_lost() {
         let events = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             Event::ViewportLaunched { ts: ts(), step: 0 },
             Event::ViewportLost { ts: ts(), step: 0 },
         ];
@@ -470,7 +472,7 @@ mod tests {
     #[test]
     fn test_type_name_matches_serde_tag() {
         let events: Vec<Event> = vec![
-            Event::TaskStarted { ts: ts(), run_id: String::new() },
+            Event::TaskStarted { ts: ts(), run_id: String::new(), workflow: String::new() },
             Event::StepFinished {
                 ts: ts(), step: 0, success: true, exit_code: 0,
                 duration: None, stdout: None, stderr: None, verify_output: None,

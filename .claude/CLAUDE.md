@@ -51,13 +51,13 @@ src/
 ├── cli.rs               # clap CLI (12 subcommands)
 ├── error.rs             # PawlError enum (6 variants, exit codes 2-7)
 ├── model/
-│   ├── config.rs        # Config + TaskConfig + Step structs, JSON loader, vars (IndexMap)
+│   ├── config.rs        # Config + TaskConfig + Step structs, load_from(), vars (IndexMap)
 │   ├── event.rs         # Event enum (10 variants), replay(), count_auto_retries()
 │   └── state.rs         # TaskState, TaskStatus (Display+FromStr), StepStatus (Display)
 ├── cmd/
 │   ├── mod.rs           # Command dispatch
-│   ├── common.rs        # Project context, event IO, output_task_state
-│   ├── init.rs          # pawl init (config.json + README.md scaffold)
+│   ├── common.rs        # Project context (multi-workflow), event IO, output_task_state
+│   ├── init.rs          # pawl init (workflows/ + README.md scaffold)
 │   ├── start.rs         # pawl start (execution engine, settle_step pipeline)
 │   ├── status.rs        # pawl status / pawl list (+ derive_routing for suggest/prompt)
 │   ├── control.rs       # pawl stop/reset
@@ -68,7 +68,7 @@ src/
 │   ├── log.rs           # pawl log (--step/--all, JSONL output)
 │   ├── serve.rs         # pawl serve (tiny_http JSON API + optional --ui)
 │   └── templates/       # Template files embedded via include_str!
-│       ├── config.json            # Empty scaffold
+│       ├── workflow.json          # Empty workflow scaffold
 │       └── readme.md              # README.md: pawl reference
 ├── viewport/
 │   ├── mod.rs           # Viewport trait (open/execute/exists/close)

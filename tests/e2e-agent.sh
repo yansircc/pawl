@@ -70,14 +70,14 @@ setup_agent_project() {
   mkdir -p "$dir"
   cd "$dir"
   pawl init >/dev/null 2>&1
-  echo "$config" | jq --arg s "$session" '. + {session: $s}' > .pawl/config.json
+  echo "$config" | jq --arg s "$session" '. + {session: $s}' > .pawl/workflows/default.json
 }
 
 create_task() {
   local name="$1"
   local empty='{}'
   local opts="${2:-$empty}"
-  python3 -c "import json,sys; c=json.load(open('.pawl/config.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/config.json','w'),indent=2)" "$name" "$opts"
+  python3 -c "import json,sys; c=json.load(open('.pawl/workflows/default.json')); c.setdefault('tasks',{})[sys.argv[1]]=json.loads(sys.argv[2]); json.dump(c,open('.pawl/workflows/default.json','w'),indent=2)" "$name" "$opts"
 }
 
 wait_status() {

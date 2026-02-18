@@ -86,12 +86,6 @@ impl Step {
 }
 
 impl Config {
-    /// Load config from .pawl/config.json
-    pub fn load<P: AsRef<Path>>(pawl_dir: P) -> Result<Self> {
-        let config_path = pawl_dir.as_ref().join("config.json");
-        Self::load_from(&config_path)
-    }
-
     /// Load config from a specific path
     pub fn load_from<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();

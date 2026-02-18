@@ -29,7 +29,8 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
     match state.status {
         TaskStatus::Running => {
             // Agent in viewport reporting done — go through unified pipeline
-            let step = &project.config.workflow[step_idx];
+            let (_, config) = project.workflow_for(&task_name)?;
+            let step = &config.workflow[step_idx];
 
             let record = StepRecord {
                 exit_code: 0,
@@ -52,7 +53,9 @@ pub fn done(task_name: &str, message: Option<&str>) -> Result<()> {
                 Some(s) if s.status == TaskStatus::Running && s.current_step == step_idx
             );
             if !retrying {
-                let _ = project.viewport.close(&task_name);
+                if let Ok(vp) = project.viewport_for(&task_name) {
+                    let _ = vp.close(&task_name);
+                }
             }
 
             if should_continue {
