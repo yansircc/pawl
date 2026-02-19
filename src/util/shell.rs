@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -67,6 +68,51 @@ pub fn run_command(
 /// Run a command and check if it succeeded (for boolean checks)
 pub fn run_command_success(cmd: &str) -> bool {
     run_command(cmd, &HashMap::new(), |_| {}).map(|r| r.success).unwrap_or(false)
+}
+
+/// Run a shell command with env, redirecting stdout to a file.
+/// Unlike run_command (which uses a pipe), this won't hang if the child
+/// forks background processes that inherit stdout — child.wait() returns
+/// as soon as the direct child exits, regardless of grandchild fd inheritance.
+/// The stdout file doubles as the live stream file for dashboard consumption.
+pub fn run_command_to_file(
+    cmd: &str,
+    env: &HashMap<String, String>,
+    stdout_path: &Path,
+) -> Result<CommandResult> {
+    let id = STDERR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stderr_path = std::env::temp_dir().join(format!("pawl-{}-{}.stderr", std::process::id(), id));
+
+    let stderr_out = std::fs::File::create(&stderr_path)
+        .with_context(|| "Failed to create stderr temp file")?;
+
+    let stdout_out = std::fs::File::create(stdout_path)
+        .with_context(|| "Failed to create stdout file")?;
+
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(cmd);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+
+    let mut child = command
+        .stdout(Stdio::from(stdout_out))
+        .stderr(Stdio::from(stderr_out))
+        .spawn()
+        .with_context(|| format!("Failed to spawn command: {}", cmd))?;
+
+    let status = child.wait().with_context(|| "Failed to wait for child process")?;
+
+    let stdout = std::fs::read_to_string(stdout_path).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&stderr_path);
+
+    Ok(CommandResult {
+        stdout,
+        stderr,
+        exit_code: status.code().unwrap_or(-1),
+        success: status.success(),
+    })
 }
 
 /// Spawn a command in the background (fire-and-forget)

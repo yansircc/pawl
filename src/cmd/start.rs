@@ -1,6 +1,5 @@
 use anyhow::{bail, Result};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::os::unix::process::CommandExt as _;
 use std::time::Instant;
 use uuid::Uuid;
@@ -9,7 +8,7 @@ use crate::error::PawlError;
 use crate::model::config::Step;
 use crate::model::event::event_timestamp;
 use crate::model::{Event, TaskStatus};
-use crate::util::shell::run_command;
+use crate::util::shell::{run_command, run_command_to_file};
 use crate::util::variable::Context;
 use super::common::Project;
 
@@ -195,21 +194,17 @@ fn execute_step(
     let state = project.replay_task(task_name)?.expect("Task state missing");
     let step_idx = state.current_step;
 
-    // Set up stream file for live output
+    // Set up stream file for live output — stdout redirected to file instead
+    // of piped, so child.wait() returns immediately when direct child exits
+    // even if forked grandchild processes still hold the stdout fd.
     let stream_file = project.stream_file(task_name);
     let streams_dir = stream_file.parent().unwrap();
     fs::create_dir_all(streams_dir)?;
-    fs::write(&stream_file, "")?;
 
     let start_time = Instant::now();
     let env = ctx.to_env_vars();
 
-    let stream_path = stream_file.clone();
-    let result = run_command(command, &env, |line| {
-        if let Ok(mut f) = OpenOptions::new().append(true).open(&stream_path) {
-            let _ = writeln!(f, "{}", line);
-        }
-    })?;
+    let result = run_command_to_file(command, &env, &stream_file)?;
 
     let duration = start_time.elapsed().as_secs_f64();
 

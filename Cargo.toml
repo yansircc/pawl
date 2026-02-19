@@ -1,6 +1,6 @@
 [package]
 name = "pawl"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 description = "A resumable step sequencer for multi-step workflows"
 license = "MIT"
