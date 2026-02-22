@@ -25,7 +25,7 @@ struct StatusResponse {
 struct TaskEntry {
     #[serde(flatten)]
     detail: TaskDetail,
-    workflow: String,
+    workflow_name: String,
     blocked_by: Vec<String>,
     max_retries: usize,
 }
@@ -211,7 +211,7 @@ fn build_status() -> Result<String> {
         };
         entries.push(TaskEntry {
             detail,
-            workflow: wf_name,
+            workflow_name: wf_name,
             blocked_by,
             max_retries,
         });

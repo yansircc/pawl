@@ -219,22 +219,11 @@ impl Project {
         }
     }
 
-    /// Discover all known tasks: all workflow tasks keys ∪ log file stems, sorted
+    /// Discover all declared tasks across workflows, sorted
     pub fn discover_tasks(&self) -> Result<Vec<String>> {
         let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for config in self.workflows.values() {
             names.extend(config.tasks.keys().cloned());
-        }
-        let logs_dir = self.pawl_dir.join("logs");
-        if logs_dir.exists() {
-            for entry in fs::read_dir(&logs_dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.extension().map(|e| e == "jsonl").unwrap_or(false)
-                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        names.insert(stem.to_string());
-                    }
-            }
         }
         Ok(names.into_iter().collect())
     }
