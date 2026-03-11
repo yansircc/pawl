@@ -16,7 +16,7 @@ use anyhow::Result;
 pub fn dispatch(cmd: Command) -> Result<()> {
     match cmd {
         Command::Init => init::run(),
-        Command::List => status::list(),
+        Command::List { ready } => status::list(ready),
         Command::Start { task, reset } => start::run(&task, reset),
         Command::Status { task } => status::run(task.as_deref()),
         Command::Stop { task } => control::stop(&task),

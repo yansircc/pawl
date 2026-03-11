@@ -14,6 +14,9 @@ pub struct TaskConfig {
     pub depends: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skip: Vec<String>,
+    /// Task-local variables (shadow workflow-level vars)
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub vars: IndexMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

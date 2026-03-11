@@ -14,7 +14,11 @@ pub enum Command {
     Init,
 
     /// List all tasks
-    List,
+    List {
+        /// Only show tasks that are pending with all deps met
+        #[arg(long)]
+        ready: bool,
+    },
 
     /// Start a task
     Start {

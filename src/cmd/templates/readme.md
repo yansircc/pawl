@@ -106,6 +106,27 @@ Declare inter-task dependencies and per-task step skipping. Undeclared tasks can
 
 All three fields are optional. With multiple workflows, all tasks must be declared in a workflow file.
 
+#### depends gates readiness, not step ownership
+
+`depends` controls whether `pawl start` is allowed — nothing more. A child task does **not** inherit progress from its parent or start mid-workflow.
+
+```json
+{
+  "tasks": {
+    "parent": {},
+    "child": { "depends": ["parent"] }
+  },
+  "workflow": [
+    { "name": "a", "run": "echo a" },
+    { "name": "b", "run": "echo b" }
+  ]
+}
+```
+
+Both `parent` and `child` run steps `a` then `b` from the beginning. `child` just waits until `parent` is completed before it can start.
+
+For fan-out/fan-in patterns: use separate workflow files for different task shapes, `depends` for readiness edges, and task-level `vars` for parameterization.
+
 ### Variables
 
 Two layers: `${var}` expanded by pawl (static, visible in logs), `$ENV_VAR` expanded by shell at runtime (dynamic).
@@ -124,6 +145,23 @@ User variables via `"vars"` in workflow files, expanded in declaration order. La
 ```
 
 All variables available as `PAWL_*` env vars in subprocesses (e.g., `$PAWL_RUN_ID`).
+
+Task-level `vars` override workflow-level vars of the same name:
+
+```json
+{
+  "vars": { "shared": "default" },
+  "tasks": {
+    "alpha": { "vars": { "shared": "alpha" } },
+    "beta":  { "vars": { "shared": "beta" } }
+  },
+  "workflow": [
+    { "name": "work", "run": "echo ${shared}" }
+  ]
+}
+```
+
+Expansion order: built-in → workflow `vars` → task `vars`. Later values shadow earlier ones.
 
 ### Event Hooks
 
@@ -155,7 +193,7 @@ Event types and extra variables:
 | `pawl init` | Initialize `.pawl/` scaffold |
 | `pawl start <name> [--reset]` | Execute task (--reset: auto-reset before start) |
 | `pawl status [name]` | Query status (includes suggest/prompt routing hints) |
-| `pawl list` | List all task statuses |
+| `pawl list [--ready]` | List all task statuses (--ready: pending + deps met) |
 | `pawl done <name> [-m msg]` | Approve waiting step or complete in_viewport step |
 | `pawl stop <name>` | Stop a running task |
 | `pawl reset <name> [--step]` | Reset task or single step |

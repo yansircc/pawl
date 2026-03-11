@@ -28,10 +28,31 @@ impl Context {
         self.vars.iter().rev().find(|(k, _)| *k == key).map(|(_, v)| v.as_str())
     }
 
-    /// Expand variables in a template string
+    /// Expand variables in a template string.
+    /// Single-pass left-to-right: resolves each ${name} via get() (last-inserted wins),
+    /// then advances past the substituted value without re-scanning it.
     pub fn expand(&self, template: &str) -> String {
-        self.vars.iter().fold(template.to_string(), |s, (k, v)|
-            s.replace(&format!("${{{}}}", k), v))
+        let mut result = String::with_capacity(template.len());
+        let bytes = template.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{' {
+                if let Some(end) = template[i + 2..].find('}') {
+                    let key = &template[i + 2..i + 2 + end];
+                    if let Some(val) = self.get(key) {
+                        result.push_str(val);
+                    } else {
+                        // Unknown var — keep literal
+                        result.push_str(&template[i..i + 2 + end + 1]);
+                    }
+                    i += 2 + end + 1;
+                    continue;
+                }
+            }
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+        result
     }
 
     /// Convert to environment variables for subprocess
@@ -169,5 +190,68 @@ mod tests {
 
         assert_eq!(ctx.get("branch"), Some("pawl/auth"));
         assert_eq!(ctx.get("worktree"), Some("/repo/.pawl/worktrees/auth"));
+    }
+
+    #[test]
+    fn test_task_vars_shadow_workflow_vars() {
+        // Simulate: workflow vars set shared="default", task vars override shared="alpha"
+        let mut ctx = Context::build()
+            .var("task", "alpha");
+
+        // Workflow-level var
+        let expanded = ctx.expand("default");
+        ctx = ctx.var_owned("shared".to_string(), expanded);
+
+        // Task-level var shadows workflow-level
+        let expanded = ctx.expand("alpha");
+        ctx = ctx.var_owned("shared".to_string(), expanded);
+
+        // expand() must use the shadowed value
+        assert_eq!(ctx.expand("${shared}"), "alpha");
+        assert_eq!(ctx.expand("output-${shared}.txt"), "output-alpha.txt");
+
+        // get() must also return the shadowed value
+        assert_eq!(ctx.get("shared"), Some("alpha"));
+
+        // env vars must export the shadowed value
+        let env = ctx.to_env_vars();
+        assert_eq!(env.get("PAWL_SHARED"), Some(&"alpha".to_string()));
+    }
+
+    #[test]
+    fn test_task_vars_reference_shadowed_value() {
+        // Task var "output" references "shared" which is itself shadowed
+        let mut ctx = Context::build()
+            .var("task", "alpha");
+
+        // Workflow-level
+        ctx = ctx.var_owned("shared".to_string(), "default".to_string());
+
+        // Task-level shadow
+        ctx = ctx.var_owned("shared".to_string(), "alpha".to_string());
+
+        // Another task var referencing the shadowed var
+        let expanded = ctx.expand("${shared}-result.txt");
+        ctx = ctx.var_owned("output".to_string(), expanded);
+
+        assert_eq!(ctx.expand("${output}"), "alpha-result.txt");
+    }
+
+    #[test]
+    fn test_self_referencing_var_no_hang() {
+        // Self-referencing var must not cause infinite loop
+        let ctx = Context::build()
+            .var_owned("a".to_string(), "${a}".to_string());
+        // Single-pass: ${a} resolves to "${a}", but the result is not re-scanned
+        assert_eq!(ctx.expand("${a}"), "${a}");
+    }
+
+    #[test]
+    fn test_circular_reference_no_hang() {
+        let ctx = Context::build()
+            .var_owned("a".to_string(), "${b}".to_string())
+            .var_owned("b".to_string(), "${a}".to_string());
+        // b resolves to "${a}", single-pass stops there
+        assert_eq!(ctx.expand("${b}"), "${a}");
     }
 }

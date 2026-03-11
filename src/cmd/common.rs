@@ -184,10 +184,18 @@ impl Project {
             .var("log_file", self.log_file(task_name).to_string_lossy())
             .var("run_id", run_id);
 
-        // Expand user vars in definition order (earlier vars available to later)
+        // Expand workflow-level vars in definition order
         for (key, value) in &config.vars {
             let expanded = ctx.expand(value);
             ctx = ctx.var_owned(key.clone(), expanded);
+        }
+
+        // Expand task-local vars (shadow workflow vars)
+        if let Some(tc) = config.tasks.get(task_name) {
+            for (key, value) in &tc.vars {
+                let expanded = ctx.expand(value);
+                ctx = ctx.var_owned(key.clone(), expanded);
+            }
         }
 
         ctx

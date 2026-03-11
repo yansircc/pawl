@@ -110,9 +110,48 @@ pub fn run(task_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// List all tasks (alias for status without arguments)
-pub fn list() -> Result<()> {
-    run(None)
+/// List all tasks, optionally filtered to only ready-to-start tasks
+pub fn list(ready: bool) -> Result<()> {
+    if ready {
+        list_ready()
+    } else {
+        run(None)
+    }
+}
+
+/// Ready view: declared ∩ pending ∩ deps_met
+fn list_ready() -> Result<()> {
+    let project = Project::load()?;
+    let tasks = project.discover_tasks()?;
+
+    let mut ready_tasks: Vec<serde_json::Value> = Vec::new();
+
+    for name in &tasks {
+        // Must be pending (no log or never started)
+        let state = project.replay_task(name)?;
+        if state.is_some() {
+            continue;
+        }
+
+        // All deps must be completed
+        let blocking = project.check_dependencies(name)?;
+        if !blocking.is_empty() {
+            continue;
+        }
+
+        let tc = project.task_config(name);
+        let (wf_name, _) = project.workflow_for(name)?;
+
+        ready_tasks.push(serde_json::json!({
+            "name": name,
+            "workflow": wf_name,
+            "description": tc.and_then(|t| t.description.clone()),
+            "depends": tc.map(|t| &t.depends).cloned().unwrap_or_default(),
+        }));
+    }
+
+    println!("{}", serde_json::to_string(&ready_tasks)?);
+    Ok(())
 }
 
 fn show_all_tasks(project: &Project) -> Result<()> {

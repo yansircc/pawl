@@ -73,7 +73,7 @@ Commands support `${var}` expansion. 9 built-in variables (`task`, `step`, `run_
 }
 ```
 
-`vars` are expanded in declaration order (later vars can reference earlier ones). All available as `PAWL_*` env vars.
+`vars` are expanded in declaration order (later vars can reference earlier ones). All available as `PAWL_*` env vars. Task-level `vars` override workflow-level vars of the same name — use this to parameterize shared workflows per task.
 
 `on` maps event types to shell commands (fire-and-forget). 10 event types: `task_started`, `step_finished`, `step_yielded`, `step_resumed`, `step_skipped`, `step_reset`, `viewport_launched`, `viewport_lost`, `task_stopped`, `task_reset`.
 
@@ -97,6 +97,8 @@ Tasks can declare dependencies (DAG) and skip steps they don't need. Each workfl
 }
 ```
 
+`depends` gates whether a task may **start** — nothing more. Every task runs its own step sequence from the beginning. A child does not inherit progress or resume mid-workflow from its parent.
+
 ```bash
 pawl start lib & pawl start api & pawl start web & pawl start ship
 # lib runs immediately; api + web wait for lib; ship waits for both
@@ -110,7 +112,7 @@ pawl start lib & pawl start api & pawl start web & pawl start ship
 ```bash
 pawl start <name> [--reset]       # run pipeline (--reset: reset first, then start)
 pawl status [name]                # query status with routing hints
-pawl list                         # all tasks summary
+pawl list [--ready]               # all tasks (--ready: pending + deps met)
 pawl done <name> [-m msg]         # approve waiting step / complete viewport step
 pawl stop <name>                  # stop a running task
 pawl reset <name> [--step]        # full reset or retry current step
